@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Galaxy Miner</title>
+  <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+  <!-- Main game canvas -->
+  <canvas id="gameCanvas"></canvas>
+
+  <!-- UI Overlays -->
+  <div id="ui-container">
+    <!-- Auth screen (login/register) -->
+    <div id="auth-screen" class="screen">
+      <div class="auth-box">
+        <h1>Galaxy Miner</h1>
+        <div id="auth-forms">
+          <div id="login-form" class="auth-form active">
+            <h2>Login</h2>
+            <input type="text" id="login-username" placeholder="Username" autocomplete="username">
+            <input type="password" id="login-password" placeholder="Password" autocomplete="current-password">
+            <button id="login-btn">Login</button>
+            <p class="switch-form">Don't have an account? <a href="#" id="show-register">Register</a></p>
+          </div>
+          <div id="register-form" class="auth-form">
+            <h2>Register</h2>
+            <input type="text" id="register-username" placeholder="Username" autocomplete="username">
+            <input type="password" id="register-password" placeholder="Password" autocomplete="new-password">
+            <input type="password" id="register-confirm" placeholder="Confirm Password" autocomplete="new-password">
+            <button id="register-btn">Register</button>
+            <p class="switch-form">Already have an account? <a href="#" id="show-login">Login</a></p>
+          </div>
+        </div>
+        <p id="auth-error" class="error"></p>
+      </div>
+    </div>
+
+    <!-- HUD (in-game) -->
+    <div id="hud" class="hidden">
+      <!-- Top bar -->
+      <div id="top-bar">
+        <div id="player-info">
+          <span id="player-name">Player</span>
+          <span id="player-credits">Credits: 0</span>
+        </div>
+        <div id="position-info">
+          Sector: <span id="sector-coords">0, 0</span>
+        </div>
+      </div>
+
+      <!-- Health/Shield bars -->
+      <div id="status-bars">
+        <div class="bar-container">
+          <div id="hull-bar" class="bar hull"></div>
+          <span class="bar-label">Hull</span>
+        </div>
+        <div class="bar-container">
+          <div id="shield-bar" class="bar shield"></div>
+          <span class="bar-label">Shield</span>
+        </div>
+      </div>
+
+      <!-- Radar minimap -->
+      <div id="radar">
+        <canvas id="radar-canvas"></canvas>
+      </div>
+
+      <!-- Action hints -->
+      <div id="action-hints">
+        <span id="mining-hint" class="hidden">Press [M] to mine</span>
+      </div>
+
+      <!-- Bottom buttons -->
+      <div id="bottom-bar">
+        <button id="btn-inventory" class="hud-btn">Inventory [I]</button>
+        <button id="btn-upgrades" class="hud-btn">Upgrades [U]</button>
+        <button id="btn-market" class="hud-btn">Market [K]</button>
+        <button id="btn-chat" class="hud-btn">Chat [Enter]</button>
+      </div>
+    </div>
+
+    <!-- Inventory panel -->
+    <div id="inventory-panel" class="panel hidden">
+      <div class="panel-header">
+        <h2>Inventory</h2>
+        <button class="close-btn">&times;</button>
+      </div>
+      <div class="panel-content">
+        <div id="cargo-info">Cargo: <span id="cargo-used">0</span>/<span id="cargo-max">50</span></div>
+        <div id="inventory-list"></div>
+      </div>
+    </div>
+
+    <!-- Upgrades panel -->
+    <div id="upgrades-panel" class="panel hidden">
+      <div class="panel-header">
+        <h2>Ship Upgrades</h2>
+        <button class="close-btn">&times;</button>
+      </div>
+      <div class="panel-content">
+        <div id="upgrades-list"></div>
+      </div>
+    </div>
+
+    <!-- Marketplace panel -->
+    <div id="market-panel" class="panel hidden">
+      <div class="panel-header">
+        <h2>Marketplace</h2>
+        <button class="close-btn">&times;</button>
+      </div>
+      <div class="panel-content">
+        <div id="market-tabs">
+          <button class="market-tab active" data-tab="buy">Buy</button>
+          <button class="market-tab" data-tab="sell">Sell</button>
+          <button class="market-tab" data-tab="my-listings">My Listings</button>
+        </div>
+        <div id="market-content"></div>
+      </div>
+    </div>
+
+    <!-- Chat panel -->
+    <div id="chat-panel" class="panel hidden">
+      <div class="panel-header">
+        <h2>Chat</h2>
+        <button class="close-btn">&times;</button>
+      </div>
+      <div class="panel-content">
+        <div id="chat-messages"></div>
+        <div id="chat-input-container">
+          <input type="text" id="chat-input" placeholder="Type a message..." maxlength="200">
+          <button id="chat-send">Send</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Scripts -->
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="/shared/constants.js"></script>
+  <script src="js/network.js"></script>
+  <script src="js/world.js"></script>
+  <script src="js/input.js"></script>
+  <script src="js/player.js"></script>
+  <script src="js/entities.js"></script>
+  <script src="js/renderer.js"></script>
+  <script src="js/ui/auth.js"></script>
+  <script src="js/ui/hud.js"></script>
+  <script src="js/ui/inventory.js"></script>
+  <script src="js/ui/marketplace.js"></script>
+  <script src="js/ui/chat.js"></script>
+  <script src="js/game.js"></script>
+  <script src="js/main.js"></script>
+</body>
+</html>
