@@ -1,0 +1,19 @@
+/**
+ * Galaxy Miner - Main CSS Entry Point
+ * Imports all modular CSS files in the correct order.
+ */
+
+/* Base styles, reset, and CSS custom properties */
+@import url('./base.css');
+
+/* Reusable UI components */
+@import url('./components.css');
+
+/* Icon styles and animations */
+@import url('./icons.css');
+
+/* HUD elements */
+@import url('./hud.css');
+
+/* Panels, modals, and overlays */
+@import url('./panels.css');

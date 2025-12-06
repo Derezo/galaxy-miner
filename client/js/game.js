@@ -41,6 +41,9 @@ const Game = {
     // Update world (sector loading, etc.)
     World.update(Player.position);
 
+    // Update graphics systems (particles, weapon projectiles)
+    Renderer.update(dt);
+
     // Update HUD
     HUD.update();
   },

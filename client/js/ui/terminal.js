@@ -1,0 +1,136 @@
+// Galaxy Miner - Terminal UI (Combined Inventory, Upgrades, Marketplace)
+
+const TerminalUI = {
+  visible: false,
+  currentTab: 'cargo',
+
+  init() {
+    const panel = document.getElementById('terminal-panel');
+    panel.querySelector('.close-btn').addEventListener('click', () => this.hide());
+
+    // Tab handlers
+    const tabs = panel.querySelectorAll('.terminal-tab');
+    tabs.forEach(tab => {
+      tab.addEventListener('click', () => {
+        this.switchTab(tab.dataset.tab);
+      });
+    });
+
+    // Initialize Modal system
+    if (typeof Modal !== 'undefined') {
+      Modal.init();
+    }
+
+    // Initialize new panels
+    if (typeof CargoPanel !== 'undefined') {
+      CargoPanel.init();
+    }
+
+    if (typeof MarketPanel !== 'undefined') {
+      MarketPanel.init();
+    }
+
+    console.log('Terminal UI initialized');
+  },
+
+  toggle() {
+    if (this.visible) {
+      this.hide();
+    } else {
+      this.show();
+    }
+  },
+
+  show() {
+    this.visible = true;
+    document.getElementById('terminal-panel').classList.remove('hidden');
+
+    // Sync current inventory to UIState
+    if (typeof UIState !== 'undefined' && typeof Player !== 'undefined') {
+      UIState.set({
+        inventory: Player.inventory || [],
+        credits: Player.credits || 0
+      });
+    }
+
+    this.refreshCurrentTab();
+  },
+
+  hide() {
+    this.visible = false;
+    document.getElementById('terminal-panel').classList.add('hidden');
+
+    // Clear selection when closing
+    if (typeof CargoPanel !== 'undefined') {
+      CargoPanel.clearSelection();
+    }
+  },
+
+  switchTab(tab) {
+    this.currentTab = tab;
+
+    // Update tab buttons
+    document.querySelectorAll('.terminal-tab').forEach(t => {
+      t.classList.toggle('active', t.dataset.tab === tab);
+    });
+
+    // Update content visibility
+    document.querySelectorAll('.terminal-content').forEach(content => {
+      content.classList.remove('active');
+    });
+
+    switch (tab) {
+      case 'cargo':
+        document.getElementById('cargo-content').classList.add('active');
+        break;
+      case 'upgrades':
+        document.getElementById('upgrades-content').classList.add('active');
+        break;
+      case 'market':
+        document.getElementById('market-content').classList.add('active');
+        break;
+    }
+
+    this.refreshCurrentTab();
+  },
+
+  refreshCurrentTab() {
+    if (!this.visible) return;
+
+    // Sync state before refresh
+    if (typeof UIState !== 'undefined' && typeof Player !== 'undefined') {
+      UIState.set({
+        inventory: Player.inventory || [],
+        credits: Player.credits || 0
+      }, undefined, true); // Silent update to avoid loops
+    }
+
+    switch (this.currentTab) {
+      case 'cargo':
+        // Use new CargoPanel if available, fallback to old InventoryUI
+        if (typeof CargoPanel !== 'undefined') {
+          CargoPanel.refresh();
+        } else if (typeof InventoryUI !== 'undefined') {
+          InventoryUI.refresh();
+        }
+        break;
+      case 'upgrades':
+        if (typeof UpgradesUI !== 'undefined') {
+          UpgradesUI.refresh();
+        }
+        break;
+      case 'market':
+        // Use new MarketPanel if available, fallback to old MarketplaceUI
+        if (typeof MarketPanel !== 'undefined') {
+          MarketPanel.refresh();
+        } else if (typeof MarketplaceUI !== 'undefined') {
+          MarketplaceUI.refresh();
+        }
+        break;
+    }
+  },
+
+  refresh() {
+    this.refreshCurrentTab();
+  }
+};

@@ -159,6 +159,52 @@ const statements = {
     DELETE FROM chat_messages WHERE id NOT IN (
       SELECT id FROM chat_messages ORDER BY sent_at DESC LIMIT ?
     )
+  `),
+
+  // Components (upgrade materials)
+  getComponents: db.prepare(`
+    SELECT * FROM components WHERE user_id = ?
+  `),
+  getComponent: db.prepare(`
+    SELECT * FROM components WHERE user_id = ? AND component_type = ?
+  `),
+  upsertComponent: db.prepare(`
+    INSERT INTO components (user_id, component_type, quantity)
+    VALUES (?, ?, ?)
+    ON CONFLICT(user_id, component_type) DO UPDATE SET quantity = quantity + excluded.quantity
+  `),
+  removeComponent: db.prepare(`
+    UPDATE components SET quantity = quantity - ? WHERE user_id = ? AND component_type = ?
+  `),
+  deleteEmptyComponents: db.prepare(`
+    DELETE FROM components WHERE user_id = ? AND quantity <= 0
+  `),
+
+  // Relics (rare collectibles)
+  getRelics: db.prepare(`
+    SELECT * FROM relics WHERE user_id = ? ORDER BY obtained_at DESC
+  `),
+  hasRelic: db.prepare(`
+    SELECT 1 FROM relics WHERE user_id = ? AND relic_type = ?
+  `),
+  addRelic: db.prepare(`
+    INSERT OR IGNORE INTO relics (user_id, relic_type) VALUES (?, ?)
+  `),
+
+  // Active Buffs (temporary power-ups)
+  getActiveBuffs: db.prepare(`
+    SELECT * FROM active_buffs WHERE user_id = ? AND expires_at > ?
+  `),
+  addBuff: db.prepare(`
+    INSERT INTO active_buffs (user_id, buff_type, expires_at)
+    VALUES (?, ?, ?)
+    ON CONFLICT(user_id, buff_type) DO UPDATE SET expires_at = excluded.expires_at
+  `),
+  removeBuff: db.prepare(`
+    DELETE FROM active_buffs WHERE user_id = ? AND buff_type = ?
+  `),
+  cleanupExpiredBuffs: db.prepare(`
+    DELETE FROM active_buffs WHERE expires_at <= ?
   `)
 };
 

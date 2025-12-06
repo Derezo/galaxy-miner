@@ -1,16 +1,12 @@
-// Galaxy Miner - Marketplace UI
+// Galaxy Miner - Marketplace UI (Terminal Tab)
 
 const MarketplaceUI = {
-  visible: false,
   currentTab: 'buy',
   listings: [],
 
   init() {
-    const panel = document.getElementById('market-panel');
-    panel.querySelector('.close-btn').addEventListener('click', () => this.hide());
-
     // Tab handlers
-    const tabs = panel.querySelectorAll('.market-tab');
+    const tabs = document.querySelectorAll('#market-content .market-tab');
     tabs.forEach(tab => {
       tab.addEventListener('click', () => {
         this.switchTab(tab.dataset.tab);
@@ -20,30 +16,11 @@ const MarketplaceUI = {
     console.log('Marketplace UI initialized');
   },
 
-  toggle() {
-    if (this.visible) {
-      this.hide();
-    } else {
-      this.show();
-    }
-  },
-
-  show() {
-    this.visible = true;
-    document.getElementById('market-panel').classList.remove('hidden');
-    this.refresh();
-  },
-
-  hide() {
-    this.visible = false;
-    document.getElementById('market-panel').classList.add('hidden');
-  },
-
   switchTab(tab) {
     this.currentTab = tab;
 
     // Update tab buttons
-    document.querySelectorAll('.market-tab').forEach(t => {
+    document.querySelectorAll('#market-content .market-tab').forEach(t => {
       t.classList.toggle('active', t.dataset.tab === tab);
     });
 
@@ -51,9 +28,7 @@ const MarketplaceUI = {
   },
 
   refresh() {
-    if (!this.visible) return;
-
-    const content = document.getElementById('market-content');
+    const content = document.getElementById('market-listings');
 
     switch (this.currentTab) {
       case 'buy':

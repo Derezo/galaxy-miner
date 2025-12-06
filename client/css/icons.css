@@ -1,0 +1,285 @@
+/**
+ * Icon CSS
+ * Styles and animations for resource icons
+ */
+
+/* Base icon styles */
+.resource-icon {
+  display: inline-block;
+  vertical-align: middle;
+  flex-shrink: 0;
+}
+
+/* Crystal icon animations */
+.crystal-icon {
+  animation: crystal-idle 4s ease-in-out infinite;
+}
+
+.crystal-icon:hover {
+  animation: crystal-hover 1s ease-in-out infinite;
+}
+
+@keyframes crystal-idle {
+  0%, 100% {
+    filter: brightness(1);
+  }
+  50% {
+    filter: brightness(1.1);
+  }
+}
+
+@keyframes crystal-hover {
+  0%, 100% {
+    transform: scale(1);
+    filter: brightness(1.1);
+  }
+  50% {
+    transform: scale(1.05);
+    filter: brightness(1.2);
+  }
+}
+
+/* Crystal shimmer effect */
+.crystal-highlight {
+  animation: crystal-shimmer 3s ease-in-out infinite;
+}
+
+@keyframes crystal-shimmer {
+  0%, 100% {
+    opacity: 0.4;
+    transform: translateX(0);
+  }
+  50% {
+    opacity: 0.7;
+    transform: translateX(1px);
+  }
+}
+
+/* Orbital icon animations */
+.orbital-icon {
+  animation: orbital-idle 6s linear infinite;
+}
+
+.orbital-icon:hover .orbital-ring {
+  animation: orbital-ring-spin 2s linear infinite;
+}
+
+@keyframes orbital-idle {
+  0%, 100% {
+    filter: brightness(1);
+  }
+  50% {
+    filter: brightness(1.05);
+  }
+}
+
+/* Orbital ring rotation */
+.orbital-ring {
+  animation: orbital-ring-spin 4s linear infinite;
+  transform-origin: center;
+}
+
+@keyframes orbital-ring-spin {
+  0% {
+    transform: rotate(var(--ring-rotation, 0deg));
+  }
+  100% {
+    transform: rotate(calc(var(--ring-rotation, 0deg) + 360deg));
+  }
+}
+
+/* Stagger ring animations */
+.orbital-ring:nth-child(1) { --ring-rotation: 0deg; animation-duration: 4s; }
+.orbital-ring:nth-child(2) { --ring-rotation: 60deg; animation-duration: 5s; }
+.orbital-ring:nth-child(3) { --ring-rotation: -60deg; animation-duration: 6s; }
+
+/* Electron orbit animation */
+.orbital-electron {
+  animation: electron-orbit 3s linear infinite;
+}
+
+@keyframes electron-orbit {
+  0% {
+    opacity: 1;
+  }
+  25% {
+    opacity: 0.7;
+  }
+  50% {
+    opacity: 1;
+  }
+  75% {
+    opacity: 0.7;
+  }
+  100% {
+    opacity: 1;
+  }
+}
+
+/* Nucleus glow */
+.orbital-nucleus {
+  animation: nucleus-glow 2s ease-in-out infinite;
+}
+
+@keyframes nucleus-glow {
+  0%, 100% {
+    filter: brightness(1);
+  }
+  50% {
+    filter: brightness(1.3);
+  }
+}
+
+/* Cloud bubble animation */
+.cloud-bubble {
+  animation: cloud-float 3s ease-in-out infinite;
+}
+
+.cloud-bubble:nth-child(odd) {
+  animation-delay: -1.5s;
+}
+
+@keyframes cloud-float {
+  0%, 100% {
+    transform: translateY(0) scale(1);
+  }
+  50% {
+    transform: translateY(-1px) scale(1.02);
+  }
+}
+
+/* Molecule atom pulse */
+.molecule-atom {
+  animation: molecule-pulse 2.5s ease-in-out infinite;
+}
+
+@keyframes molecule-pulse {
+  0%, 100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.03);
+  }
+}
+
+/* Material icon animations */
+.material-icon {
+  animation: material-idle 5s ease-in-out infinite;
+}
+
+.material-icon:hover {
+  animation: material-hover 0.5s ease-out forwards;
+}
+
+@keyframes material-idle {
+  0%, 100% {
+    filter: brightness(1);
+  }
+  50% {
+    filter: brightness(1.05);
+  }
+}
+
+@keyframes material-hover {
+  0% {
+    transform: scale(1);
+  }
+  100% {
+    transform: scale(1.08);
+    filter: brightness(1.15);
+  }
+}
+
+/* Material highlight shimmer */
+.material-highlight {
+  animation: material-shimmer 4s ease-in-out infinite;
+}
+
+@keyframes material-shimmer {
+  0%, 100% {
+    opacity: 0.15;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+/* Exotic/pulse animation for rare materials */
+.icon-pulse {
+  animation: icon-energy-pulse var(--pulse-speed, 2s) ease-in-out infinite;
+}
+
+@keyframes icon-energy-pulse {
+  0%, 100% {
+    filter: brightness(1) drop-shadow(0 0 2px currentColor);
+  }
+  50% {
+    filter: brightness(1.3) drop-shadow(0 0 8px currentColor);
+  }
+}
+
+/* Rarity-based glow colors */
+.resource-icon[data-rarity="common"] {
+  --glow-color: rgba(136, 170, 255, 0.3);
+}
+
+.resource-icon[data-rarity="uncommon"] {
+  --glow-color: rgba(102, 255, 136, 0.4);
+}
+
+.resource-icon[data-rarity="rare"] {
+  --glow-color: rgba(170, 136, 255, 0.5);
+}
+
+.resource-icon[data-rarity="ultrarare"] {
+  --glow-color: rgba(255, 136, 170, 0.6);
+}
+
+/* Icon size variants */
+.resource-icon.icon-sm {
+  width: 16px;
+  height: 16px;
+}
+
+.resource-icon.icon-md {
+  width: 24px;
+  height: 24px;
+}
+
+.resource-icon.icon-lg {
+  width: 48px;
+  height: 48px;
+}
+
+.resource-icon.icon-xl {
+  width: 64px;
+  height: 64px;
+}
+
+/* Icon in list context */
+.icon-with-label {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+}
+
+/* Icon container with background */
+.icon-container {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--spacing-sm);
+  background: var(--color-bg-input);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--color-border-lighter);
+}
+
+.icon-container:hover {
+  background: var(--color-bg-input-focus);
+  border-color: var(--color-border);
+}
+
+/* Fallback icon styles */
+.fallback-icon {
+  opacity: 0.5;
+}

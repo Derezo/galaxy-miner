@@ -1,17 +1,35 @@
-// Galaxy Miner - Chat UI
+// Galaxy Miner - Chat UI (Integrated into HUD)
 
 const ChatUI = {
   visible: false,
   messages: [],
   lastMessageTime: 0,
+  unreadCount: 0,
+  autoHideTimeout: null,
 
   init() {
-    const panel = document.getElementById('chat-panel');
-    panel.querySelector('.close-btn').addEventListener('click', () => this.hide());
+    // Chat indicator click handler
+    document.getElementById('chat-indicator').addEventListener('click', () => this.toggle());
 
+    // Chat input and send handlers
     document.getElementById('chat-send').addEventListener('click', () => this.sendMessage());
-    document.getElementById('chat-input').addEventListener('keypress', (e) => {
-      if (e.key === 'Enter') this.sendMessage();
+    document.getElementById('chat-input').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        this.sendMessage();
+        e.preventDefault();
+      } else if (e.key === 'Escape') {
+        this.hide();
+        e.preventDefault();
+      }
+    });
+
+    // Auto-hide when clicking outside
+    document.addEventListener('click', (e) => {
+      const overlay = document.getElementById('chat-overlay');
+      const indicator = document.getElementById('chat-indicator');
+      if (this.visible && !overlay.contains(e.target) && !indicator.contains(e.target)) {
+        this.hide();
+      }
     });
 
     console.log('Chat UI initialized');
@@ -27,14 +45,44 @@ const ChatUI = {
 
   show() {
     this.visible = true;
-    document.getElementById('chat-panel').classList.remove('hidden');
+    this.unreadCount = 0;
+    this.updateUnreadBadge();
+    document.getElementById('chat-overlay').classList.remove('hidden');
     document.getElementById('chat-input').focus();
     this.scrollToBottom();
+    this.clearAutoHide();
   },
 
   hide() {
     this.visible = false;
-    document.getElementById('chat-panel').classList.add('hidden');
+    document.getElementById('chat-overlay').classList.add('hidden');
+    this.clearAutoHide();
+  },
+
+  clearAutoHide() {
+    if (this.autoHideTimeout) {
+      clearTimeout(this.autoHideTimeout);
+      this.autoHideTimeout = null;
+    }
+  },
+
+  scheduleAutoHide() {
+    this.clearAutoHide();
+    this.autoHideTimeout = setTimeout(() => {
+      if (this.visible && document.getElementById('chat-input').value === '') {
+        this.hide();
+      }
+    }, 5000);
+  },
+
+  updateUnreadBadge() {
+    const badge = document.getElementById('chat-unread-badge');
+    if (this.unreadCount > 0) {
+      badge.textContent = this.unreadCount > 9 ? '9+' : this.unreadCount;
+      badge.classList.remove('hidden');
+    } else {
+      badge.classList.add('hidden');
+    }
   },
 
   sendMessage() {
@@ -60,6 +108,12 @@ const ChatUI = {
     // Keep only last N messages
     if (this.messages.length > CONSTANTS.CHAT_HISTORY_SIZE) {
       this.messages.shift();
+    }
+
+    // Increment unread if chat is not visible
+    if (!this.visible) {
+      this.unreadCount++;
+      this.updateUnreadBadge();
     }
 
     this.renderMessages();

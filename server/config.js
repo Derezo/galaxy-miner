@@ -2,7 +2,7 @@ const CONSTANTS = require('../shared/constants');
 
 module.exports = {
   // Server settings
-  PORT: process.env.PORT || 3000,
+  PORT: process.env.PORT || 3388,
   HOST: process.env.HOST || '0.0.0.0',
 
   // Import shared constants

@@ -3,12 +3,16 @@
 const Entities = {
   players: new Map(),
   npcs: new Map(),
+  wreckage: new Map(),
   projectiles: [],
+  baseStates: new Map(), // Track destroyed/damaged base states
 
   init() {
     this.players.clear();
     this.npcs.clear();
+    this.wreckage.clear();
     this.projectiles = [];
+    this.baseStates.clear();
     console.log('Entities initialized');
   },
 
@@ -30,6 +34,9 @@ const Entities = {
       p.lifetime -= dt * 1000;
       return p.lifetime > 0;
     });
+
+    // Update wreckage (rotation animation)
+    this.updateWreckageRotation(dt);
   },
 
   interpolateEntity(entity, dt) {
@@ -69,6 +76,7 @@ const Entities = {
       player.targetRotation = data.rotation;
       player.hull = data.hull;
       player.shield = data.shield;
+      player.status = data.status || 'idle';
     }
   },
 
@@ -76,22 +84,49 @@ const Entities = {
     this.players.delete(playerId);
   },
 
+  updatePlayerMining(playerId, miningData) {
+    const player = this.players.get(playerId);
+    if (player) {
+      player.mining = miningData;
+    }
+  },
+
+  clearPlayerMining(playerId) {
+    const player = this.players.get(playerId);
+    if (player) {
+      player.mining = null;
+    }
+  },
+
   updateNPC(data) {
     if (!this.npcs.has(data.id)) {
       this.npcs.set(data.id, {
         id: data.id,
         type: data.type,
+        name: data.name || data.type || 'NPC',
+        faction: data.faction || 'pirate',
         position: { x: data.x, y: data.y },
         targetPosition: { x: data.x, y: data.y },
-        rotation: data.rotation,
-        targetRotation: data.rotation,
-        hull: data.hull
+        rotation: data.rotation || 0,
+        targetRotation: data.rotation || 0,
+        hull: data.hull,
+        hullMax: data.hullMax || data.hull || 100,
+        shield: data.shield,
+        shieldMax: data.shieldMax || data.shield || 0,
+        state: data.state || 'patrol'
       });
     } else {
       const npc = this.npcs.get(data.id);
       npc.targetPosition = { x: data.x, y: data.y };
-      npc.targetRotation = data.rotation;
+      npc.targetRotation = data.rotation || npc.targetRotation;
       npc.hull = data.hull;
+      npc.shield = data.shield;
+      npc.state = data.state || npc.state;
+      // Update max values if provided
+      if (data.hullMax !== undefined) npc.hullMax = data.hullMax;
+      if (data.shieldMax !== undefined) npc.shieldMax = data.shieldMax;
+      if (data.name) npc.name = data.name;
+      if (data.faction) npc.faction = data.faction;
     }
   },
 
@@ -134,5 +169,118 @@ const Entities = {
       }
     }
     return result;
+  },
+
+  // Wreckage management
+  updateWreckage(data) {
+    if (!this.wreckage.has(data.id)) {
+      this.wreckage.set(data.id, {
+        id: data.id,
+        position: { x: data.x, y: data.y },
+        faction: data.faction || 'unknown',
+        npcName: data.npcName || 'Unknown',
+        contentCount: data.contentCount || 0,
+        despawnTime: data.despawnTime,
+        spawnTime: Date.now(),
+        rotation: Math.random() * Math.PI * 2,
+        rotationSpeed: (Math.random() - 0.5) * 0.3
+      });
+    }
+  },
+
+  removeWreckage(wreckageId) {
+    this.wreckage.delete(wreckageId);
+  },
+
+  getWreckageInRange(position, range) {
+    const result = [];
+    for (const [id, w] of this.wreckage) {
+      const dx = w.position.x - position.x;
+      const dy = w.position.y - position.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      if (dist <= range) {
+        result.push({ ...w, distance: dist });
+      }
+    }
+    return result;
+  },
+
+  getClosestWreckage(position, maxRange) {
+    let closest = null;
+    let closestDist = maxRange;
+
+    for (const [id, w] of this.wreckage) {
+      const dx = w.position.x - position.x;
+      const dy = w.position.y - position.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      if (dist < closestDist) {
+        closest = w;
+        closestDist = dist;
+      }
+    }
+
+    return closest;
+  },
+
+  updateWreckageRotation(dt) {
+    for (const [id, w] of this.wreckage) {
+      w.rotation += w.rotationSpeed * dt;
+    }
+  },
+
+  // Base state management
+  updateBaseHealth(baseId, health, maxHealth) {
+    if (!this.baseStates.has(baseId)) {
+      this.baseStates.set(baseId, {
+        destroyed: false,
+        health: health,
+        maxHealth: maxHealth
+      });
+    } else {
+      const state = this.baseStates.get(baseId);
+      state.health = health;
+      state.maxHealth = maxHealth;
+    }
+  },
+
+  destroyBase(baseId) {
+    if (!this.baseStates.has(baseId)) {
+      this.baseStates.set(baseId, {
+        destroyed: true,
+        health: 0,
+        maxHealth: 0,
+        destroyedAt: Date.now()
+      });
+    } else {
+      const state = this.baseStates.get(baseId);
+      state.destroyed = true;
+      state.health = 0;
+      state.destroyedAt = Date.now();
+    }
+  },
+
+  respawnBase(baseId, data) {
+    if (this.baseStates.has(baseId)) {
+      const state = this.baseStates.get(baseId);
+      state.destroyed = false;
+      state.health = data.health || data.maxHealth;
+      state.maxHealth = data.maxHealth;
+      delete state.destroyedAt;
+    } else {
+      this.baseStates.set(baseId, {
+        destroyed: false,
+        health: data.health || data.maxHealth,
+        maxHealth: data.maxHealth
+      });
+    }
+  },
+
+  isBaseDestroyed(baseId) {
+    const state = this.baseStates.get(baseId);
+    return state ? state.destroyed : false;
+  },
+
+  getBaseState(baseId) {
+    return this.baseStates.get(baseId);
   }
 };

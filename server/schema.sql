@@ -72,6 +72,33 @@ CREATE TABLE IF NOT EXISTS chat_messages (
   sent_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+-- Upgrade components inventory (for tier 6+ upgrades)
+CREATE TABLE IF NOT EXISTS components (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  component_type TEXT NOT NULL,
+  quantity INTEGER DEFAULT 1,
+  UNIQUE(user_id, component_type)
+);
+
+-- Relics collection (rare collectibles)
+CREATE TABLE IF NOT EXISTS relics (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  relic_type TEXT NOT NULL,
+  obtained_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(user_id, relic_type)
+);
+
+-- Active buffs on players (temporary power-ups)
+CREATE TABLE IF NOT EXISTS active_buffs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  buff_type TEXT NOT NULL,
+  expires_at INTEGER NOT NULL,
+  UNIQUE(user_id, buff_type)
+);
+
 -- Indexes for performance
 CREATE INDEX IF NOT EXISTS idx_ships_user_id ON ships(user_id);
 CREATE INDEX IF NOT EXISTS idx_inventory_user_id ON inventory(user_id);
@@ -80,3 +107,7 @@ CREATE INDEX IF NOT EXISTS idx_marketplace_resource ON marketplace(resource_type
 CREATE INDEX IF NOT EXISTS idx_world_changes_object ON world_changes(object_id);
 CREATE INDEX IF NOT EXISTS idx_world_changes_respawn ON world_changes(respawn_at);
 CREATE INDEX IF NOT EXISTS idx_chat_sent ON chat_messages(sent_at);
+CREATE INDEX IF NOT EXISTS idx_components_user_id ON components(user_id);
+CREATE INDEX IF NOT EXISTS idx_relics_user_id ON relics(user_id);
+CREATE INDEX IF NOT EXISTS idx_active_buffs_user_id ON active_buffs(user_id);
+CREATE INDEX IF NOT EXISTS idx_active_buffs_expires ON active_buffs(expires_at);

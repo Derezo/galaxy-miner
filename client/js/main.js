@@ -19,6 +19,10 @@ const GalaxyMiner = {
     InventoryUI.init();
     MarketplaceUI.init();
     ChatUI.init();
+    UpgradesUI.init();
+    TerminalUI.init();
+    Toast.init();
+    EmoteWheel.init();
 
     console.log('Galaxy Miner ready');
   },

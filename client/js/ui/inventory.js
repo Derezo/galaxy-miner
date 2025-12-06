@@ -1,37 +1,11 @@
-// Galaxy Miner - Inventory UI
+// Galaxy Miner - Inventory UI (Terminal Tab)
 
 const InventoryUI = {
-  visible: false,
-
   init() {
-    const panel = document.getElementById('inventory-panel');
-    panel.querySelector('.close-btn').addEventListener('click', () => this.hide());
-
     console.log('Inventory UI initialized');
   },
 
-  toggle() {
-    if (this.visible) {
-      this.hide();
-    } else {
-      this.show();
-    }
-  },
-
-  show() {
-    this.visible = true;
-    document.getElementById('inventory-panel').classList.remove('hidden');
-    this.refresh();
-  },
-
-  hide() {
-    this.visible = false;
-    document.getElementById('inventory-panel').classList.add('hidden');
-  },
-
   refresh() {
-    if (!this.visible) return;
-
     // Update cargo info
     const cargoUsed = Player.getCargoUsed();
     const cargoMax = Math.floor(Player.getCargoMax());

@@ -25,14 +25,14 @@ const Input = {
     if (!GalaxyMiner.gameStarted) return;
 
     switch (e.code) {
-      case 'KeyI':
-        InventoryUI.toggle();
+      case 'KeyT':
+        TerminalUI.toggle();
         break;
-      case 'KeyU':
-        // Upgrades panel toggle (to be implemented)
-        break;
-      case 'KeyK':
-        MarketplaceUI.toggle();
+      case 'KeyE':
+        // Toggle emote wheel
+        if (typeof EmoteWheel !== 'undefined') {
+          EmoteWheel.toggle();
+        }
         break;
       case 'Enter':
         ChatUI.toggle();
@@ -41,8 +41,13 @@ const Input = {
         this.closeAllPanels();
         break;
       case 'KeyM':
-        // Mine action
-        Player.tryMine();
+        // Mine action or loot collection (same key, context-dependent)
+        // Try mining first, if nothing to mine, try collecting wreckage
+        if (Player._nearestMineable && !Player.miningTarget) {
+          Player.tryMine();
+        } else {
+          Player.tryCollectWreckage();
+        }
         break;
       case 'Space':
         // Fire weapon
@@ -87,9 +92,10 @@ const Input = {
   },
 
   closeAllPanels() {
-    InventoryUI.hide();
-    MarketplaceUI.hide();
+    TerminalUI.hide();
     ChatUI.hide();
-    // Close other panels as needed
+    if (typeof EmoteWheel !== 'undefined') {
+      EmoteWheel.close();
+    }
   }
 };

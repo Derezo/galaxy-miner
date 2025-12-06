@@ -22,6 +22,14 @@ const Player = {
   lastFireTime: 0,
   miningTarget: null,
   miningProgress: 0,
+  miningConfirmed: false,  // Server confirmed mining started
+  thrustDuration: 0,       // Duration of continuous thrust in ms (for visual effects)
+  // Loot collection state
+  collectingWreckage: null,
+  collectProgress: 0,
+  collectTotalTime: 0,
+  // Active buffs
+  activeBuffs: new Map(),
 
   init(data) {
     this.id = data.id;
@@ -58,10 +66,15 @@ const Player = {
     if (input.left) this.rotation -= rotSpeed * dt;
     if (input.right) this.rotation += rotSpeed * dt;
 
-    // Thrust
+    // Thrust with duration tracking for visual effects
     if (input.up) {
       this.velocity.x += Math.cos(this.rotation) * speed * dt;
       this.velocity.y += Math.sin(this.rotation) * speed * dt;
+      // Accumulate thrust duration (cap at 2000ms for visual saturation)
+      this.thrustDuration = Math.min(this.thrustDuration + dt * 1000, 2000);
+    } else {
+      // Decay thrust duration quickly when not thrusting
+      this.thrustDuration = Math.max(this.thrustDuration - dt * 5000, 0);
     }
     if (input.down) {
       this.velocity.x -= Math.cos(this.rotation) * speed * 0.5 * dt;
@@ -82,6 +95,9 @@ const Player = {
 
     // Check for nearby mineable objects
     this.checkMiningProximity();
+
+    // Check for nearby wreckage
+    this.checkWreckageProximity();
 
     // Update mining progress if mining
     if (this.miningTarget) {
@@ -115,13 +131,8 @@ const Player = {
     this.lastFireTime = now;
     Network.sendFire(this.rotation);
 
-    // Visual feedback (muzzle flash, etc.)
-    Renderer.addEffect({
-      type: 'fire',
-      x: this.position.x + Math.cos(this.rotation) * CONSTANTS.SHIP_SIZE,
-      y: this.position.y + Math.sin(this.rotation) * CONSTANTS.SHIP_SIZE,
-      duration: 100
-    });
+    // Trigger weapon visual effect with tier-based rendering
+    Renderer.fireWeapon();
   },
 
   checkMiningProximity() {
@@ -169,13 +180,19 @@ const Player = {
   },
 
   updateMining(dt) {
-    // Check if still in range
-    const dist = this.distanceTo(this.miningTarget);
-    if (dist > CONSTANTS.MINING_RANGE * 1.5) {
-      this.miningTarget = null;
-      this.miningProgress = 0;
-      return;
+    // Update target position to track moving asteroid/planet
+    // Find current position of the mining target
+    const objects = World.getVisibleObjects(this.position, 2000);
+    const allObjects = [...objects.asteroids, ...objects.planets];
+    const currentTarget = allObjects.find(obj => obj.id === this.miningTarget.id);
+    if (currentTarget) {
+      // Update position for rendering the progress bar
+      this.miningTarget.x = currentTarget.x;
+      this.miningTarget.y = currentTarget.y;
     }
+
+    // Once mining starts, it continues (mining beam locks onto target)
+    // No distance check - server handles validation
 
     // Progress mining
     const miningSpeed = Math.pow(CONSTANTS.TIER_MULTIPLIER, this.ship.miningTier - 1);
@@ -204,6 +221,39 @@ const Player = {
     this.credits = data.credits;
   },
 
+  onMiningStarted(data) {
+    this.miningConfirmed = true;
+  },
+
+  onMiningComplete(data) {
+    // Show notification of what was mined
+    Renderer.showMiningResult(data.resourceName, data.quantity);
+
+    // Clear mining state
+    this.miningTarget = null;
+    this.miningProgress = 0;
+    this.miningConfirmed = false;
+  },
+
+  onMiningCancelled(data) {
+    this.miningTarget = null;
+    this.miningProgress = 0;
+    this.miningConfirmed = false;
+  },
+
+  onMiningError(data) {
+    this.miningTarget = null;
+    this.miningProgress = 0;
+    this.miningConfirmed = false;
+    Toast.error(data.message);
+  },
+
+  onDamaged(data) {
+    // Update health values
+    this.hull.current = data.hull;
+    this.shield.current = data.shield;
+  },
+
   getCargoUsed() {
     return this.inventory.reduce((sum, item) => sum + item.quantity, 0);
   },
@@ -214,5 +264,145 @@ const Player = {
 
   getRadarRange() {
     return CONSTANTS.BASE_RADAR_RANGE * Math.pow(CONSTANTS.TIER_MULTIPLIER, this.ship.radarTier - 1);
+  },
+
+  /**
+   * Get thrust intensity for visual effects
+   * Ramps up over 2 seconds of continuous thrust
+   * 0-500ms: 30% -> 60% (quick ignition)
+   * 500-2000ms: 60% -> 100% (build to full)
+   * @returns {number} Intensity 0-1
+   */
+  getThrustIntensity() {
+    if (this.thrustDuration <= 0) return 0;
+
+    if (this.thrustDuration < 500) {
+      // Quick ignition phase: 0.3 -> 0.6
+      return 0.3 + (this.thrustDuration / 500) * 0.3;
+    }
+
+    // Build to full: 0.6 -> 1.0
+    const buildPhase = Math.min(1, (this.thrustDuration - 500) / 1500);
+    return 0.6 + buildPhase * 0.4;
+  },
+
+  /**
+   * Check if player is currently thrusting
+   * @returns {boolean}
+   */
+  isThrusting() {
+    return this.thrustDuration > 0;
+  },
+
+  // Loot collection methods
+  tryCollectWreckage() {
+    if (this.collectingWreckage || this.miningTarget) return;
+
+    const collectRange = CONSTANTS.MINING_RANGE || 100;
+    const closestWreckage = Entities.getClosestWreckage(this.position, collectRange);
+
+    if (closestWreckage) {
+      this.collectingWreckage = closestWreckage;
+      this.collectProgress = 0;
+      Network.sendLootCollect(closestWreckage.id);
+    }
+  },
+
+  cancelCollectWreckage() {
+    if (this.collectingWreckage) {
+      Network.sendLootCancel(this.collectingWreckage.id);
+      this.collectingWreckage = null;
+      this.collectProgress = 0;
+      this.collectTotalTime = 0;
+    }
+  },
+
+  onLootCollectionStarted(data) {
+    this.collectTotalTime = data.totalTime;
+    console.log('Started collecting wreckage:', data.wreckageId);
+  },
+
+  onLootCollectionProgress(data) {
+    this.collectProgress = data.progress;
+  },
+
+  onLootCollectionComplete(data) {
+    console.log('Loot collected:', data.contents);
+
+    // Show loot notification
+    if (data.results) {
+      let message = '';
+      if (data.results.credits > 0) {
+        message += `+${data.results.credits} credits `;
+      }
+      if (data.results.resources.length > 0) {
+        const resourceText = data.results.resources.map(r => `+${r.quantity} ${r.type}`).join(', ');
+        message += resourceText;
+      }
+      if (data.results.components.length > 0) {
+        message += ` +${data.results.components.length} component(s)`;
+      }
+      if (data.results.relics.length > 0) {
+        message += ` +${data.results.relics.length} relic(s)!`;
+      }
+
+      if (message && typeof Toast !== 'undefined') {
+        Toast.success(message.trim());
+      }
+    }
+
+    this.collectingWreckage = null;
+    this.collectProgress = 0;
+    this.collectTotalTime = 0;
+  },
+
+  onLootCollectionCancelled(data) {
+    console.log('Loot collection cancelled:', data.reason);
+    this.collectingWreckage = null;
+    this.collectProgress = 0;
+    this.collectTotalTime = 0;
+  },
+
+  // Buff methods
+  onBuffApplied(data) {
+    this.activeBuffs.set(data.buffType, {
+      type: data.buffType,
+      expiresAt: data.expiresAt,
+      duration: data.duration
+    });
+  },
+
+  onBuffExpired(data) {
+    this.activeBuffs.delete(data.buffType);
+  },
+
+  hasBuff(buffType) {
+    const buff = this.activeBuffs.get(buffType);
+    if (!buff) return false;
+    return Date.now() < buff.expiresAt;
+  },
+
+  getBuffTimeRemaining(buffType) {
+    const buff = this.activeBuffs.get(buffType);
+    if (!buff) return 0;
+    return Math.max(0, buff.expiresAt - Date.now());
+  },
+
+  // Check for nearby wreckage
+  checkWreckageProximity() {
+    const collectRange = CONSTANTS.MINING_RANGE || 100;
+    const nearestWreckage = Entities.getClosestWreckage(this.position, collectRange);
+
+    // Update UI hint for wreckage collection
+    const hint = document.getElementById('loot-hint');
+    if (hint) {
+      if (nearestWreckage && !this.collectingWreckage && !this.miningTarget) {
+        hint.classList.remove('hidden');
+      } else {
+        hint.classList.add('hidden');
+      }
+    }
+
+    return nearestWreckage;
   }
 };

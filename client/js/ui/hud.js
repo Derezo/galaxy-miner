@@ -14,10 +14,7 @@ const HUD = {
     this.radarCanvas.height = 150;
 
     // Button handlers
-    document.getElementById('btn-inventory').addEventListener('click', () => InventoryUI.toggle());
-    document.getElementById('btn-upgrades').addEventListener('click', () => this.toggleUpgrades());
-    document.getElementById('btn-market').addEventListener('click', () => MarketplaceUI.toggle());
-    document.getElementById('btn-chat').addEventListener('click', () => ChatUI.toggle());
+    document.getElementById('btn-terminal').addEventListener('click', () => TerminalUI.toggle());
 
     // Start latency ping
     setInterval(() => Network.ping(), 5000);
@@ -112,7 +109,7 @@ const HUD = {
       ctx.fill();
     }
 
-    // Draw other players
+    // Draw other players as triangles showing heading
     ctx.fillStyle = '#00aaff';
     for (const [id, player] of Entities.players) {
       const dx = player.position.x - Player.position.x;
@@ -122,9 +119,19 @@ const HUD = {
 
       const rx = center + dx * scale;
       const ry = center + dy * scale;
+      const rotation = player.rotation || 0;
+
+      // Draw triangle pointing in player's direction
+      ctx.save();
+      ctx.translate(rx, ry);
+      ctx.rotate(rotation);
       ctx.beginPath();
-      ctx.arc(rx, ry, 4, 0, Math.PI * 2);
+      ctx.moveTo(5, 0);       // nose
+      ctx.lineTo(-3.5, -3);   // left tail
+      ctx.lineTo(-3.5, 3);    // right tail
+      ctx.closePath();
       ctx.fill();
+      ctx.restore();
     }
 
     // Draw NPCs
@@ -158,10 +165,5 @@ const HUD = {
 
   updateLatency(latency) {
     this.latency = latency;
-  },
-
-  toggleUpgrades() {
-    // TODO: Implement upgrades panel
-    console.log('Upgrades panel not yet implemented');
   }
 };

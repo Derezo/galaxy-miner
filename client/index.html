@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Galaxy Miner</title>
-  <link rel="stylesheet" href="css/styles.css">
+  <link rel="stylesheet" href="css/index.css">
 </head>
 <body>
   <!-- Main game canvas -->
@@ -48,6 +48,21 @@
         <div id="position-info">
           Sector: <span id="sector-coords">0, 0</span>
         </div>
+        <div id="chat-indicator" class="chat-indicator">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+          </svg>
+          <span id="chat-unread-badge" class="unread-badge hidden">0</span>
+        </div>
+      </div>
+
+      <!-- Chat overlay (hidden by default) -->
+      <div id="chat-overlay" class="chat-overlay hidden">
+        <div id="chat-messages"></div>
+        <div id="chat-input-container">
+          <input type="text" id="chat-input" placeholder="Type a message..." maxlength="200">
+          <button id="chat-send">Send</button>
+        </div>
       </div>
 
       <!-- Health/Shield bars -->
@@ -74,63 +89,61 @@
 
       <!-- Bottom buttons -->
       <div id="bottom-bar">
-        <button id="btn-inventory" class="hud-btn">Inventory [I]</button>
-        <button id="btn-upgrades" class="hud-btn">Upgrades [U]</button>
-        <button id="btn-market" class="hud-btn">Market [K]</button>
-        <button id="btn-chat" class="hud-btn">Chat [Enter]</button>
+        <button id="btn-terminal" class="hud-btn terminal-btn">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align: middle; margin-right: 5px;">
+            <rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect>
+            <line x1="8" y1="21" x2="16" y2="21"></line>
+            <line x1="12" y1="17" x2="12" y2="21"></line>
+          </svg>
+          Terminal [T]
+        </button>
       </div>
     </div>
 
-    <!-- Inventory panel -->
-    <div id="inventory-panel" class="panel hidden">
+    <!-- Ship Terminal (combined inventory, upgrades, marketplace) -->
+    <div id="terminal-panel" class="panel terminal-panel hidden">
       <div class="panel-header">
-        <h2>Inventory</h2>
+        <h2>Ship Terminal</h2>
         <button class="close-btn">&times;</button>
       </div>
+      <div class="terminal-tabs">
+        <button class="terminal-tab active" data-tab="cargo">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path>
+          </svg>
+          Cargo
+        </button>
+        <button class="terminal-tab" data-tab="upgrades">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="3"></circle>
+            <path d="M12 1v6m0 6v6m-6-6H0m12 0h6m-3-5.196l-4.5 2.598m0 5.196l4.5 2.598m0-10.392l-4.5 2.598m0 5.196l4.5 2.598"></path>
+          </svg>
+          Upgrades
+        </button>
+        <button class="terminal-tab" data-tab="market">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="9" cy="21" r="1"></circle>
+            <circle cx="20" cy="21" r="1"></circle>
+            <path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"></path>
+          </svg>
+          Market
+        </button>
+      </div>
       <div class="panel-content">
-        <div id="cargo-info">Cargo: <span id="cargo-used">0</span>/<span id="cargo-max">50</span></div>
-        <div id="inventory-list"></div>
-      </div>
-    </div>
-
-    <!-- Upgrades panel -->
-    <div id="upgrades-panel" class="panel hidden">
-      <div class="panel-header">
-        <h2>Ship Upgrades</h2>
-        <button class="close-btn">&times;</button>
-      </div>
-      <div class="panel-content">
-        <div id="upgrades-list"></div>
-      </div>
-    </div>
-
-    <!-- Marketplace panel -->
-    <div id="market-panel" class="panel hidden">
-      <div class="panel-header">
-        <h2>Marketplace</h2>
-        <button class="close-btn">&times;</button>
-      </div>
-      <div class="panel-content">
-        <div id="market-tabs">
-          <button class="market-tab active" data-tab="buy">Buy</button>
-          <button class="market-tab" data-tab="sell">Sell</button>
-          <button class="market-tab" data-tab="my-listings">My Listings</button>
+        <!-- Cargo tab content -->
+        <div id="cargo-content" class="terminal-content active">
+          <div id="cargo-info">Cargo: <span id="cargo-used">0</span>/<span id="cargo-max">50</span></div>
+          <div id="inventory-list"></div>
         </div>
-        <div id="market-content"></div>
-      </div>
-    </div>
 
-    <!-- Chat panel -->
-    <div id="chat-panel" class="panel hidden">
-      <div class="panel-header">
-        <h2>Chat</h2>
-        <button class="close-btn">&times;</button>
-      </div>
-      <div class="panel-content">
-        <div id="chat-messages"></div>
-        <div id="chat-input-container">
-          <input type="text" id="chat-input" placeholder="Type a message..." maxlength="200">
-          <button id="chat-send">Send</button>
+        <!-- Upgrades tab content -->
+        <div id="upgrades-content" class="terminal-content">
+          <div id="upgrades-list"></div>
+        </div>
+
+        <!-- Market tab content -->
+        <div id="market-content" class="terminal-content">
+          <!-- Content rendered by MarketPanel -->
         </div>
       </div>
     </div>
@@ -139,17 +152,48 @@
   <!-- Scripts -->
   <script src="/socket.io/socket.io.js"></script>
   <script src="/shared/constants.js"></script>
+  <script src="/shared/physics.js"></script>
   <script src="js/network.js"></script>
   <script src="js/world.js"></script>
   <script src="js/input.js"></script>
   <script src="js/player.js"></script>
   <script src="js/entities.js"></script>
+  <!-- Graphics system -->
+  <script src="js/graphics/particles.js"></script>
+  <script src="js/graphics/ships.js"></script>
+  <script src="js/graphics/thrust.js"></script>
+  <script src="js/graphics/tractor-beam.js"></script>
+  <script src="js/graphics/weapons.js"></script>
+  <script src="js/graphics/hit-effects.js"></script>
+  <script src="js/graphics/status-icons.js"></script>
+  <script src="js/graphics/emote-renderer.js"></script>
+  <script src="js/graphics/npc-ships.js"></script>
+  <script src="js/graphics/npc-weapons.js"></script>
+  <script src="js/graphics/death-effects.js"></script>
+  <script src="js/graphics/faction-bases.js"></script>
   <script src="js/renderer.js"></script>
+  <!-- Core UI infrastructure -->
+  <script src="js/ui/core/Component.js"></script>
+  <script src="js/ui/core/Modal.js"></script>
+  <script src="js/ui/core/State.js"></script>
+  <script src="js/ui/core/Toast.js"></script>
+  <!-- Icon system -->
+  <script src="js/ui/icons/shapes/CrystalShape.js"></script>
+  <script src="js/ui/icons/shapes/OrbitalShape.js"></script>
+  <script src="js/ui/icons/shapes/MaterialShape.js"></script>
+  <script src="js/ui/icons/IconFactory.js"></script>
+  <!-- UI modules -->
   <script src="js/ui/auth.js"></script>
   <script src="js/ui/hud.js"></script>
   <script src="js/ui/inventory.js"></script>
   <script src="js/ui/marketplace.js"></script>
   <script src="js/ui/chat.js"></script>
+  <script src="js/ui/upgrades.js"></script>
+  <!-- New panels -->
+  <script src="js/ui/panels/CargoPanel.js"></script>
+  <script src="js/ui/panels/MarketPanel.js"></script>
+  <script src="js/ui/terminal.js"></script>
+  <script src="js/ui/emote-wheel.js"></script>
   <script src="js/game.js"></script>
   <script src="js/main.js"></script>
 </body>

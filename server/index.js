@@ -19,9 +19,13 @@ const io = new Server(httpServer, {
 app.use(express.json());
 app.use(express.static(path.join(__dirname, '..', 'client')));
 
-// Serve shared constants to client
+// Serve shared modules to client
 app.get('/shared/constants.js', (req, res) => {
   res.sendFile(path.join(__dirname, '..', 'shared', 'constants.js'));
+});
+
+app.get('/shared/physics.js', (req, res) => {
+  res.sendFile(path.join(__dirname, '..', 'shared', 'physics.js'));
 });
 
 // Health check endpoint
@@ -29,8 +33,13 @@ app.get('/health', (req, res) => {
   res.json({ status: 'ok', uptime: process.uptime() });
 });
 
-// Initialize socket handlers (will be implemented in socket.js)
-require('./socket')(io);
+// Initialize socket handlers
+const socketModule = require('./socket')(io);
+
+// Initialize and start game engine
+const engine = require('./game/engine');
+engine.init(io, socketModule.connectedPlayers);
+engine.start();
 
 // Start server
 httpServer.listen(config.PORT, config.HOST, () => {
