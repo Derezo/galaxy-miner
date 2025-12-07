@@ -6,6 +6,8 @@ const Entities = {
   wreckage: new Map(),
   projectiles: [],
   baseStates: new Map(), // Track destroyed/damaged base states
+  bases: new Map(),      // Track active bases for radar display
+  projectileTrails: [],  // Track recent weapon fire for radar (Tier 4+)
 
   init() {
     this.players.clear();
@@ -13,6 +15,8 @@ const Entities = {
     this.wreckage.clear();
     this.projectiles = [];
     this.baseStates.clear();
+    this.bases.clear();
+    this.projectileTrails = [];
     console.log('Entities initialized');
   },
 
@@ -67,7 +71,8 @@ const Entities = {
         rotation: data.rotation,
         targetRotation: data.rotation,
         hull: data.hull,
-        shield: data.shield
+        shield: data.shield,
+        colorId: data.colorId || 'green'
       });
     } else {
       // Update existing player
@@ -77,6 +82,17 @@ const Entities = {
       player.hull = data.hull;
       player.shield = data.shield;
       player.status = data.status || 'idle';
+      // Update color if provided
+      if (data.colorId) {
+        player.colorId = data.colorId;
+      }
+    }
+  },
+
+  updatePlayerColor(playerId, colorId) {
+    const player = this.players.get(playerId);
+    if (player) {
+      player.colorId = colorId;
     }
   },
 
@@ -125,6 +141,7 @@ const Entities = {
       // Update max values if provided
       if (data.hullMax !== undefined) npc.hullMax = data.hullMax;
       if (data.shieldMax !== undefined) npc.shieldMax = data.shieldMax;
+      if (data.type) npc.type = data.type;
       if (data.name) npc.name = data.name;
       if (data.faction) npc.faction = data.faction;
     }
@@ -282,5 +299,54 @@ const Entities = {
 
   getBaseState(baseId) {
     return this.baseStates.get(baseId);
+  },
+
+  // Update bases from server broadcast (for radar display)
+  updateBases(basesArray) {
+    // Clear old bases and replace with new data
+    this.bases.clear();
+    for (const base of basesArray) {
+      this.bases.set(base.id, {
+        id: base.id,
+        position: base.position || { x: base.x, y: base.y },
+        faction: base.faction,
+        type: base.type,
+        name: base.name,
+        health: base.health,
+        maxHealth: base.maxHealth,
+        size: base.size
+      });
+    }
+  },
+
+  // Add a projectile trail for radar display (Tier 4+)
+  addProjectileTrail(data) {
+    this.projectileTrails.push({
+      startX: data.x,
+      startY: data.y,
+      endX: data.x + Math.cos(data.direction) * 100,
+      endY: data.y + Math.sin(data.direction) * 100,
+      type: data.type || 'kinetic',
+      tier: data.tier || 1,
+      timestamp: Date.now()
+    });
+
+    // Trim old trails (keep last 500ms)
+    const cutoff = Date.now() - 500;
+    this.projectileTrails = this.projectileTrails.filter(t => t.timestamp > cutoff);
+  },
+
+  // Get bases in range for radar
+  getBasesInRange(position, range) {
+    const result = [];
+    for (const [id, base] of this.bases) {
+      const dx = base.position.x - position.x;
+      const dy = base.position.y - position.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      if (dist <= range) {
+        result.push({ ...base, distance: dist });
+      }
+    }
+    return result;
   }
 };

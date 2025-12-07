@@ -2,6 +2,7 @@ const bcrypt = require('bcrypt');
 const { v4: uuidv4 } = require('uuid');
 const { statements, createUserWithShip } = require('./database');
 const config = require('./config');
+const world = require('./world');
 
 // In-memory session store (for MVP - could use Redis later)
 const sessions = new Map();
@@ -43,6 +44,12 @@ async function register(username, password) {
     // Create user and ship
     const userId = createUserWithShip(username, passwordHash);
 
+    // Set safe spawn location (default 0,0 might be inside a star)
+    const safeSpawn = world.findSafeSpawnLocation(0, 0, 5000);
+    const sectorX = Math.floor(safeSpawn.x / config.SECTOR_SIZE);
+    const sectorY = Math.floor(safeSpawn.y / config.SECTOR_SIZE);
+    statements.setShipPosition.run(safeSpawn.x, safeSpawn.y, sectorX, sectorY, userId);
+
     // Create session
     const token = createSession(userId);
 
@@ -77,6 +84,15 @@ async function login(username, password) {
     const valid = await bcrypt.compare(password, user.password_hash);
     if (!valid) {
       return { success: false, error: 'Invalid username or password' };
+    }
+
+    // Check if player is at an unsafe location (e.g., inside a star)
+    const ship = statements.getShipByUserId.get(user.id);
+    if (!world.isLocationSafe(ship.position_x, ship.position_y, config.STAR_SIZE_MAX * 2)) {
+      const safeSpawn = world.findSafeSpawnLocation(ship.position_x, ship.position_y, 5000);
+      const sectorX = Math.floor(safeSpawn.x / config.SECTOR_SIZE);
+      const sectorY = Math.floor(safeSpawn.y / config.SECTOR_SIZE);
+      statements.setShipPosition.run(safeSpawn.x, safeSpawn.y, sectorX, sectorY, user.id);
     }
 
     // Create session
@@ -132,6 +148,7 @@ function getPlayerData(userId) {
   const user = statements.getUserById.get(userId);
   const ship = statements.getShipByUserId.get(userId);
   const inventory = statements.getInventory.all(userId);
+  const relics = statements.getRelics.all(userId);
 
   return {
     id: user.id,
@@ -153,7 +170,11 @@ function getPlayerData(userId) {
     mining_tier: ship.mining_tier,
     cargo_tier: ship.cargo_tier,
     radar_tier: ship.radar_tier,
-    inventory
+    energy_core_tier: ship.energy_core_tier || 1,
+    hull_tier: ship.hull_tier || 1,
+    ship_color_id: ship.ship_color_id || 'green',
+    inventory,
+    relics
   };
 }
 

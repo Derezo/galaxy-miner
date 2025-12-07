@@ -13,12 +13,76 @@ class FormationStrategy {
   constructor() {
     // Formation tracking
     this.formations = new Map(); // leaderId -> { members: [], formationType }
+
+    // Formation state tracking for succession behavior
+    // formationId -> { state: 'normal'|'confusion'|'reforming', stateStartTime, newLeaderId }
+    this.formationStates = new Map();
+  }
+
+  /**
+   * Set formation state (called when leader dies)
+   * @param {string} formationId - Formation identifier
+   * @param {string} state - 'confusion' or 'reforming'
+   * @param {string} newLeaderId - New leader's ID (for reforming)
+   */
+  setFormationState(formationId, state, newLeaderId = null) {
+    this.formationStates.set(formationId, {
+      state,
+      stateStartTime: Date.now(),
+      newLeaderId
+    });
+  }
+
+  /**
+   * Get current formation state
+   */
+  getFormationState(npc) {
+    // Check all states for this NPC
+    for (const [formationId, stateInfo] of this.formationStates) {
+      if (stateInfo.newLeaderId === npc.id || npc.formationId === formationId) {
+        return stateInfo;
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Clear expired formation states
+   */
+  cleanupFormationStates() {
+    const now = Date.now();
+    for (const [formationId, stateInfo] of this.formationStates) {
+      // Confusion lasts 1 second, reforming lasts 2 seconds
+      const maxDuration = stateInfo.state === 'confusion' ? 1000 : 3000;
+      if (now - stateInfo.stateStartTime > maxDuration) {
+        this.formationStates.delete(formationId);
+      }
+    }
   }
 
   /**
    * Main update for formation behavior
    */
   update(npc, nearbyPlayers, nearbyAllies, deltaTime, context) {
+    // Cleanup expired formation states
+    this.cleanupFormationStates();
+
+    // Check for confusion or reforming state
+    const formationState = this.getFormationState(npc);
+    if (formationState) {
+      const elapsed = Date.now() - formationState.stateStartTime;
+
+      if (formationState.state === 'confusion') {
+        // During confusion: random drift, no targeting, no firing
+        return this.updateConfusion(npc, deltaTime, elapsed);
+      }
+
+      if (formationState.state === 'reforming') {
+        // During reformation: move toward new leader, no combat
+        return this.updateReformation(npc, nearbyAllies, deltaTime, formationState);
+      }
+    }
+
     // Check if should retreat
     if (this.shouldRetreat(npc)) {
       npc.state = 'retreat';
@@ -308,6 +372,57 @@ class FormationStrategy {
       // Follow leader in formation
       this.followLeader(npc, formationInfo.leader, formationInfo.index, deltaTime);
     }
+  }
+
+  /**
+   * Update during confusion state - random drift, no targeting
+   * @param {Object} npc - NPC being updated
+   * @param {number} deltaTime - Time since last update
+   * @param {number} elapsed - Time elapsed in confusion state
+   */
+  updateConfusion(npc, deltaTime, elapsed) {
+    npc.state = 'confused';
+    npc.targetPlayer = null;
+
+    // Random drift - slight random movement
+    const driftSpeed = npc.speed * 0.2 * (deltaTime / 1000);
+    const driftAngle = npc.rotation + Math.sin(elapsed * 0.005) * 0.3;
+
+    // Small random offsets
+    npc.position.x += Math.cos(driftAngle) * driftSpeed * (Math.random() - 0.5) * 2;
+    npc.position.y += Math.sin(driftAngle) * driftSpeed * (Math.random() - 0.5) * 2;
+
+    // Slightly erratic rotation
+    npc.rotation += (Math.random() - 0.5) * 0.1;
+
+    // No firing during confusion
+    return null;
+  }
+
+  /**
+   * Update during reformation state - move toward new leader
+   * @param {Object} npc - NPC being updated
+   * @param {Array} allies - Nearby allies
+   * @param {number} deltaTime - Time since last update
+   * @param {Object} stateInfo - Formation state info
+   */
+  updateReformation(npc, allies, deltaTime, stateInfo) {
+    npc.state = 'reforming';
+    npc.targetPlayer = null;
+
+    // Find the new leader
+    const newLeader = allies.find(a => a.id === stateInfo.newLeaderId);
+    if (!newLeader) {
+      // New leader not found, just drift
+      return this.updateConfusion(npc, deltaTime, 0);
+    }
+
+    // Move toward formation position around new leader
+    const formationInfo = this.getFormationRole(npc, allies);
+    this.followLeader(npc, newLeader, formationInfo.index, deltaTime);
+
+    // No firing during reformation
+    return null;
   }
 }
 

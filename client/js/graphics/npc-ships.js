@@ -1,11 +1,11 @@
 /**
  * NPC Ship Geometry Definitions
  * Distinct ship silhouettes for each of the 5 factions
- * Pirates: Angular, aggressive
- * Scavengers: Asymmetric, patched together
- * Swarm: Organic, curved
- * Void: Sleek, ethereal
- * Rogue Miners: Industrial, bulky
+ * Pirates: Angular, aggressive, bright red
+ * Scavengers: Asymmetric, patched together, dusty tan
+ * Swarm: Stealthy predators - black hulls with crimson accents, blade-like shapes, glowing red eyes
+ * Void: Sleek, ethereal, purple energy
+ * Rogue Miners: Industrial, bulky, orange/yellow
  */
 
 const NPCShipGeometry = {
@@ -26,10 +26,13 @@ const NPCShipGeometry = {
       outline: '#cccc88'
     },
     swarm: {
-      hull: '#00ff66',
-      accent: '#00cc44',
-      glow: '#00ff6670',
-      outline: '#66ff99'
+      // Stealthy predator theme - black hull with crimson accents
+      hull: '#1a1a1a',
+      accent: '#8b0000',
+      glow: '#8b000040',
+      outline: '#660000',
+      veinColor: '#990000',
+      eyeColor: '#ff0000'
     },
     void: {
       hull: '#9900ff',
@@ -185,46 +188,83 @@ const NPCShipGeometry = {
   },
 
   generateSwarmPaths(SIZE) {
-    // Swarm: Organic, curved, insectoid, bioluminescent
-    // Variant 1: Drone - Tiny, round
-    this.cachedPaths['swarm_1'] = new Path2D();
-    this.cachedPaths['swarm_1'].ellipse(0, 0, SIZE * 0.5, SIZE * 0.35, 0, 0, Math.PI * 2);
+    // Swarm: Stealthy predator - angular, blade-like, sinister
+    // Black hulls with crimson accents, red eyes on larger variants
 
-    // Variant 2: Worker - Oval with mandibles
-    const worker = new Path2D();
-    worker.ellipse(0, 0, SIZE * 0.6, SIZE * 0.4, 0, 0, Math.PI * 2);
-    worker.moveTo(SIZE * 0.6, SIZE * 0.1);
-    worker.lineTo(SIZE * 0.9, SIZE * 0.25);
-    worker.moveTo(SIZE * 0.6, -SIZE * 0.1);
-    worker.lineTo(SIZE * 0.9, -SIZE * 0.25);
-    this.cachedPaths['swarm_2'] = worker;
+    // Variant 1: Drone - Sharp dagger shape, fast and deadly
+    this.cachedPaths['swarm_1'] = new Path2D(
+      `M ${SIZE * 0.8} 0 L ${SIZE * 0.2} ${-SIZE * 0.25}
+       L ${-SIZE * 0.4} ${-SIZE * 0.15} L ${-SIZE * 0.5} 0
+       L ${-SIZE * 0.4} ${SIZE * 0.15} L ${SIZE * 0.2} ${SIZE * 0.25} Z`
+    );
 
-    // Variant 3: Warrior - Larger, aggressive curves
+    // Variant 2: Worker - Angular with blade extensions
+    this.cachedPaths['swarm_2'] = new Path2D(
+      `M ${SIZE * 0.9} 0 L ${SIZE * 0.4} ${-SIZE * 0.15}
+       L ${SIZE * 0.2} ${-SIZE * 0.5} L ${-SIZE * 0.1} ${-SIZE * 0.35}
+       L ${-SIZE * 0.5} ${-SIZE * 0.2} L ${-SIZE * 0.6} 0
+       L ${-SIZE * 0.5} ${SIZE * 0.2} L ${-SIZE * 0.1} ${SIZE * 0.35}
+       L ${SIZE * 0.2} ${SIZE * 0.5} L ${SIZE * 0.4} ${SIZE * 0.15} Z`
+    );
+    // Worker blade tips
+    this.cachedAccents['swarm_2'] = new Path2D(
+      `M ${SIZE * 0.2} ${-SIZE * 0.5} L ${SIZE * 0.35} ${-SIZE * 0.7}
+       M ${SIZE * 0.2} ${SIZE * 0.5} L ${SIZE * 0.35} ${SIZE * 0.7}`
+    );
+
+    // Variant 3: Warrior - Aggressive angular with blade wings and eye socket
     this.cachedPaths['swarm_3'] = new Path2D(
-      `M ${SIZE * 0.9} 0
-       C ${SIZE * 0.8} ${-SIZE * 0.3}, ${SIZE * 0.4} ${-SIZE * 0.6}, ${0} ${-SIZE * 0.5}
-       C ${-SIZE * 0.4} ${-SIZE * 0.5}, ${-SIZE * 0.7} ${-SIZE * 0.3}, ${-SIZE * 0.6} 0
-       C ${-SIZE * 0.7} ${SIZE * 0.3}, ${-SIZE * 0.4} ${SIZE * 0.5}, ${0} ${SIZE * 0.5}
-       C ${SIZE * 0.4} ${SIZE * 0.6}, ${SIZE * 0.8} ${SIZE * 0.3}, ${SIZE * 0.9} 0 Z`
+      `M ${SIZE * 1.0} 0 L ${SIZE * 0.5} ${-SIZE * 0.2}
+       L ${SIZE * 0.3} ${-SIZE * 0.6} L ${0} ${-SIZE * 0.8}
+       L ${-SIZE * 0.3} ${-SIZE * 0.5} L ${-SIZE * 0.6} ${-SIZE * 0.25}
+       L ${-SIZE * 0.7} 0 L ${-SIZE * 0.6} ${SIZE * 0.25}
+       L ${-SIZE * 0.3} ${SIZE * 0.5} L ${0} ${SIZE * 0.8}
+       L ${SIZE * 0.3} ${SIZE * 0.6} L ${SIZE * 0.5} ${SIZE * 0.2} Z`
     );
-    // Warrior pincers accent
+    // Warrior blade wings
     this.cachedAccents['swarm_3'] = new Path2D(
-      `M ${SIZE * 0.9} 0 L ${SIZE * 1.2} ${-SIZE * 0.3}
-       M ${SIZE * 0.9} 0 L ${SIZE * 1.2} ${SIZE * 0.3}`
+      `M ${0} ${-SIZE * 0.8} L ${-SIZE * 0.2} ${-SIZE * 1.1} L ${-SIZE * 0.4} ${-SIZE * 0.7}
+       M ${0} ${SIZE * 0.8} L ${-SIZE * 0.2} ${SIZE * 1.1} L ${-SIZE * 0.4} ${SIZE * 0.7}`
     );
+    // Warrior eye position (stored for special rendering)
+    this.cachedPaths['swarm_3_eye'] = { x: SIZE * 0.35, y: 0, radius: SIZE * 0.12 };
 
-    // Variant 4: Queen - Massive, elongated abdomen
+    // Variant 4: Queen - Massive predator with blade wings, spinal ridges, and glowing eye
     this.cachedPaths['swarm_4'] = new Path2D(
-      `M ${SIZE * 1.1} 0
-       C ${SIZE} ${-SIZE * 0.4}, ${SIZE * 0.5} ${-SIZE * 0.7}, ${0} ${-SIZE * 0.6}
-       C ${-SIZE * 0.5} ${-SIZE * 0.6}, ${-SIZE * 0.9} ${-SIZE * 0.4}, ${-SIZE * 1.0} 0
-       C ${-SIZE * 0.9} ${SIZE * 0.4}, ${-SIZE * 0.5} ${SIZE * 0.6}, ${0} ${SIZE * 0.6}
-       C ${SIZE * 0.5} ${SIZE * 0.7}, ${SIZE} ${SIZE * 0.4}, ${SIZE * 1.1} 0 Z`
+      `M ${SIZE * 1.2} 0 L ${SIZE * 0.7} ${-SIZE * 0.25}
+       L ${SIZE * 0.5} ${-SIZE * 0.6} L ${SIZE * 0.2} ${-SIZE * 0.85}
+       L ${-SIZE * 0.2} ${-SIZE * 0.9} L ${-SIZE * 0.5} ${-SIZE * 0.6}
+       L ${-SIZE * 0.8} ${-SIZE * 0.3} L ${-SIZE * 0.9} 0
+       L ${-SIZE * 0.8} ${SIZE * 0.3} L ${-SIZE * 0.5} ${SIZE * 0.6}
+       L ${-SIZE * 0.2} ${SIZE * 0.9} L ${SIZE * 0.2} ${SIZE * 0.85}
+       L ${SIZE * 0.5} ${SIZE * 0.6} L ${SIZE * 0.7} ${SIZE * 0.25} Z`
     );
-    // Queen crown accent
+    // Queen blade wings and spinal ridges
     this.cachedAccents['swarm_4'] = new Path2D(
-      `M ${SIZE * 0.3} ${-SIZE * 0.5} L ${SIZE * 0.5} ${-SIZE * 0.8} L ${SIZE * 0.6} ${-SIZE * 0.4}
-       M ${SIZE * 0.3} ${SIZE * 0.5} L ${SIZE * 0.5} ${SIZE * 0.8} L ${SIZE * 0.6} ${SIZE * 0.4}`
+      `M ${SIZE * 0.2} ${-SIZE * 0.85} L ${0} ${-SIZE * 1.2} L ${-SIZE * 0.3} ${-SIZE * 0.8}
+       M ${SIZE * 0.2} ${SIZE * 0.85} L ${0} ${SIZE * 1.2} L ${-SIZE * 0.3} ${SIZE * 0.8}
+       M ${-SIZE * 0.3} ${-SIZE * 0.55} L ${-SIZE * 0.5} ${-SIZE * 0.7}
+       M ${-SIZE * 0.3} ${SIZE * 0.55} L ${-SIZE * 0.5} ${SIZE * 0.7}
+       M ${-SIZE * 0.55} ${-SIZE * 0.35} L ${-SIZE * 0.75} ${-SIZE * 0.45}
+       M ${-SIZE * 0.55} ${SIZE * 0.35} L ${-SIZE * 0.75} ${SIZE * 0.45}`
+    );
+    // Queen eye position (larger, more prominent)
+    this.cachedPaths['swarm_4_eye'] = { x: SIZE * 0.5, y: 0, radius: SIZE * 0.18 };
+
+    // Store vein paths for animated rendering
+    this.cachedPaths['swarm_3_veins'] = new Path2D(
+      `M ${SIZE * 0.3} 0 L ${-SIZE * 0.4} ${-SIZE * 0.15}
+       M ${SIZE * 0.3} 0 L ${-SIZE * 0.4} ${SIZE * 0.15}
+       M ${SIZE * 0.1} ${-SIZE * 0.3} L ${-SIZE * 0.2} ${-SIZE * 0.45}
+       M ${SIZE * 0.1} ${SIZE * 0.3} L ${-SIZE * 0.2} ${SIZE * 0.45}`
+    );
+    this.cachedPaths['swarm_4_veins'] = new Path2D(
+      `M ${SIZE * 0.45} 0 L ${-SIZE * 0.5} ${-SIZE * 0.2}
+       M ${SIZE * 0.45} 0 L ${-SIZE * 0.5} ${SIZE * 0.2}
+       M ${SIZE * 0.3} ${-SIZE * 0.4} L ${-SIZE * 0.3} ${-SIZE * 0.55}
+       M ${SIZE * 0.3} ${SIZE * 0.4} L ${-SIZE * 0.3} ${SIZE * 0.55}
+       M ${0} ${-SIZE * 0.6} L ${-SIZE * 0.4} ${-SIZE * 0.65}
+       M ${0} ${SIZE * 0.6} L ${-SIZE * 0.4} ${SIZE * 0.65}`
     );
   },
 
@@ -330,6 +370,7 @@ const NPCShipGeometry = {
    * Get faction from NPC type
    */
   getFaction(npcType) {
+    if (!npcType || typeof npcType !== 'string') return 'pirate';
     if (npcType.startsWith('pirate')) return 'pirate';
     if (npcType.startsWith('scavenger')) return 'scavenger';
     if (npcType.startsWith('swarm')) return 'swarm';
@@ -350,7 +391,7 @@ const NPCShipGeometry = {
   /**
    * Draw an NPC ship with faction-specific geometry
    */
-  draw(ctx, position, rotation, npcType, faction, screenPos) {
+  draw(ctx, position, rotation, npcType, faction, screenPos, time) {
     const variant = this.SHIP_VARIANTS[npcType] || 'pirate_1';
     const variantNum = this.getVariant(npcType);
     const actualFaction = faction || this.getFaction(npcType);
@@ -413,7 +454,65 @@ const NPCShipGeometry = {
       ctx.stroke(accentPath);
     }
 
+    // Special Swarm rendering: pulsing veins and glowing eye
+    if (actualFaction === 'swarm') {
+      this.drawSwarmEffects(ctx, variant, variantNum, colors, time);
+    }
+
     ctx.restore();
+  },
+
+  /**
+   * Draw Swarm-specific effects: pulsing crimson veins and glowing red eyes
+   */
+  drawSwarmEffects(ctx, variant, variantNum, colors, time) {
+    const currentTime = time || Date.now();
+    const pulsePhase = (Math.sin(currentTime * 0.003) + 1) / 2; // 0-1 pulsing
+
+    // Draw pulsing veins for Warrior and Queen
+    const veinPath = this.cachedPaths[variant + '_veins'];
+    if (veinPath) {
+      ctx.strokeStyle = colors.veinColor || '#990000';
+      ctx.lineWidth = 1 + pulsePhase * 0.5;
+      ctx.globalAlpha = 0.5 + pulsePhase * 0.4;
+      ctx.stroke(veinPath);
+      ctx.globalAlpha = 1;
+    }
+
+    // Draw glowing eye for Warrior and Queen
+    const eyeData = this.cachedPaths[variant + '_eye'];
+    if (eyeData) {
+      const eyeColor = colors.eyeColor || '#ff0000';
+      const eyePulse = 0.7 + pulsePhase * 0.3;
+
+      // Eye glow
+      const eyeGradient = ctx.createRadialGradient(
+        eyeData.x, eyeData.y, 0,
+        eyeData.x, eyeData.y, eyeData.radius * 2
+      );
+      eyeGradient.addColorStop(0, eyeColor);
+      eyeGradient.addColorStop(0.5, eyeColor + '80');
+      eyeGradient.addColorStop(1, 'transparent');
+
+      ctx.globalAlpha = eyePulse;
+      ctx.fillStyle = eyeGradient;
+      ctx.beginPath();
+      ctx.arc(eyeData.x, eyeData.y, eyeData.radius * 2, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Eye core
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = eyeColor;
+      ctx.beginPath();
+      ctx.arc(eyeData.x, eyeData.y, eyeData.radius * 0.6, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Eye pupil (dark center)
+      ctx.fillStyle = '#000000';
+      ctx.beginPath();
+      ctx.arc(eyeData.x, eyeData.y, eyeData.radius * 0.25, 0, Math.PI * 2);
+      ctx.fill();
+    }
   },
 
   /**

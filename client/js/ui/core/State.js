@@ -215,6 +215,7 @@ const UIState = createStore({
   inventory: [],
   credits: 0,
   ship: null,
+  relics: [],
 
   // Market state
   marketListings: [],
@@ -224,6 +225,9 @@ const UIState = createStore({
   // Cargo panel state
   selectedItem: null,
   detailPanelOpen: false,
+
+  // Relics panel state
+  selectedRelic: null,
 
   // UI state
   terminalOpen: false,

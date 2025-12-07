@@ -4,7 +4,7 @@
  *
  * cannon: Pirates - fiery projectile with trailing sparks
  * jury_laser: Scavengers - flickering unstable beam
- * acid_bolt: Swarm - organic projectile with splash
+ * dark_energy: Swarm - black core with crimson tendrils and void tears
  * dark_beam: Void - pulsing dark energy beam
  * mining_laser: Rogue Miners - industrial beam with particles
  */
@@ -38,15 +38,17 @@ const NPCWeaponEffects = {
       flicker: true,
       flickerRate: 20
     },
-    acid_bolt: {
+    dark_energy: {
       type: 'projectile',
-      color: { primary: '#00ff66', secondary: '#66ffaa', glow: '#00ff6680' },
-      size: 6,
-      speed: 350,
-      duration: 700,
-      splash: true,
-      splashRadius: 30,
-      drip: true
+      color: { primary: '#8b0000', secondary: '#ff0000', glow: '#ff000040', core: '#000000' },
+      size: 7,
+      speed: 400,
+      duration: 600,
+      trail: true,
+      trailColor: '#8b0000',
+      trailLength: 40,
+      voidTear: true,
+      tendrils: true
     },
     dark_beam: {
       type: 'beam',
@@ -176,9 +178,9 @@ const NPCWeaponEffects = {
             HitEffectRenderer.addHit(proj.target.x, proj.target.y, proj.hitInfo.isShieldHit);
           }
 
-          // Create splash effect for acid bolts at impact
-          if (proj.config.splash && typeof ParticleSystem !== 'undefined') {
-            this.createSplashEffect(proj);
+          // Create void tear effect for dark energy at impact
+          if (proj.config.voidTear && typeof ParticleSystem !== 'undefined') {
+            this.createVoidTearEffect(proj);
           }
 
           // Remove projectile after impact
@@ -187,9 +189,9 @@ const NPCWeaponEffects = {
       }
 
       if (proj.life <= 0) {
-        // Create splash effect for acid bolts (fallback if no target)
-        if (proj.config.splash && typeof ParticleSystem !== 'undefined' && !proj.hitTriggered) {
-          this.createSplashEffect(proj);
+        // Create void tear effect (fallback if no target)
+        if (proj.config.voidTear && typeof ParticleSystem !== 'undefined' && !proj.hitTriggered) {
+          this.createVoidTearEffect(proj);
         }
         return false;
       }
@@ -203,22 +205,63 @@ const NPCWeaponEffects = {
     });
   },
 
-  createSplashEffect(proj) {
-    const count = 12;
-    for (let i = 0; i < count; i++) {
-      const angle = (Math.PI * 2 * i) / count + Math.random() * 0.3;
-      const speed = 50 + Math.random() * 80;
+  createVoidTearEffect(proj) {
+    // Crimson tendrils radiating outward
+    const tendrilCount = 8;
+    for (let i = 0; i < tendrilCount; i++) {
+      const angle = (Math.PI * 2 * i) / tendrilCount + Math.random() * 0.4;
+      const speed = 80 + Math.random() * 120;
 
       ParticleSystem.spawn({
         x: proj.x,
         y: proj.y,
         vx: Math.cos(angle) * speed,
         vy: Math.sin(angle) * speed,
-        life: 300 + Math.random() * 200,
-        color: proj.config.color.primary,
-        size: 2 + Math.random() * 3,
+        life: 400 + Math.random() * 200,
+        color: proj.config.color.primary, // Dark crimson
+        size: 3 + Math.random() * 2,
         type: 'glow',
-        drag: 0.92,
+        drag: 0.88,
+        decay: 1
+      });
+    }
+
+    // Dark core particles (sucked inward initially, then explode)
+    const coreCount = 6;
+    for (let i = 0; i < coreCount; i++) {
+      const angle = (Math.PI * 2 * i) / coreCount + Math.random() * 0.5;
+      const speed = 40 + Math.random() * 60;
+
+      ParticleSystem.spawn({
+        x: proj.x + (Math.random() - 0.5) * 10,
+        y: proj.y + (Math.random() - 0.5) * 10,
+        vx: Math.cos(angle) * speed,
+        vy: Math.sin(angle) * speed,
+        life: 250 + Math.random() * 150,
+        color: '#000000', // Black core
+        size: 4 + Math.random() * 3,
+        type: 'glow',
+        drag: 0.9,
+        decay: 1
+      });
+    }
+
+    // Red sparks
+    const sparkCount = 10;
+    for (let i = 0; i < sparkCount; i++) {
+      const angle = Math.random() * Math.PI * 2;
+      const speed = 100 + Math.random() * 150;
+
+      ParticleSystem.spawn({
+        x: proj.x,
+        y: proj.y,
+        vx: Math.cos(angle) * speed,
+        vy: Math.sin(angle) * speed,
+        life: 200 + Math.random() * 100,
+        color: proj.config.color.secondary, // Bright red
+        size: 1.5 + Math.random() * 1.5,
+        type: 'spark',
+        drag: 0.95,
         decay: 1
       });
     }
@@ -279,8 +322,8 @@ const NPCWeaponEffects = {
       case 'cannon':
         this.drawCannonProjectile(ctx, config);
         break;
-      case 'acid_bolt':
-        this.drawAcidBolt(ctx, config);
+      case 'dark_energy':
+        this.drawDarkEnergyBolt(ctx, config, proj);
         break;
       default:
         this.drawGenericProjectile(ctx, config);
@@ -321,47 +364,94 @@ const NPCWeaponEffects = {
     }
   },
 
-  drawAcidBolt(ctx, config) {
-    // Organic acid projectile
+  drawDarkEnergyBolt(ctx, config, proj) {
+    // Dark energy projectile - black core with crimson tendrils and void tear effect
     const size = config.size;
-    const wobble = Math.sin(Date.now() * 0.02) * 2;
+    const time = Date.now();
+    const pulsePhase = (Math.sin(time * 0.008) + 1) / 2;
 
-    // Toxic glow
-    const gradient = ctx.createRadialGradient(0, 0, 0, 0, 0, size * 2.5);
-    gradient.addColorStop(0, config.color.secondary);
-    gradient.addColorStop(0.3, config.color.primary);
-    gradient.addColorStop(0.7, config.color.glow);
-    gradient.addColorStop(1, 'transparent');
-
-    ctx.fillStyle = gradient;
-    ctx.beginPath();
-    ctx.arc(0, 0, size * 2.5, 0, Math.PI * 2);
-    ctx.fill();
-
-    // Organic blob shape
-    ctx.fillStyle = config.color.primary;
-    ctx.beginPath();
-    for (let i = 0; i < 8; i++) {
-      const angle = (Math.PI * 2 * i) / 8;
-      const r = size * (0.8 + Math.sin(Date.now() * 0.01 + i) * 0.2);
-      if (i === 0) {
-        ctx.moveTo(Math.cos(angle) * r, Math.sin(angle) * r);
-      } else {
-        ctx.lineTo(Math.cos(angle) * r, Math.sin(angle) * r);
+    // Void tear effect - distortion around the projectile
+    if (config.voidTear) {
+      ctx.strokeStyle = config.color.glow;
+      ctx.lineWidth = 1;
+      ctx.globalAlpha = 0.3 + pulsePhase * 0.2;
+      for (let i = 0; i < 3; i++) {
+        const tearSize = size * (1.5 + i * 0.5);
+        const offset = Math.sin(time * 0.005 + i) * 3;
+        ctx.beginPath();
+        ctx.ellipse(offset, 0, tearSize, tearSize * 0.6, 0, 0, Math.PI * 2);
+        ctx.stroke();
       }
-    }
-    ctx.closePath();
-    ctx.fill();
-
-    // Dripping effect
-    if (config.drip) {
-      ctx.fillStyle = config.color.primary;
-      ctx.globalAlpha = 0.7;
-      ctx.beginPath();
-      ctx.ellipse(0, size + wobble, size * 0.3, size * 0.5, 0, 0, Math.PI * 2);
-      ctx.fill();
       ctx.globalAlpha = 1;
     }
+
+    // Outer crimson glow
+    const outerGlow = ctx.createRadialGradient(0, 0, 0, 0, 0, size * 3);
+    outerGlow.addColorStop(0, config.color.primary);
+    outerGlow.addColorStop(0.4, config.color.glow);
+    outerGlow.addColorStop(1, 'transparent');
+
+    ctx.fillStyle = outerGlow;
+    ctx.beginPath();
+    ctx.arc(0, 0, size * 3, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Crimson tendrils extending from core
+    if (config.tendrils) {
+      ctx.strokeStyle = config.color.primary;
+      ctx.lineWidth = 1.5;
+      ctx.lineCap = 'round';
+
+      for (let i = 0; i < 6; i++) {
+        const baseAngle = (Math.PI * 2 * i) / 6 + time * 0.002;
+        const tendrilLength = size * (1.2 + Math.sin(time * 0.006 + i) * 0.4);
+        const wobble = Math.sin(time * 0.01 + i * 2) * 0.3;
+
+        ctx.globalAlpha = 0.6 + Math.sin(time * 0.005 + i) * 0.3;
+        ctx.beginPath();
+        ctx.moveTo(
+          Math.cos(baseAngle) * size * 0.5,
+          Math.sin(baseAngle) * size * 0.5
+        );
+
+        // Curvy tendril using quadratic bezier
+        const midX = Math.cos(baseAngle + wobble) * tendrilLength * 0.6;
+        const midY = Math.sin(baseAngle + wobble) * tendrilLength * 0.6;
+        const endX = Math.cos(baseAngle) * tendrilLength;
+        const endY = Math.sin(baseAngle) * tendrilLength;
+
+        ctx.quadraticCurveTo(midX, midY, endX, endY);
+        ctx.stroke();
+      }
+      ctx.globalAlpha = 1;
+    }
+
+    // Dark crimson ring
+    ctx.strokeStyle = config.color.primary;
+    ctx.lineWidth = 2;
+    ctx.globalAlpha = 0.8;
+    ctx.beginPath();
+    ctx.arc(0, 0, size * 0.8, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+
+    // Black void core
+    const coreGradient = ctx.createRadialGradient(0, 0, 0, 0, 0, size);
+    coreGradient.addColorStop(0, config.color.core || '#000000');
+    coreGradient.addColorStop(0.6, '#1a0000');
+    coreGradient.addColorStop(1, config.color.primary);
+
+    ctx.fillStyle = coreGradient;
+    ctx.beginPath();
+    ctx.arc(0, 0, size * 0.7, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Inner red eye highlight
+    const eyeSize = size * 0.25 * (0.8 + pulsePhase * 0.4);
+    ctx.fillStyle = config.color.secondary;
+    ctx.beginPath();
+    ctx.arc(0, 0, eyeSize, 0, Math.PI * 2);
+    ctx.fill();
   },
 
   drawGenericProjectile(ctx, config) {
@@ -568,7 +658,7 @@ const NPCWeaponEffects = {
     const factionWeapons = {
       pirate: 'cannon',
       scavenger: 'jury_laser',
-      swarm: 'acid_bolt',
+      swarm: 'dark_energy',
       void: 'dark_beam',
       rogue_miner: 'mining_laser'
     };

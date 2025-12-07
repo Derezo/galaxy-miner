@@ -38,12 +38,20 @@ const Input = {
         ChatUI.toggle();
         break;
       case 'Escape':
-        this.closeAllPanels();
+        // Cancel wormhole transit during selection, or close panels
+        if (Player.inWormholeTransit && Player.wormholeTransitPhase === 'selecting') {
+          Player.cancelWormholeTransit();
+        } else {
+          this.closeAllPanels();
+        }
         break;
       case 'KeyM':
-        // Mine action or loot collection (same key, context-dependent)
-        // Try mining first, if nothing to mine, try collecting wreckage
-        if (Player._nearestMineable && !Player.miningTarget) {
+        // Priority: Wormhole > Mining > Loot collection
+        console.log('[Input] M pressed - wormhole:', Player._nearestWormhole, 'hasGem:', Player.hasRelic('WORMHOLE_GEM'),
+          'mineable:', Player._nearestMineable, 'miningTarget:', Player.miningTarget);
+        if (Player._nearestWormhole && Player.hasRelic('WORMHOLE_GEM') && !Player.inWormholeTransit) {
+          Player.tryEnterWormhole();
+        } else if (Player._nearestMineable && !Player.miningTarget) {
           Player.tryMine();
         } else {
           Player.tryCollectWreckage();

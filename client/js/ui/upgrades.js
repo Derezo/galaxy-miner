@@ -66,23 +66,5 @@ const UpgradesUI = {
   }
 };
 
-// Listen for upgrade events
-if (typeof Network !== 'undefined') {
-  // These will be set up after Network is initialized
-  document.addEventListener('DOMContentLoaded', () => {
-    setTimeout(() => {
-      if (Network.socket) {
-        Network.socket.on('upgrade:success', (data) => {
-          Player.ship[data.component + 'Tier'] = data.newTier;
-          Player.credits = data.credits;
-          UpgradesUI.refresh();
-          HUD.update();
-        });
-
-        Network.socket.on('upgrade:error', (data) => {
-          alert(data.message);
-        });
-      }
-    }, 1000);
-  });
-}
+// Note: Upgrade event listeners (upgrade:success, upgrade:error) are now
+// registered in Network.init() for reliable handling across reconnections

@@ -351,6 +351,194 @@ const SECTOR_NPC_RESPAWN_DELAY = 300000;
 // Active bases: baseId -> baseData (runtime tracking)
 const activeBases = new Map();
 
+// ============================================
+// FORMATION TRACKING (Void faction leader succession)
+// ============================================
+
+// Formation registry: formationId -> { leaderId, memberIds: Set, lastLeaderId }
+const formations = new Map();
+
+// Tier scores for succession priority (higher = more likely to become leader)
+const SUCCESSION_TIER_SCORES = {
+  void_phantom: 3,
+  void_shadow: 2,
+  void_whisper: 1
+};
+
+/**
+ * Get formation info for an NPC
+ * @param {string} npcId - NPC ID to look up
+ * @returns {Object|null} Formation info { formationId, leaderId, memberIds } or null
+ */
+function getFormationForNpc(npcId) {
+  for (const [formationId, formation] of formations) {
+    if (formation.leaderId === npcId || formation.memberIds.has(npcId)) {
+      return {
+        formationId,
+        leaderId: formation.leaderId,
+        memberIds: formation.memberIds,
+        lastLeaderId: formation.lastLeaderId
+      };
+    }
+  }
+  return null;
+}
+
+/**
+ * Register or update a formation
+ * @param {string} leaderId - Formation leader NPC ID
+ * @param {Array|Set} memberIds - Member NPC IDs (excluding leader)
+ * @returns {string} Formation ID
+ */
+function registerFormation(leaderId, memberIds) {
+  // Check if leader already has a formation
+  const existing = getFormationForNpc(leaderId);
+  if (existing) {
+    // Update existing formation
+    const formation = formations.get(existing.formationId);
+    formation.leaderId = leaderId;
+    formation.memberIds = new Set(memberIds);
+    formation.memberIds.delete(leaderId); // Leader shouldn't be in members
+    return existing.formationId;
+  }
+
+  // Create new formation
+  const formationId = `formation_${leaderId}_${Date.now()}`;
+  formations.set(formationId, {
+    leaderId,
+    memberIds: new Set(memberIds),
+    lastLeaderId: null,
+    createdAt: Date.now()
+  });
+
+  return formationId;
+}
+
+/**
+ * Score an NPC for leadership succession
+ * Higher scores = more likely to become new leader
+ * @param {Object} npcEntity - NPC to score
+ * @returns {number} Leadership score
+ */
+function scoreNpcForLeadership(npcEntity) {
+  if (!npcEntity || npcEntity.hull <= 0) return -1;
+
+  const healthPercent = npcEntity.hull / npcEntity.hullMax;
+  const tierScore = SUCCESSION_TIER_SCORES[npcEntity.type] || 0;
+
+  // Score = health% * 100 + tierScore * 10
+  return (healthPercent * 100) + (tierScore * 10);
+}
+
+/**
+ * Handle formation leader death - select new leader
+ * @param {string} formationId - Formation ID
+ * @returns {Object} Succession result { newLeader, memberIds, success }
+ */
+function handleLeaderDeath(formationId) {
+  const formation = formations.get(formationId);
+  if (!formation) {
+    return { success: false, reason: 'Formation not found' };
+  }
+
+  const oldLeaderId = formation.leaderId;
+
+  // Clean up dead members
+  for (const memberId of formation.memberIds) {
+    if (!activeNPCs.has(memberId)) {
+      formation.memberIds.delete(memberId);
+    }
+  }
+
+  // No members left - dissolve formation
+  if (formation.memberIds.size === 0) {
+    formations.delete(formationId);
+    return { success: false, reason: 'No surviving members' };
+  }
+
+  // Score all surviving members
+  let bestScore = -1;
+  let bestCandidate = null;
+
+  for (const memberId of formation.memberIds) {
+    const member = activeNPCs.get(memberId);
+    if (!member) continue;
+
+    const score = scoreNpcForLeadership(member);
+    if (score > bestScore) {
+      bestScore = score;
+      bestCandidate = member;
+    }
+  }
+
+  if (!bestCandidate) {
+    formations.delete(formationId);
+    return { success: false, reason: 'No viable candidates' };
+  }
+
+  // Promote new leader
+  formation.lastLeaderId = oldLeaderId;
+  formation.leaderId = bestCandidate.id;
+  formation.memberIds.delete(bestCandidate.id);
+
+  // Mark new leader in NPC data
+  bestCandidate.isFormationLeader = true;
+  bestCandidate.formationLeader = true;
+
+  console.log(`[FORMATION] Leader succession: ${bestCandidate.name} (${bestCandidate.id}) is now leader of formation ${formationId}`);
+
+  return {
+    success: true,
+    newLeader: {
+      id: bestCandidate.id,
+      type: bestCandidate.type,
+      name: bestCandidate.name,
+      position: bestCandidate.position,
+      score: bestScore
+    },
+    memberIds: Array.from(formation.memberIds),
+    formationId
+  };
+}
+
+/**
+ * Remove an NPC from any formation they belong to
+ * @param {string} npcId - NPC ID to remove
+ */
+function removeFromFormation(npcId) {
+  for (const [formationId, formation] of formations) {
+    if (formation.memberIds.has(npcId)) {
+      formation.memberIds.delete(npcId);
+    }
+    // If leader was removed (shouldn't happen via this function normally)
+    if (formation.leaderId === npcId) {
+      formation.leaderId = null;
+    }
+  }
+}
+
+/**
+ * Clean up empty formations
+ */
+function cleanupFormations() {
+  for (const [formationId, formation] of formations) {
+    // Remove dead members
+    for (const memberId of formation.memberIds) {
+      if (!activeNPCs.has(memberId)) {
+        formation.memberIds.delete(memberId);
+      }
+    }
+
+    // Check if leader is dead
+    const leaderDead = !activeNPCs.has(formation.leaderId);
+
+    // Remove formation if no leader and no members
+    if (leaderDead && formation.memberIds.size === 0) {
+      formations.delete(formationId);
+    }
+  }
+}
+
 // Base type to NPC type mapping (spawn pool per base)
 const BASE_NPC_SPAWNS = {
   pirate_outpost: {
@@ -427,12 +615,17 @@ function activateBase(base) {
     activated: true
   });
 
+  // Get current computed position for orbital/binary bases
+  const computedPos = world.getObjectPosition(base.id);
+  const activatedX = computedPos ? computedPos.x : base.x;
+  const activatedY = computedPos ? computedPos.y : base.y;
+
   // Do initial spawn
   for (let i = 0; i < spawnConfig.initialSpawn; i++) {
     spawnNPCFromBase(base.id);
   }
 
-  console.log(`[NPC] Activated base ${base.name} (${base.type}) at (${Math.round(base.x)}, ${Math.round(base.y)})`);
+  console.log(`[NPC] Activated base ${base.name} (${base.type}) at (${Math.round(activatedX)}, ${Math.round(activatedY)})${computedPos ? ' (computed)' : ''}`);
 }
 
 // Deactivate a base (when no players nearby for a while)
@@ -468,12 +661,17 @@ function spawnNPCFromBase(baseId) {
 
   const npcId = `npc_${++npcIdCounter}`;
 
+  // Get current computed position for orbital/binary bases
+  const currentPos = world.getObjectPosition(baseId);
+  const baseX = currentPos ? currentPos.x : base.x;
+  const baseY = currentPos ? currentPos.y : base.y;
+
   // Spawn position - random around base within patrol radius
   const patrolRadius = (base.patrolRadius || 3) * config.SECTOR_SIZE;
   const spawnAngle = Math.random() * Math.PI * 2;
   const spawnDist = Math.random() * patrolRadius * 0.5; // Spawn within 50% of patrol radius
-  const spawnX = base.x + Math.cos(spawnAngle) * spawnDist;
-  const spawnY = base.y + Math.sin(spawnAngle) * spawnDist;
+  const spawnX = baseX + Math.cos(spawnAngle) * spawnDist;
+  const spawnY = baseY + Math.sin(spawnAngle) * spawnDist;
 
   const npc = {
     id: npcId,
@@ -495,9 +693,9 @@ function spawnNPCFromBase(baseId) {
     aggroRange: npcTypeData.aggroRange,
     lootTable: npcTypeData.lootTable,
     creditReward: npcTypeData.creditReward,
-    // Link to home base
+    // Link to home base (use computed position for orbital/binary bases)
     homeBaseId: baseId,
-    homeBasePosition: { x: base.x, y: base.y },
+    homeBasePosition: { x: baseX, y: baseY },
     patrolRadius: patrolRadius,
     spawnPoint: { x: spawnX, y: spawnY },
     state: 'patrol',
@@ -689,7 +887,7 @@ function generateBaseLoot(base) {
   for (let i = 0; i < numDrops; i++) {
     const resourceType = resources[Math.floor(Math.random() * resources.length)];
     const quantity = Math.floor(Math.random() * 10) + 5; // 5-14 per drop
-    loot.push({ resourceType, quantity });
+    loot.push({ type: 'resource', resourceType, quantity });
   }
 
   // Chance for component or relic
@@ -758,23 +956,33 @@ function getDestroyedBases() {
 }
 
 // Get all active (non-destroyed) bases within range of a position
+// Returns bases where edge (center - size) is within range
+// Uses computed positions for orbital bases and binary star systems
 function getBasesInRange(position, range) {
   const basesInRange = [];
   for (const [baseId, base] of activeBases) {
     if (base.destroyed) continue;
 
-    const dx = base.x - position.x;
-    const dy = base.y - position.y;
-    const dist = Math.sqrt(dx * dx + dy * dy);
+    // Compute current position (handles orbital bases and binary star movement)
+    const currentPos = world.getObjectPosition(baseId);
+    const baseX = currentPos ? currentPos.x : base.x;
+    const baseY = currentPos ? currentPos.y : base.y;
 
-    // Add base size to range check (bases are large targets)
-    if (dist <= range + (base.size || 100)) {
+    const dx = baseX - position.x;
+    const dy = baseY - position.y;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    const baseSize = base.size || 100;
+
+    // Check if edge of base (not center) is within range
+    // effectiveDistance = dist - baseSize, check if <= range
+    // Equivalent: dist <= range + baseSize
+    if (dist - baseSize <= range) {
       basesInRange.push({
         id: baseId,
-        x: base.x,
-        y: base.y,
-        size: base.size || 100,
-        position: { x: base.x, y: base.y },
+        x: baseX,
+        y: baseY,
+        size: baseSize,
+        position: { x: baseX, y: baseY },
         health: base.health,
         maxHealth: base.maxHealth,
         faction: base.faction,
@@ -1175,6 +1383,222 @@ function applySwarmLinkedDamage(damagedNpc, damage) {
   return affected;
 }
 
+// ============================================
+// SWARM QUEEN SPAWNING MECHANICS
+// ============================================
+
+// Queen spawn configuration
+const QUEEN_SPAWN_CONFIG = {
+  maxMinions: 12,                    // Max alive minions per queen
+  spawnCooldown: 15000,              // 15 seconds between spawns
+  healthThresholds: [0.75, 0.5, 0.25], // Spawn at these health percentages
+  combatSpawnDelay: 10000,           // Wait 10s in combat before time-based spawns
+  unitsPerSpawn: { min: 2, max: 4 }, // Units spawned each time
+  spawnTypes: {
+    swarm_drone: 0.7,   // 70% chance
+    swarm_worker: 0.2,  // 20% chance
+    swarm_warrior: 0.1  // 10% chance
+  }
+};
+
+/**
+ * Initialize queen spawn tracking data on NPC
+ * @param {Object} npc - Queen NPC to initialize
+ */
+function initQueenSpawnData(npc) {
+  if (!npc.spawnsUnits) return;
+
+  npc.spawnedMinions = npc.spawnedMinions || [];
+  npc.lastSpawnTime = npc.lastSpawnTime || 0;
+  npc.combatStartTime = npc.combatStartTime || null;
+  npc.lastHealthThreshold = npc.lastHealthThreshold || 1.0;
+  npc.spawnThresholdsTriggered = npc.spawnThresholdsTriggered || [];
+}
+
+/**
+ * Select random minion type based on spawn weights
+ * @returns {string} NPC type to spawn
+ */
+function selectMinionType() {
+  const roll = Math.random();
+  let cumulative = 0;
+
+  for (const [type, weight] of Object.entries(QUEEN_SPAWN_CONFIG.spawnTypes)) {
+    cumulative += weight;
+    if (roll <= cumulative) {
+      return type;
+    }
+  }
+  return 'swarm_drone'; // Fallback
+}
+
+/**
+ * Spawn minion units for a Swarm Queen
+ * @param {Object} queen - The queen spawning minions
+ * @param {number} count - Number of minions to spawn
+ * @returns {Array} Spawned NPC data for broadcasting
+ */
+function spawnQueenMinions(queen, count) {
+  initQueenSpawnData(queen);
+
+  // Remove dead minions from tracking
+  queen.spawnedMinions = queen.spawnedMinions.filter(id => activeNPCs.has(id));
+
+  // Check if at max minions
+  const canSpawn = QUEEN_SPAWN_CONFIG.maxMinions - queen.spawnedMinions.length;
+  if (canSpawn <= 0) return [];
+
+  const spawnCount = Math.min(count, canSpawn);
+  const spawned = [];
+
+  for (let i = 0; i < spawnCount; i++) {
+    const minionType = selectMinionType();
+    const typeData = NPC_TYPES[minionType];
+    if (!typeData) continue;
+
+    const minionId = `npc_${++npcIdCounter}`;
+
+    // Spawn position - emerge from queen
+    const angle = Math.random() * Math.PI * 2;
+    const dist = 40 + Math.random() * 30; // 40-70 units from queen
+    const spawnX = queen.position.x + Math.cos(angle) * dist;
+    const spawnY = queen.position.y + Math.sin(angle) * dist;
+
+    const minion = {
+      id: minionId,
+      type: minionType,
+      name: typeData.name,
+      faction: typeData.faction,
+      position: { x: spawnX, y: spawnY },
+      rotation: Math.random() * Math.PI * 2,
+      velocity: { x: 0, y: 0 },
+      hull: typeData.hull,
+      hullMax: typeData.hull,
+      shield: typeData.shield || 0,
+      shieldMax: typeData.shield || 0,
+      speed: typeData.speed,
+      aggroRange: typeData.aggroRange,
+      weaponType: typeData.weaponType,
+      weaponTier: typeData.weaponTier,
+      weaponDamage: typeData.weaponDamage,
+      weaponRange: typeData.weaponRange,
+      lootTable: typeData.lootTable,
+      creditReward: typeData.creditReward,
+      deathEffect: typeData.deathEffect || 'dissolve',
+      linkedHealth: typeData.linkedHealth || false,
+      state: 'idle',
+      target: queen.target, // Inherit queen's target
+      lastFireTime: 0,
+      damageContributors: new Map(),
+      spawnPoint: { x: spawnX, y: spawnY },
+      spawnedBy: queen.id
+    };
+
+    activeNPCs.set(minionId, minion);
+    queen.spawnedMinions.push(minionId);
+
+    spawned.push({
+      id: minionId,
+      type: minionType,
+      name: minion.name,
+      faction: minion.faction,
+      x: minion.position.x,
+      y: minion.position.y,
+      rotation: minion.rotation,
+      hull: minion.hull,
+      hullMax: minion.hullMax,
+      shield: minion.shield,
+      shieldMax: minion.shieldMax,
+      queenId: queen.id // For client-side spawn effect
+    });
+  }
+
+  queen.lastSpawnTime = Date.now();
+  return spawned;
+}
+
+/**
+ * Update Swarm Queen spawning logic
+ * Call this from the game loop for each queen with nearby players
+ * @param {Object} queen - Queen NPC
+ * @param {Array} nearbyPlayers - Players within aggro range
+ * @param {number} deltaTime - Time since last update in ms
+ * @returns {Object|null} Spawn event data if spawning occurred
+ */
+function updateSwarmQueenSpawning(queen, nearbyPlayers, deltaTime) {
+  if (!queen.spawnsUnits || queen.type !== 'swarm_queen') return null;
+
+  initQueenSpawnData(queen);
+
+  const now = Date.now();
+  const healthPercent = queen.hull / queen.hullMax;
+
+  // No players nearby - reset combat state
+  if (!nearbyPlayers || nearbyPlayers.length === 0) {
+    queen.combatStartTime = null;
+    return null;
+  }
+
+  // Start combat tracking if not started
+  if (!queen.combatStartTime) {
+    queen.combatStartTime = now;
+
+    // First target triggers initial spawn
+    const spawnCount = QUEEN_SPAWN_CONFIG.unitsPerSpawn.min +
+      Math.floor(Math.random() * (QUEEN_SPAWN_CONFIG.unitsPerSpawn.max - QUEEN_SPAWN_CONFIG.unitsPerSpawn.min + 1));
+    const spawned = spawnQueenMinions(queen, spawnCount);
+
+    if (spawned.length > 0) {
+      return { type: 'combat_start', spawned };
+    }
+  }
+
+  // Check health threshold spawns
+  for (const threshold of QUEEN_SPAWN_CONFIG.healthThresholds) {
+    if (healthPercent <= threshold && !queen.spawnThresholdsTriggered.includes(threshold)) {
+      queen.spawnThresholdsTriggered.push(threshold);
+
+      const spawnCount = QUEEN_SPAWN_CONFIG.unitsPerSpawn.min +
+        Math.floor(Math.random() * (QUEEN_SPAWN_CONFIG.unitsPerSpawn.max - QUEEN_SPAWN_CONFIG.unitsPerSpawn.min + 1));
+      const spawned = spawnQueenMinions(queen, spawnCount);
+
+      if (spawned.length > 0) {
+        return { type: 'health_threshold', threshold, spawned };
+      }
+    }
+  }
+
+  // Check time-based spawning (every 15 seconds if in combat > 10 seconds)
+  const combatDuration = now - queen.combatStartTime;
+  if (combatDuration > QUEEN_SPAWN_CONFIG.combatSpawnDelay) {
+    if (now - queen.lastSpawnTime >= QUEEN_SPAWN_CONFIG.spawnCooldown) {
+      const spawnCount = QUEEN_SPAWN_CONFIG.unitsPerSpawn.min +
+        Math.floor(Math.random() * (QUEEN_SPAWN_CONFIG.unitsPerSpawn.max - QUEEN_SPAWN_CONFIG.unitsPerSpawn.min + 1));
+      const spawned = spawnQueenMinions(queen, spawnCount);
+
+      if (spawned.length > 0) {
+        return { type: 'time_interval', spawned };
+      }
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Get all minions spawned by a queen
+ * @param {string} queenId - Queen's ID
+ * @returns {Array} List of minion NPCs
+ */
+function getQueenMinions(queenId) {
+  const queen = activeNPCs.get(queenId);
+  if (!queen || !queen.spawnedMinions) return [];
+
+  return queen.spawnedMinions
+    .filter(id => activeNPCs.has(id))
+    .map(id => activeNPCs.get(id));
+}
+
 module.exports = {
   NPC_TYPES,
   TEAM_MULTIPLIERS,
@@ -1202,5 +1626,19 @@ module.exports = {
   getDestroyedBases,
   getBasesInRange,
   // Swarm linked health
-  applySwarmLinkedDamage
+  applySwarmLinkedDamage,
+  // Swarm Queen spawning
+  updateSwarmQueenSpawning,
+  spawnQueenMinions,
+  getQueenMinions,
+  QUEEN_SPAWN_CONFIG,
+  // Formation tracking (Void faction succession)
+  formations,
+  getFormationForNpc,
+  registerFormation,
+  handleLeaderDeath,
+  scoreNpcForLeadership,
+  removeFromFormation,
+  cleanupFormations,
+  SUCCESSION_TIER_SCORES
 };

@@ -5,6 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Galaxy Miner</title>
   <link rel="stylesheet" href="css/index.css">
+  <link rel="stylesheet" href="css/ship-upgrade.css">
+  <link rel="stylesheet" href="css/wormhole-transit.css">
 </head>
 <body>
   <!-- Main game canvas -->
@@ -75,6 +77,11 @@
           <div id="shield-bar" class="bar shield"></div>
           <span class="bar-label">Shield</span>
         </div>
+        <div class="bar-container boost-bar-container">
+          <div id="boost-bar" class="bar boost"></div>
+          <span class="bar-label">Boost</span>
+          <span id="boost-status" class="boost-status"></span>
+        </div>
       </div>
 
       <!-- Radar minimap -->
@@ -85,6 +92,7 @@
       <!-- Action hints -->
       <div id="action-hints">
         <span id="mining-hint" class="hidden">Press [M] to mine</span>
+        <span id="wormhole-hint" class="hidden">Press [M] to enter wormhole</span>
       </div>
 
       <!-- Bottom buttons -->
@@ -128,6 +136,25 @@
           </svg>
           Market
         </button>
+        <button class="terminal-tab" data-tab="customize">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="10"></circle>
+            <circle cx="12" cy="12" r="4"></circle>
+            <line x1="12" y1="2" x2="12" y2="4"></line>
+            <line x1="12" y1="20" x2="12" y2="22"></line>
+            <line x1="2" y1="12" x2="4" y2="12"></line>
+            <line x1="20" y1="12" x2="22" y2="12"></line>
+          </svg>
+          Customize
+        </button>
+        <button class="terminal-tab" data-tab="relics">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polygon points="12,2 16,4 17,20 14,23 10,23 7,20 8,4"></polygon>
+            <circle cx="12" cy="10" r="2"></circle>
+            <circle cx="12" cy="16" r="1.5"></circle>
+          </svg>
+          Relics
+        </button>
       </div>
       <div class="panel-content">
         <!-- Cargo tab content -->
@@ -145,21 +172,33 @@
         <div id="market-content" class="terminal-content">
           <!-- Content rendered by MarketPanel -->
         </div>
+
+        <!-- Customize tab content -->
+        <div id="customize-content" class="terminal-content">
+          <!-- Content rendered by ShipCustomizationPanel -->
+        </div>
+
+        <!-- Relics tab content -->
+        <div id="relics-content" class="terminal-content">
+          <!-- Content rendered by RelicsPanel -->
+        </div>
       </div>
     </div>
   </div>
 
   <!-- Scripts -->
   <script src="/socket.io/socket.io.js"></script>
-  <script src="/shared/constants.js"></script>
-  <script src="/shared/physics.js"></script>
-  <script src="js/network.js"></script>
-  <script src="js/world.js"></script>
+  <script src="/shared/constants.js?v=8"></script>
+  <script src="/shared/physics.js?v=8"></script>
+  <script src="/shared/star-system.js?v=8"></script>
+  <script src="js/network.js?v=8"></script>
+  <script src="js/world.js?v=8"></script>
   <script src="js/input.js"></script>
   <script src="js/player.js"></script>
-  <script src="js/entities.js"></script>
+  <script src="js/entities.js?v=8"></script>
   <!-- Graphics system -->
   <script src="js/graphics/particles.js"></script>
+  <script src="js/graphics/star-effects.js"></script>
   <script src="js/graphics/ships.js"></script>
   <script src="js/graphics/thrust.js"></script>
   <script src="js/graphics/tractor-beam.js"></script>
@@ -171,6 +210,10 @@
   <script src="js/graphics/npc-weapons.js"></script>
   <script src="js/graphics/death-effects.js"></script>
   <script src="js/graphics/faction-bases.js"></script>
+  <script src="js/graphics/base-destruction.js"></script>
+  <script src="js/graphics/linked-damage.js"></script>
+  <script src="js/graphics/formation-succession.js"></script>
+  <script src="js/graphics/player-death.js"></script>
   <script src="js/renderer.js"></script>
   <!-- Core UI infrastructure -->
   <script src="js/ui/core/Component.js"></script>
@@ -181,9 +224,23 @@
   <script src="js/ui/icons/shapes/CrystalShape.js"></script>
   <script src="js/ui/icons/shapes/OrbitalShape.js"></script>
   <script src="js/ui/icons/shapes/MaterialShape.js"></script>
+  <script src="js/ui/icons/shapes/ShipPartShape.js"></script>
+  <script src="js/ui/icons/shapes/RelicShape.js"></script>
+  <script src="js/ui/icons/shapes/WormholeGemShape.js"></script>
   <script src="js/ui/icons/IconFactory.js"></script>
+  <!-- Ship preview system -->
+  <script src="js/ui/ship-preview/ShipPreviewCanvas.js"></script>
   <!-- UI modules -->
   <script src="js/ui/auth.js"></script>
+  <!-- Radar system modules (must load before hud.js) -->
+  <script src="js/ui/radar/base-renderer.js"></script>
+  <script src="js/ui/radar/objects.js"></script>
+  <script src="js/ui/radar/entities.js"></script>
+  <script src="js/ui/radar/combat.js"></script>
+  <script src="js/ui/radar/loot.js"></script>
+  <script src="js/ui/radar/tooltips.js"></script>
+  <script src="js/ui/radar/advanced.js"></script>
+  <script src="js/ui/radar/index.js"></script>
   <script src="js/ui/hud.js"></script>
   <script src="js/ui/inventory.js"></script>
   <script src="js/ui/marketplace.js"></script>
@@ -192,6 +249,10 @@
   <!-- New panels -->
   <script src="js/ui/panels/CargoPanel.js"></script>
   <script src="js/ui/panels/MarketPanel.js"></script>
+  <script src="js/ui/panels/ShipCustomizationPanel.js"></script>
+  <script src="js/ui/panels/ShipUpgradePanel.js"></script>
+  <script src="js/ui/panels/RelicsPanel.js"></script>
+  <script src="js/ui/WormholeTransitUI.js"></script>
   <script src="js/ui/terminal.js"></script>
   <script src="js/ui/emote-wheel.js"></script>
   <script src="js/game.js"></script>

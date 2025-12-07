@@ -20,6 +20,28 @@ db.pragma('foreign_keys = ON');
 const schema = fs.readFileSync(SCHEMA_PATH, 'utf8');
 db.exec(schema);
 
+// Run migrations for existing databases
+// Add ship_color_id column if it doesn't exist
+try {
+  db.exec(`ALTER TABLE ships ADD COLUMN ship_color_id TEXT DEFAULT 'green'`);
+} catch (e) {
+  // Column already exists, ignore error
+}
+
+// Add energy_core_tier column if it doesn't exist
+try {
+  db.exec(`ALTER TABLE ships ADD COLUMN energy_core_tier INTEGER DEFAULT 1`);
+} catch (e) {
+  // Column already exists, ignore error
+}
+
+// Add hull_tier column if it doesn't exist
+try {
+  db.exec(`ALTER TABLE ships ADD COLUMN hull_tier INTEGER DEFAULT 1`);
+} catch (e) {
+  // Column already exists, ignore error
+}
+
 // Prepared statements for common operations
 const statements = {
   // Users
@@ -65,6 +87,8 @@ const statements = {
       mining_tier = COALESCE(?, mining_tier),
       cargo_tier = COALESCE(?, cargo_tier),
       radar_tier = COALESCE(?, radar_tier),
+      energy_core_tier = COALESCE(?, energy_core_tier),
+      hull_tier = COALESCE(?, hull_tier),
       updated_at = CURRENT_TIMESTAMP
     WHERE user_id = ?
   `),
@@ -74,6 +98,17 @@ const statements = {
       position_x = ?, position_y = ?,
       velocity_x = 0, velocity_y = 0,
       updated_at = CURRENT_TIMESTAMP
+    WHERE user_id = ?
+  `),
+  setShipPosition: db.prepare(`
+    UPDATE ships SET
+      position_x = ?, position_y = ?,
+      current_sector_x = ?, current_sector_y = ?,
+      updated_at = CURRENT_TIMESTAMP
+    WHERE user_id = ?
+  `),
+  updateShipColor: db.prepare(`
+    UPDATE ships SET ship_color_id = ?, updated_at = CURRENT_TIMESTAMP
     WHERE user_id = ?
   `),
 
@@ -185,7 +220,7 @@ const statements = {
     SELECT * FROM relics WHERE user_id = ? ORDER BY obtained_at DESC
   `),
   hasRelic: db.prepare(`
-    SELECT 1 FROM relics WHERE user_id = ? AND relic_type = ?
+    SELECT 1 FROM relics WHERE user_id = ? AND UPPER(relic_type) = UPPER(?)
   `),
   addRelic: db.prepare(`
     INSERT OR IGNORE INTO relics (user_id, relic_type) VALUES (?, ?)
@@ -242,9 +277,183 @@ const purchaseListing = db.transaction((buyerId, listingId, quantity) => {
   return { success: true, cost: totalCost };
 });
 
+/**
+ * Perform ship upgrade with resource deduction (atomic transaction)
+ * @param {number} userId - User ID
+ * @param {string} component - Component key (engine, weapon, shield, etc.)
+ * @param {Object} requirements - { credits: number, resources: { RESOURCE_TYPE: quantity } }
+ * @param {number} maxTier - Maximum tier (default 5)
+ * @returns {Object} { success: boolean, error?: string, newTier?: number, creditsSpent?: number }
+ */
+const performUpgrade = db.transaction((userId, component, requirements, maxTier = 5) => {
+  // 1. Get ship and verify current tier
+  const ship = statements.getShipByUserId.get(userId);
+  if (!ship) return { success: false, error: 'Ship not found' };
+
+  // Map component key to database column name
+  const dbColumnMap = {
+    'engine': 'engine_tier',
+    'weapon': 'weapon_tier',
+    'shield': 'shield_tier',
+    'mining': 'mining_tier',
+    'cargo': 'cargo_tier',
+    'radar': 'radar_tier',
+    'energy_core': 'energy_core_tier',
+    'hull': 'hull_tier'
+  };
+
+  const dbColumn = dbColumnMap[component];
+  if (!dbColumn) return { success: false, error: 'Invalid component' };
+
+  const currentTier = ship[dbColumn] || 1;
+  if (currentTier >= maxTier) return { success: false, error: 'Already at max tier' };
+
+  // 2. Check credits
+  const shipCredits = ship.credits || 0;
+  if (shipCredits < requirements.credits) {
+    return { success: false, error: `Not enough credits (need ${requirements.credits}, have ${shipCredits})` };
+  }
+
+  // 3. Check all resources
+  const inventory = statements.getInventory.all(userId);
+  const inventoryMap = new Map(inventory.map(i => [i.resource_type, i.quantity]));
+
+  for (const [resourceType, required] of Object.entries(requirements.resources || {})) {
+    const available = inventoryMap.get(resourceType) || 0;
+    if (available < required) {
+      return {
+        success: false,
+        error: `Need ${required} ${resourceType} (have ${available})`
+      };
+    }
+  }
+
+  // 4. Deduct credits
+  statements.updateShipCredits.run(shipCredits - requirements.credits, userId);
+
+  // 5. Deduct resources
+  for (const [resourceType, quantity] of Object.entries(requirements.resources || {})) {
+    const current = inventoryMap.get(resourceType);
+    const newQuantity = current - quantity;
+    console.log(`[INVENTORY] User ${userId} ${resourceType}: ${current} -> ${newQuantity} (upgrade -${quantity})`);
+    if (newQuantity <= 0) {
+      // Remove entry entirely
+      db.prepare('DELETE FROM inventory WHERE user_id = ? AND resource_type = ?')
+        .run(userId, resourceType);
+    } else {
+      statements.setInventoryQuantity.run(newQuantity, userId, resourceType);
+    }
+  }
+
+  // 6. Apply upgrade - build params array for upgradeShipComponent
+  // Order: engine, weapon_type, weapon, shield, mining, cargo, radar, energy_core, hull, user_id
+  const nextTier = currentTier + 1;
+  const updateParams = [null, null, null, null, null, null, null, null, null, userId];
+  const componentToIndex = {
+    'engine': 0,
+    'weapon': 2,
+    'shield': 3,
+    'mining': 4,
+    'cargo': 5,
+    'radar': 6,
+    'energy_core': 7,
+    'hull': 8
+  };
+  updateParams[componentToIndex[component]] = nextTier;
+  statements.upgradeShipComponent.run(...updateParams);
+
+  return { success: true, newTier: nextTier, creditsSpent: requirements.credits };
+});
+
+/**
+ * Safely update ship credits - prevents null/NaN from ever being written
+ * @param {number} credits - New credit value
+ * @param {number} userId - User ID
+ * @returns {Object} Result of the update
+ */
+function safeUpdateCredits(credits, userId) {
+  // Validate credits is a valid number - if invalid, don't update (preserve current value)
+  if (credits === null || credits === undefined || Number.isNaN(credits) || typeof credits !== 'number') {
+    console.warn(`safeUpdateCredits: Invalid credits value (${credits}) for user ${userId}, skipping update`);
+    return { changes: 0 }; // Return empty result, don't update
+  }
+
+  const safeCredits = Math.max(0, Math.floor(credits)); // Ensure non-negative integer
+  return statements.updateShipCredits.run(safeCredits, userId);
+}
+
+/**
+ * Safely get credits from a ship object, never returns null
+ * @param {Object|null} ship - Ship object from database
+ * @returns {number} Credits value, defaults to 0
+ */
+function getSafeCredits(ship) {
+  if (!ship) return 0;
+  const credits = ship.credits;
+  if (credits === null || credits === undefined || Number.isNaN(credits)) {
+    return 0;
+  }
+  return credits;
+}
+
+/**
+ * Safely add resources to inventory - validates inputs before updating
+ * @param {number} userId - User ID
+ * @param {string} resourceType - Resource type string
+ * @param {number} quantity - Quantity to add (must be positive)
+ * @returns {Object} Result of the update, or { changes: 0 } if invalid
+ */
+function safeUpsertInventory(userId, resourceType, quantity) {
+  // Validate userId
+  if (!userId || typeof userId !== 'number') {
+    console.warn(`[INVENTORY] Invalid userId (${userId}), skipping`);
+    return { changes: 0 };
+  }
+
+  // Validate resourceType
+  if (!resourceType || typeof resourceType !== 'string') {
+    console.warn(`[INVENTORY] Invalid resourceType (${resourceType}) for user ${userId}, skipping`);
+    return { changes: 0 };
+  }
+
+  // Validate quantity - MUST be positive to add resources
+  if (quantity === null || quantity === undefined || Number.isNaN(quantity) || typeof quantity !== 'number' || quantity <= 0) {
+    console.warn(`[INVENTORY] Invalid quantity (${quantity}) for ${resourceType}, user ${userId}, skipping`);
+    return { changes: 0 };
+  }
+
+  const safeQuantity = Math.floor(quantity); // Ensure integer
+
+  // Get current quantity before update for logging
+  const before = statements.getInventoryItem.get(userId, resourceType);
+  const beforeQty = before ? before.quantity : 0;
+
+  const result = statements.upsertInventory.run(userId, resourceType, safeQuantity);
+
+  // Verify the update and log
+  const after = statements.getInventoryItem.get(userId, resourceType);
+  const afterQty = after ? after.quantity : 0;
+
+  // CRITICAL: Detect if quantity unexpectedly decreased
+  if (afterQty < beforeQty) {
+    console.error(`[INVENTORY CRITICAL] User ${userId} ${resourceType}: quantity DECREASED from ${beforeQty} to ${afterQty}! Adding ${safeQuantity}`);
+  }
+
+  // Log significant changes for debugging
+  if (beforeQty !== afterQty) {
+    console.log(`[INVENTORY] User ${userId} ${resourceType}: ${beforeQty} -> ${afterQty} (+${safeQuantity})`);
+  }
+
+  return result;
+}
+
 module.exports = {
   db,
   statements,
   createUserWithShip,
-  purchaseListing
+  purchaseListing,
+  performUpgrade,
+  safeUpdateCredits,
+  getSafeCredits,
+  safeUpsertInventory
 };

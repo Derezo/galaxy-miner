@@ -1,11 +1,12 @@
 const config = require('./config');
 const auth = require('./auth');
-const { statements } = require('./database');
+const { statements, safeUpdateCredits, getSafeCredits, performUpgrade, safeUpsertInventory } = require('./database');
 const mining = require('./game/mining');
 const combat = require('./game/combat');
 const marketplace = require('./game/marketplace');
 const npc = require('./game/npc');
 const engine = require('./game/engine');
+const wormhole = require('./game/wormhole');
 
 // Track connected players: socketId -> { userId, username, position, etc. }
 const connectedPlayers = new Map();
@@ -133,7 +134,8 @@ module.exports = function(io) {
         rotation: data.rotation,
         hull: player.hull,
         shield: player.shield,
-        status: getPlayerStatus(authenticatedUserId)
+        status: getPlayerStatus(authenticatedUserId),
+        colorId: player.colorId || 'green'
       });
     });
 
@@ -159,24 +161,41 @@ module.exports = function(io) {
 
       // Hit detection for NPCs
       const weaponTier = player.weaponTier || 1;
-      const weaponRange = config.BASE_WEAPON_RANGE * Math.pow(config.TIER_MULTIPLIER, weaponTier - 1);
+      // Use per-tier weapon ranges that match client visual projectile distance
+      const weaponRange = (config.WEAPON_RANGES && config.WEAPON_RANGES[weaponTier])
+        || config.BASE_WEAPON_RANGE * Math.pow(config.TIER_MULTIPLIER, weaponTier - 1);
       const fireDirection = data.direction || player.rotation;
 
       // Get all NPCs in range
       const npcsInRange = npc.getNPCsInRange(player.position, weaponRange);
+      const projectileSpeed = config.PROJECTILE_SPEED || 800;
 
       for (const npcData of npcsInRange) {
-        // Calculate angle to NPC
+        // Calculate distance to NPC
         const dx = npcData.position.x - player.position.x;
         const dy = npcData.position.y - player.position.y;
-        const angleToNpc = Math.atan2(dy, dx);
+        const dist = Math.sqrt(dx * dx + dy * dy);
 
-        // Check if NPC is in firing cone (within ~15 degrees)
+        // Calculate projectile travel time to current NPC position
+        const travelTime = dist / projectileSpeed;
+
+        // Predict NPC position at impact time (account for NPC movement)
+        const npcVelocity = npcData.velocity || { x: 0, y: 0 };
+        const predictedX = npcData.position.x + npcVelocity.x * travelTime;
+        const predictedY = npcData.position.y + npcVelocity.y * travelTime;
+
+        // Calculate angle to PREDICTED position
+        const predictedDx = predictedX - player.position.x;
+        const predictedDy = predictedY - player.position.y;
+        const angleToNpc = Math.atan2(predictedDy, predictedDx);
+
+        // Check if NPC is in firing cone
         let angleDiff = angleToNpc - fireDirection;
         while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
         while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
 
-        const hitAngle = 0.26; // ~15 degrees in radians
+        // Slightly wider hit angle for prediction tolerance (~17 degrees)
+        const hitAngle = 0.30;
         if (Math.abs(angleDiff) <= hitAngle) {
           // Hit! Apply damage to NPC
           const result = engine.playerAttackNPC(
@@ -197,36 +216,40 @@ module.exports = function(io) {
 
             // If NPC was destroyed, give loot and credits to player
             if (result.destroyed) {
-              // Award credit reward (with team bonus)
-              if (result.creditsPerPlayer > 0) {
-                const ship = statements.getShipByUserId.get(authenticatedUserId);
-                if (ship) {
-                  statements.updateShipCredits.run(ship.credits + result.creditsPerPlayer, authenticatedUserId);
+              try {
+                // Award credit reward (with team bonus)
+                if (result.creditsPerPlayer > 0) {
+                  const ship = statements.getShipByUserId.get(authenticatedUserId);
+                  const currentCredits = getSafeCredits(ship);
+                  safeUpdateCredits(currentCredits + result.creditsPerPlayer, authenticatedUserId);
                 }
-              }
 
-              // Add loot to player inventory
-              if (result.loot) {
-                for (const item of result.loot) {
-                  statements.upsertInventory.run(authenticatedUserId, item.resourceType, item.quantity);
+                // Add loot to player inventory using safe wrapper
+                if (result.loot) {
+                  for (const item of result.loot) {
+                    safeUpsertInventory(authenticatedUserId, item.resourceType, item.quantity);
+                  }
                 }
+
+                // Send updated inventory and credits
+                const inventory = statements.getInventory.all(authenticatedUserId);
+                const updatedShip = statements.getShipByUserId.get(authenticatedUserId);
+                socket.emit('inventory:update', {
+                  inventory,
+                  credits: getSafeCredits(updatedShip)
+                });
+
+                // Notify player of rewards
+                socket.emit('npc:reward', {
+                  credits: result.creditsPerPlayer,
+                  teamMultiplier: result.teamMultiplier,
+                  participantCount: result.participantCount,
+                  loot: result.loot
+                });
+              } catch (err) {
+                console.error(`[COMBAT REWARD ERROR] User ${authenticatedUserId} NPC loot:`, err.message);
+                socket.emit('error:generic', { message: 'Failed to award combat rewards. Please check your inventory.' });
               }
-
-              // Send updated inventory and credits
-              const inventory = statements.getInventory.all(authenticatedUserId);
-              const updatedShip = statements.getShipByUserId.get(authenticatedUserId);
-              socket.emit('inventory:update', {
-                inventory,
-                credits: updatedShip ? updatedShip.credits : 0
-              });
-
-              // Notify player of rewards
-              socket.emit('npc:reward', {
-                credits: result.creditsPerPlayer,
-                teamMultiplier: result.teamMultiplier,
-                participantCount: result.participantCount,
-                loot: result.loot
-              });
             }
           }
           break; // Only hit one NPC per shot
@@ -236,9 +259,18 @@ module.exports = function(io) {
       // Hit detection for faction bases (only if no NPC was hit)
       const basesInRange = npc.getBasesInRange(player.position, weaponRange);
       for (const baseData of basesInRange) {
-        // Calculate angle to base center
+        // Calculate distance and angle to base center
         const dx = baseData.x - player.position.x;
         const dy = baseData.y - player.position.y;
+        const distToBase = Math.sqrt(dx * dx + dy * dy);
+        const baseSize = baseData.size || 100;
+
+        // Effective distance subtracts base size (edge of base, not center)
+        const effectiveDistance = distToBase - baseSize;
+
+        // Skip if actually out of weapon range (accounting for size)
+        if (effectiveDistance > weaponRange) continue;
+
         const angleToBase = Math.atan2(dy, dx);
 
         // Bases are larger targets - use wider hit angle based on size
@@ -247,8 +279,7 @@ module.exports = function(io) {
         while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
 
         // Calculate angular size of base from player's perspective
-        const distToBase = Math.sqrt(dx * dx + dy * dy);
-        const baseAngularSize = Math.atan2(baseData.size, distToBase);
+        const baseAngularSize = Math.atan2(baseSize, distToBase);
         const hitAngle = Math.max(0.26, baseAngularSize); // At least 15 degrees
 
         if (Math.abs(angleDiff) <= hitAngle) {
@@ -272,30 +303,34 @@ module.exports = function(io) {
 
             // If base was destroyed, give rewards to player
             if (result.destroyed) {
-              // Award credit reward (with team bonus)
-              if (result.creditsPerPlayer > 0) {
-                const ship = statements.getShipByUserId.get(authenticatedUserId);
-                if (ship) {
-                  statements.updateShipCredits.run(ship.credits + result.creditsPerPlayer, authenticatedUserId);
+              try {
+                // Award credit reward (with team bonus)
+                if (result.creditsPerPlayer > 0) {
+                  const ship = statements.getShipByUserId.get(authenticatedUserId);
+                  const currentCredits = getSafeCredits(ship);
+                  safeUpdateCredits(currentCredits + result.creditsPerPlayer, authenticatedUserId);
                 }
+
+                // Send updated inventory and credits
+                const inventory = statements.getInventory.all(authenticatedUserId);
+                const updatedShip = statements.getShipByUserId.get(authenticatedUserId);
+                socket.emit('inventory:update', {
+                  inventory,
+                  credits: getSafeCredits(updatedShip)
+                });
+
+                // Notify player of rewards
+                socket.emit('base:reward', {
+                  credits: result.creditsPerPlayer,
+                  teamMultiplier: result.teamMultiplier,
+                  participantCount: result.participantCount,
+                  baseName: baseData.name,
+                  faction: baseData.faction
+                });
+              } catch (err) {
+                console.error(`[COMBAT REWARD ERROR] User ${authenticatedUserId} base loot:`, err.message);
+                socket.emit('error:generic', { message: 'Failed to award base destruction rewards. Please check your inventory.' });
               }
-
-              // Send updated inventory and credits
-              const inventory = statements.getInventory.all(authenticatedUserId);
-              const updatedShip = statements.getShipByUserId.get(authenticatedUserId);
-              socket.emit('inventory:update', {
-                inventory,
-                credits: updatedShip ? updatedShip.credits : 0
-              });
-
-              // Notify player of rewards
-              socket.emit('base:reward', {
-                credits: result.creditsPerPlayer,
-                teamMultiplier: result.teamMultiplier,
-                participantCount: result.participantCount,
-                baseName: baseData.name,
-                faction: baseData.faction
-              });
             }
           }
           break; // Only hit one base per shot
@@ -362,7 +397,7 @@ module.exports = function(io) {
             const ship = statements.getShipByUserId.get(authenticatedUserId);
             socket.emit('inventory:update', {
               inventory: progress.inventory,
-              credits: ship ? ship.credits : 0
+              credits: getSafeCredits(ship)
             });
             // Notify nearby players of depletion
             broadcastToNearby(socket, player, 'world:update', {
@@ -378,7 +413,8 @@ module.exports = function(io) {
           }
         }, 100);
       } else {
-        socket.emit('mining:error', { message: result.error });
+        console.log('[Socket] Mining error for user', authenticatedUserId, ':', result.error, 'objectId:', data.objectId);
+        socket.emit('mining:error', { message: result.error, objectId: data.objectId });
       }
     });
 
@@ -436,7 +472,7 @@ module.exports = function(io) {
         const ship = statements.getShipByUserId.get(authenticatedUserId);
         socket.emit('inventory:update', {
           inventory: result.inventory,
-          credits: ship ? ship.credits : 0
+          credits: getSafeCredits(ship)
         });
         // Notify all players of new listing
         io.emit('market:update', { action: 'new_listing' });
@@ -504,7 +540,7 @@ module.exports = function(io) {
         const ship = statements.getShipByUserId.get(authenticatedUserId);
         socket.emit('inventory:update', {
           inventory: result.inventory,
-          credits: ship ? ship.credits : 0
+          credits: getSafeCredits(ship)
         });
         io.emit('market:update', { action: 'cancelled' });
       } else {
@@ -531,59 +567,99 @@ module.exports = function(io) {
       socket.emit('market:myListings', { listings });
     });
 
-    // Ship upgrade
+    // Ship upgrade (with resource requirements)
     socket.on('ship:upgrade', (data) => {
-      if (!authenticatedUserId) return;
+      console.log('[UPGRADE] Received upgrade request:', data, 'from user:', authenticatedUserId);
+      try {
+        if (!authenticatedUserId) {
+          socket.emit('upgrade:error', { message: 'Not authenticated' });
+          return;
+        }
 
-      const player = connectedPlayers.get(socket.id);
-      if (!player) return;
+        const player = connectedPlayers.get(socket.id);
+        if (!player) {
+          socket.emit('upgrade:error', { message: 'Player not found' });
+          return;
+        }
 
-      const ship = statements.getShipByUserId.get(authenticatedUserId);
-      if (!ship) return;
+        const ship = statements.getShipByUserId.get(authenticatedUserId);
+        if (!ship) {
+          socket.emit('upgrade:error', { message: 'Ship data not found' });
+          return;
+        }
 
-      const { component } = data;
-      const validComponents = ['engine', 'weapon', 'shield', 'mining', 'cargo', 'radar'];
+        const { component } = data;
+        const validComponents = ['engine', 'weapon', 'shield', 'mining', 'cargo', 'radar', 'energy_core', 'hull'];
 
-      if (!validComponents.includes(component)) {
-        socket.emit('upgrade:error', { message: 'Invalid component' });
-        return;
+        if (!validComponents.includes(component)) {
+          socket.emit('upgrade:error', { message: 'Invalid component' });
+          return;
+        }
+
+        // Get current tier using the correct column name
+        const dbColumnMap = {
+          'engine': 'engine_tier',
+          'weapon': 'weapon_tier',
+          'shield': 'shield_tier',
+          'mining': 'mining_tier',
+          'cargo': 'cargo_tier',
+          'radar': 'radar_tier',
+          'energy_core': 'energy_core_tier',
+          'hull': 'hull_tier'
+        };
+        const currentTier = ship[dbColumnMap[component]] || 1;
+
+        if (currentTier >= config.MAX_TIER) {
+          socket.emit('upgrade:error', { message: 'Already at max tier' });
+          return;
+        }
+
+        // Get requirements from UPGRADE_REQUIREMENTS
+        const nextTier = currentTier + 1;
+        const requirements = config.UPGRADE_REQUIREMENTS[component]?.[nextTier];
+
+        if (!requirements) {
+          socket.emit('upgrade:error', { message: 'Invalid upgrade tier' });
+          return;
+        }
+
+        // Use transaction to perform upgrade atomically (checks credits + resources)
+        const result = performUpgrade(authenticatedUserId, component, requirements, config.MAX_TIER);
+
+        if (!result.success) {
+          socket.emit('upgrade:error', { message: result.error });
+          return;
+        }
+
+        // Get updated ship and inventory
+        const updatedShip = statements.getShipByUserId.get(authenticatedUserId);
+        const updatedInventory = statements.getInventory.all(authenticatedUserId);
+
+        // Update player state cache
+        player.credits = getSafeCredits(updatedShip);
+        if (component === 'radar') player.radarTier = result.newTier;
+        if (component === 'mining') player.miningTier = result.newTier;
+        if (component === 'weapon') player.weaponTier = result.newTier;
+        if (component === 'energy_core') player.energyCoreTier = result.newTier;
+        if (component === 'hull') player.hullTier = result.newTier;
+
+        // Send upgrade success
+        socket.emit('upgrade:success', {
+          component,
+          newTier: result.newTier,
+          credits: player.credits
+        });
+
+        // Also send updated inventory since resources were consumed
+        socket.emit('inventory:update', {
+          inventory: updatedInventory,
+          credits: player.credits
+        });
+      } catch (err) {
+        console.error(`[UPGRADE ERROR] User ${authenticatedUserId} upgrading ${data?.component}:`, err.message);
+        console.error(err.stack);
+        socket.emit('upgrade:error', { message: 'Upgrade failed due to a server error. Please try again.' });
       }
-
-      // Get current tier
-      const currentTier = ship[`${component}_tier`];
-      if (currentTier >= config.MAX_TIER) {
-        socket.emit('upgrade:error', { message: 'Already at max tier' });
-        return;
-      }
-
-      // Check cost
-      const nextTier = currentTier + 1;
-      const cost = config.UPGRADE_COSTS[nextTier];
-
-      if (ship.credits < cost) {
-        socket.emit('upgrade:error', { message: 'Not enough credits' });
-        return;
-      }
-
-      // Apply upgrade
-      const updateParams = [null, null, null, null, null, null, null, authenticatedUserId];
-      const componentIndex = validComponents.indexOf(component);
-      updateParams[componentIndex] = nextTier;
-
-      statements.upgradeShipComponent.run(...updateParams);
-      statements.updateShipCredits.run(ship.credits - cost, authenticatedUserId);
-
-      // Update player state
-      player.credits = ship.credits - cost;
-      if (component === 'radar') player.radarTier = nextTier;
-      if (component === 'mining') player.miningTier = nextTier;
-      if (component === 'weapon') player.weaponTier = nextTier;
-
-      socket.emit('upgrade:success', {
-        component,
-        newTier: nextTier,
-        credits: ship.credits - cost
-      });
     });
 
     // Get ship data
@@ -600,9 +676,50 @@ module.exports = function(io) {
           mining_tier: ship.mining_tier,
           cargo_tier: ship.cargo_tier,
           radar_tier: ship.radar_tier,
-          credits: ship.credits
+          energy_core_tier: ship.energy_core_tier || 1,
+          hull_tier: ship.hull_tier || 1,
+          credits: ship.credits,
+          ship_color_id: ship.ship_color_id || 'green'
         });
       }
+    });
+
+    // Ship color customization
+    socket.on('ship:setColor', (data) => {
+      if (!authenticatedUserId) return;
+
+      const player = connectedPlayers.get(socket.id);
+      if (!player) return;
+
+      const { colorId } = data;
+
+      // Validate color ID against available options
+      const validColors = config.PLAYER_COLOR_OPTIONS.map(c => c.id);
+      if (!validColors.includes(colorId)) {
+        socket.emit('ship:colorError', { message: 'Invalid color selection' });
+        return;
+      }
+
+      // Update database
+      try {
+        statements.updateShipColor.run(colorId, authenticatedUserId);
+      } catch (err) {
+        console.error(`[COLOR ERROR] User ${authenticatedUserId} setting color:`, err.message);
+        socket.emit('ship:colorError', { message: 'Failed to save color preference' });
+        return;
+      }
+
+      // Update player state
+      player.colorId = colorId;
+
+      // Confirm to the player
+      socket.emit('ship:colorChanged', { colorId });
+
+      // Broadcast to nearby players
+      broadcastToNearby(socket, player, 'player:colorChanged', {
+        playerId: authenticatedUserId,
+        colorId
+      });
     });
 
     // Emotes: Send emote to nearby players
@@ -641,13 +758,15 @@ module.exports = function(io) {
         return;
       }
 
-      // Check range (use mining range)
+      // Check range (use mining range, subtract wreckage size like mining does)
       const dx = wreckage.position.x - player.position.x;
       const dy = wreckage.position.y - player.position.y;
       const dist = Math.sqrt(dx * dx + dy * dy);
+      const wreckageSize = wreckage.size || 20; // Standard wreckage size
+      const effectiveDistance = dist - wreckageSize;
       const collectRange = config.MINING_RANGE || 100;
 
-      if (dist > collectRange) {
+      if (effectiveDistance > collectRange) {
         socket.emit('loot:error', { message: 'Too far from wreckage' });
         return;
       }
@@ -678,27 +797,12 @@ module.exports = function(io) {
         });
 
         // Set up collection progress check
+        // Once collection starts, it continues regardless of movement (beam locks onto target)
         const checkCollection = setInterval(() => {
           const currentPlayer = connectedPlayers.get(socket.id);
           if (!currentPlayer) {
             clearInterval(checkCollection);
             engine.cancelWreckageCollection(wreckageId, authenticatedUserId);
-            return;
-          }
-
-          // Check if still in range
-          const cdx = wreckage.position.x - currentPlayer.position.x;
-          const cdy = wreckage.position.y - currentPlayer.position.y;
-          const cdist = Math.sqrt(cdx * cdx + cdy * cdy);
-
-          if (cdist > collectRange * 1.5) {
-            clearInterval(checkCollection);
-            engine.cancelWreckageCollection(wreckageId, authenticatedUserId);
-            socket.emit('loot:cancelled', { reason: 'Moved out of range' });
-            setPlayerStatus(authenticatedUserId, 'idle');
-            broadcastToNearby(socket, currentPlayer, 'loot:playerStopped', {
-              playerId: authenticatedUserId
-            });
             return;
           }
 
@@ -728,7 +832,7 @@ module.exports = function(io) {
             const ship = statements.getShipByUserId.get(authenticatedUserId);
             socket.emit('inventory:update', {
               inventory,
-              credits: ship ? ship.credits : 0
+              credits: getSafeCredits(ship)
             });
 
             // Clear player status
@@ -792,6 +896,135 @@ module.exports = function(io) {
       });
     });
 
+    // Wormhole: Enter wormhole
+    socket.on('wormhole:enter', (data) => {
+      if (!authenticatedUserId) return;
+
+      const player = connectedPlayers.get(socket.id);
+      if (!player) return;
+
+      const { wormholeId } = data;
+
+      // Create player object with required properties
+      const playerData = {
+        id: authenticatedUserId,
+        x: player.position.x,
+        y: player.position.y
+      };
+
+      const result = wormhole.enterWormhole(playerData, wormholeId);
+
+      if (result.success) {
+        // Set player status to show they're in wormhole
+        setPlayerStatus(authenticatedUserId, 'wormhole');
+
+        socket.emit('wormhole:entered', {
+          wormholeId,
+          destinations: result.destinations
+        });
+
+        // Broadcast to nearby players that player entered wormhole
+        broadcastToNearby(socket, player, 'wormhole:playerEntered', {
+          playerId: authenticatedUserId,
+          wormholeId
+        });
+      } else {
+        socket.emit('wormhole:error', { message: result.error });
+      }
+    });
+
+    // Wormhole: Select destination
+    socket.on('wormhole:selectDestination', (data) => {
+      if (!authenticatedUserId) return;
+
+      const player = connectedPlayers.get(socket.id);
+      if (!player) return;
+
+      const { destinationId } = data;
+
+      const result = wormhole.selectDestination(authenticatedUserId, destinationId);
+
+      if (result.success) {
+        socket.emit('wormhole:transitStarted', {
+          destinationId,
+          destination: result.destination,
+          duration: result.duration
+        });
+
+        // Broadcast transit start to nearby players
+        broadcastToNearby(socket, player, 'wormhole:playerTransiting', {
+          playerId: authenticatedUserId,
+          destinationId
+        });
+
+        // Set up transit completion check
+        setTimeout(() => {
+          const completeResult = wormhole.completeTransit(authenticatedUserId);
+
+          if (completeResult.success) {
+            // Update player position
+            player.position = { x: completeResult.position.x, y: completeResult.position.y };
+            player.velocity = { x: 0, y: 0 };
+
+            // Save new position to database
+            const sectorX = Math.floor(completeResult.position.x / config.SECTOR_SIZE);
+            const sectorY = Math.floor(completeResult.position.y / config.SECTOR_SIZE);
+            statements.updateShipPosition.run(
+              completeResult.position.x, completeResult.position.y, player.rotation,
+              0, 0,
+              sectorX, sectorY,
+              authenticatedUserId
+            );
+
+            // Clear player status
+            setPlayerStatus(authenticatedUserId, 'idle');
+
+            socket.emit('wormhole:exitComplete', {
+              position: completeResult.position,
+              wormholeId: completeResult.wormholeId
+            });
+
+            // Broadcast exit to nearby players at new location
+            broadcastToNearby(socket, player, 'wormhole:playerExited', {
+              playerId: authenticatedUserId,
+              x: completeResult.position.x,
+              y: completeResult.position.y
+            });
+          }
+        }, wormhole.TRANSIT_DURATION);
+      } else {
+        socket.emit('wormhole:error', { message: result.error });
+      }
+    });
+
+    // Wormhole: Cancel transit
+    socket.on('wormhole:cancel', () => {
+      if (!authenticatedUserId) return;
+
+      const player = connectedPlayers.get(socket.id);
+      if (!player) return;
+
+      const result = wormhole.cancelTransit(authenticatedUserId, 'Cancelled by player');
+
+      if (result.success) {
+        setPlayerStatus(authenticatedUserId, 'idle');
+        socket.emit('wormhole:cancelled', { reason: result.reason });
+
+        // Broadcast cancellation to nearby players
+        broadcastToNearby(socket, player, 'wormhole:playerCancelled', {
+          playerId: authenticatedUserId
+        });
+      }
+    });
+
+    // Wormhole: Get transit progress
+    socket.on('wormhole:getProgress', () => {
+      if (!authenticatedUserId) return;
+
+      const progress = wormhole.getTransitProgress(authenticatedUserId);
+      socket.emit('wormhole:progress', progress);
+    });
+
     // Ping for latency measurement
     socket.on('ping', (timestamp) => {
       socket.emit('pong', timestamp);
@@ -833,7 +1066,8 @@ module.exports = function(io) {
       radarTier: playerData.radar_tier,
       miningTier: playerData.mining_tier,
       weaponTier: playerData.weapon_tier,
-      credits: playerData.credits
+      credits: playerData.credits,
+      colorId: playerData.ship_color_id || 'green'
     };
 
     connectedPlayers.set(socket.id, player);
@@ -849,7 +1083,8 @@ module.exports = function(io) {
       y: player.position.y,
       rotation: player.rotation,
       hull: player.hull,
-      shield: player.shield
+      shield: player.shield,
+      colorId: player.colorId || 'green'
     });
   }
 
@@ -858,13 +1093,17 @@ module.exports = function(io) {
     const player = connectedPlayers.get(socket.id);
     if (player) {
       // Save final position
-      statements.updateShipPosition.run(
-        player.position.x, player.position.y, player.rotation,
-        player.velocity.x, player.velocity.y,
-        Math.floor(player.position.x / config.SECTOR_SIZE),
-        Math.floor(player.position.y / config.SECTOR_SIZE),
-        userId
-      );
+      try {
+        statements.updateShipPosition.run(
+          player.position.x, player.position.y, player.rotation,
+          player.velocity.x, player.velocity.y,
+          Math.floor(player.position.x / config.SECTOR_SIZE),
+          Math.floor(player.position.y / config.SECTOR_SIZE),
+          userId
+        );
+      } catch (err) {
+        console.error(`[DISCONNECT ERROR] Failed to save position for user ${userId}:`, err.message);
+      }
 
       // Notify others
       broadcastToNearby(socket, player, 'player:leave', userId);
@@ -880,6 +1119,9 @@ module.exports = function(io) {
       clearTimeout(statusData.timeout);
     }
     playerStatus.delete(userId);
+
+    // Clean up any active wormhole transit
+    wormhole.cleanupPlayer(userId);
   }
 
   // Helper: Set player status with optional timeout
@@ -932,67 +1174,76 @@ module.exports = function(io) {
       resources: [],
       components: [],
       relics: [],
-      buffs: []
+      buffs: [],
+      errors: []
     };
 
     for (const item of contents) {
-      switch (item.type) {
-        case 'credits':
-          // Add credits to player
-          const ship = statements.getShipByUserId.get(userId);
-          if (ship) {
-            statements.updateShipCredits.run(ship.credits + item.amount, userId);
-            results.credits += item.amount;
-          }
-          break;
+      try {
+        switch (item.type) {
+          case 'credits':
+            // Add credits to player (only if amount is valid)
+            if (typeof item.amount === 'number' && item.amount > 0 && !Number.isNaN(item.amount)) {
+              const ship = statements.getShipByUserId.get(userId);
+              const currentCredits = getSafeCredits(ship);
+              safeUpdateCredits(currentCredits + item.amount, userId);
+              results.credits += item.amount;
+            }
+            break;
 
-        case 'resource':
-          // Add resource to inventory
-          statements.upsertInventory.run(userId, item.resourceType, item.quantity);
-          results.resources.push({
-            type: item.resourceType,
-            quantity: item.quantity
-          });
-          break;
+          case 'resource':
+            // Add resource to inventory using safe wrapper
+            const resourceResult = safeUpsertInventory(userId, item.resourceType, item.quantity);
+            if (resourceResult.changes > 0) {
+              results.resources.push({
+                type: item.resourceType,
+                quantity: item.quantity
+              });
+            }
+            break;
 
-        case 'component':
-          // Add component to components table
-          statements.upsertComponent.run(userId, item.componentType, 1);
-          results.components.push({
-            type: item.componentType
-          });
-          break;
+          case 'component':
+            // Add component to components table
+            statements.upsertComponent.run(userId, item.componentType, 1);
+            results.components.push({
+              type: item.componentType
+            });
+            break;
 
-        case 'relic':
-          // Add relic to relics table (only if not already owned)
-          statements.addRelic.run(userId, item.relicType);
-          results.relics.push({
-            type: item.relicType
-          });
-          break;
+          case 'relic':
+            // Add relic to relics table (only if not already owned)
+            statements.addRelic.run(userId, item.relicType);
+            results.relics.push({
+              type: item.relicType
+            });
+            break;
 
-        case 'buff':
-          // Apply temporary buff
-          const buffConfig = config.BUFF_TYPES ? config.BUFF_TYPES[item.buffType] : null;
-          const duration = buffConfig ? buffConfig.duration : 60000; // Default 60s
-          const expiresAt = Date.now() + duration;
-          statements.addBuff.run(userId, item.buffType, expiresAt);
-          results.buffs.push({
-            type: item.buffType,
-            duration,
-            expiresAt
-          });
-
-          // Notify player of buff application
-          const socketId = userSockets.get(userId);
-          if (socketId) {
-            io.to(socketId).emit('buff:applied', {
-              buffType: item.buffType,
+          case 'buff':
+            // Apply temporary buff
+            const buffConfig = config.BUFF_TYPES ? config.BUFF_TYPES[item.buffType] : null;
+            const duration = buffConfig ? buffConfig.duration : 60000; // Default 60s
+            const expiresAt = Date.now() + duration;
+            statements.addBuff.run(userId, item.buffType, expiresAt);
+            results.buffs.push({
+              type: item.buffType,
               duration,
               expiresAt
             });
-          }
-          break;
+
+            // Notify player of buff application
+            const socketId = userSockets.get(userId);
+            if (socketId) {
+              io.to(socketId).emit('buff:applied', {
+                buffType: item.buffType,
+                duration,
+                expiresAt
+              });
+            }
+            break;
+        }
+      } catch (err) {
+        console.error(`[LOOT ERROR] User ${userId} processing ${item.type}:`, err.message);
+        results.errors.push({ type: item.type, error: err.message });
       }
     }
 

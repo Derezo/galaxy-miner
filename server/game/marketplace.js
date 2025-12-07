@@ -1,7 +1,7 @@
 // Galaxy Miner - Marketplace System (Server-side)
 
 const config = require('../config');
-const { statements, purchaseListing } = require('../database');
+const { statements, purchaseListing, safeUpsertInventory } = require('../database');
 
 function listItem(sellerId, resourceType, quantity, pricePerUnit) {
   // Validate inputs
@@ -20,8 +20,9 @@ function listItem(sellerId, resourceType, quantity, pricePerUnit) {
     return { success: false, error: 'Not enough resources' };
   }
 
-  // Remove from inventory
+  // Remove from inventory (for marketplace listing)
   const newQuantity = inventoryItem.quantity - quantity;
+  console.log(`[INVENTORY] User ${sellerId} ${resourceType}: ${inventoryItem.quantity} -> ${newQuantity} (marketplace listing -${quantity})`);
   if (newQuantity <= 0) {
     statements.removeInventoryItem.run(sellerId, resourceType);
   } else {
@@ -53,7 +54,7 @@ function buyItem(buyerId, listingId, quantity) {
     return {
       success: true,
       cost: result.cost,
-      credits: ship.credits,
+      credits: ship?.credits ?? 0,
       inventory
     };
   }
@@ -73,8 +74,8 @@ function cancelListing(sellerId, listingId) {
     return { success: false, error: 'Not your listing' };
   }
 
-  // Return resources to inventory
-  statements.upsertInventory.run(sellerId, listing.resource_type, listing.quantity);
+  // Return resources to inventory using safe wrapper
+  safeUpsertInventory(sellerId, listing.resource_type, listing.quantity);
 
   // Delete listing
   statements.deleteListing.run(listingId);

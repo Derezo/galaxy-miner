@@ -325,6 +325,88 @@ const IconFactory = {
   },
 
   /**
+   * Create a relic icon
+   * @param {string} relicType - Relic type key (e.g., 'WORMHOLE_GEM', 'ANCIENT_STAR_MAP')
+   * @param {number} size - Icon size in pixels (default: 32)
+   * @returns {SVGElement} Generated SVG icon
+   */
+  createRelicIcon(relicType, size = 32) {
+    // Get relic info from constants
+    const relicInfo = (typeof CONSTANTS !== 'undefined' && CONSTANTS.RELIC_TYPES)
+      ? CONSTANTS.RELIC_TYPES[relicType]
+      : null;
+
+    if (!relicInfo) {
+      console.warn(`No relic info for type: ${relicType}`);
+      return this._createFallbackRelicIcon(size);
+    }
+
+    let icon;
+
+    // Check for custom icon type
+    if (relicInfo.iconType === 'wormhole_gem') {
+      // Use WormholeGemShape for the Wormhole Gem relic
+      if (typeof WormholeGemShape !== 'undefined') {
+        icon = WormholeGemShape.create({
+          size,
+          glowIntensity: 0.8
+        });
+      } else {
+        icon = this._createFallbackRelicIcon(size);
+      }
+    } else {
+      // Default: use RelicShape (stone monument)
+      if (typeof RelicShape !== 'undefined') {
+        icon = RelicShape.create({
+          size,
+          glyphVariant: relicInfo.glyphVariant || 'constellation',
+          glowColor: relicInfo.glowColor || '#00aaff',
+          glowIntensity: 0.7
+        });
+      } else {
+        icon = this._createFallbackRelicIcon(size);
+      }
+    }
+
+    // Add data attributes
+    icon.dataset.relicType = relicType;
+    icon.dataset.rarity = relicInfo.rarity || 'rare';
+
+    return icon;
+  },
+
+  /**
+   * Create fallback relic icon
+   * @param {number} size - Icon size
+   * @returns {SVGElement}
+   */
+  _createFallbackRelicIcon(size) {
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('width', size);
+    svg.setAttribute('height', size);
+    svg.setAttribute('viewBox', '0 0 24 24');
+    svg.classList.add('resource-icon', 'relic-icon', 'fallback-icon');
+
+    // Simple obelisk shape
+    const obelisk = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
+    obelisk.setAttribute('points', '12,2 16,4 17,20 14,23 10,23 7,20 8,4');
+    obelisk.setAttribute('fill', '#4a4a4a');
+    obelisk.setAttribute('stroke', '#666666');
+    obelisk.setAttribute('stroke-width', '0.5');
+    svg.appendChild(obelisk);
+
+    // Simple glow dot
+    const glow = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+    glow.setAttribute('cx', '12');
+    glow.setAttribute('cy', '12');
+    glow.setAttribute('r', '2');
+    glow.setAttribute('fill', '#00aaff');
+    svg.appendChild(glow);
+
+    return svg;
+  },
+
+  /**
    * Get resource description
    * @param {string} resourceType - Resource type key
    * @returns {string} Description text

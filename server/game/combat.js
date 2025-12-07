@@ -2,6 +2,7 @@
 
 const config = require('../config');
 const { statements } = require('../database');
+const world = require('../world');
 
 // Track weapon cooldowns: playerId -> lastFireTime
 const weaponCooldowns = new Map();
@@ -9,9 +10,35 @@ const weaponCooldowns = new Map();
 // Track shield recharge delay: playerId -> lastDamageTime
 const shieldDelays = new Map();
 
-function canFire(playerId, weaponTier) {
+/**
+ * Get hull resistance values for a given hull tier
+ * @param {number} hullTier - Hull upgrade tier (1-5)
+ * @returns {Object} Resistance percentages for each damage type
+ */
+function getHullResistances(hullTier) {
+  const tier = Math.max(1, Math.min(5, hullTier || 1));
+  return {
+    kinetic: config.HULL.KINETIC_RESIST[tier] || 0,
+    energy: config.HULL.ENERGY_RESIST[tier] || 0,
+    explosive: config.HULL.EXPLOSIVE_RESIST[tier] || 0
+  };
+}
+
+/**
+ * Get effective weapon cooldown with energy core bonus
+ * @param {number} weaponTier - Weapon upgrade tier
+ * @param {number} energyCoreTier - Energy core upgrade tier (1-5)
+ * @returns {number} Cooldown in milliseconds
+ */
+function getEffectiveCooldown(weaponTier, energyCoreTier = 1) {
+  const baseCooldown = config.BASE_WEAPON_COOLDOWN / Math.pow(config.TIER_MULTIPLIER, weaponTier - 1);
+  const cooldownReduction = config.ENERGY_CORE.COOLDOWN_REDUCTION[energyCoreTier] || 0;
+  return baseCooldown * (1 - cooldownReduction);
+}
+
+function canFire(playerId, weaponTier, energyCoreTier = 1) {
   const lastFire = weaponCooldowns.get(playerId) || 0;
-  const cooldown = config.BASE_WEAPON_COOLDOWN / Math.pow(config.TIER_MULTIPLIER, weaponTier - 1);
+  const cooldown = getEffectiveCooldown(weaponTier, energyCoreTier);
   return Date.now() - lastFire >= cooldown;
 }
 
@@ -58,13 +85,24 @@ function checkHit(attackerPos, targetPos, targetSize, weaponRange, weaponTier) {
   const dy = targetPos.y - attackerPos.y;
   const distance = Math.sqrt(dx * dx + dy * dy);
 
-  const effectiveRange = weaponRange * Math.pow(config.TIER_MULTIPLIER, weaponTier - 1);
+  // Use per-tier weapon ranges if available (weaponRange param may already be tier-specific)
+  // Only apply tier multiplier if weaponRange is the base range
+  const effectiveRange = (config.WEAPON_RANGES && config.WEAPON_RANGES[weaponTier])
+    ? config.WEAPON_RANGES[weaponTier]
+    : weaponRange * Math.pow(config.TIER_MULTIPLIER, weaponTier - 1);
 
   // Simple distance check (could add projectile travel time later)
   return distance <= effectiveRange + targetSize;
 }
 
-function applyDamage(targetUserId, damage) {
+/**
+ * Apply damage to a player with hull resistance
+ * @param {number} targetUserId - Target player's user ID
+ * @param {Object} damage - { shieldDamage, hullDamage }
+ * @param {string} damageType - 'kinetic', 'energy', or 'explosive' (for hull resistance)
+ * @returns {Object|null} Result with new shield/hull values, or null if player not found
+ */
+function applyDamage(targetUserId, damage, damageType = 'kinetic') {
   const ship = statements.getShipByUserId.get(targetUserId);
   if (!ship) return null;
 
@@ -72,6 +110,11 @@ function applyDamage(targetUserId, damage) {
   let newShield = ship.shield_hp;
   let newHull = ship.hull_hp;
   const hadShields = newShield > 0;
+
+  // Get hull resistance based on hull tier
+  const hullTier = ship.hull_tier || 1;
+  const resistances = getHullResistances(hullTier);
+  const resistance = Math.min(resistances[damageType] || 0, config.HULL.RESISTANCE_CAP);
 
   // Record damage time for shield recharge delay
   shieldDelays.set(targetUserId, Date.now());
@@ -99,6 +142,12 @@ function applyDamage(targetUserId, damage) {
     totalHullDamage = hullDamage;
   }
 
+  // Apply hull resistance to reduce damage
+  if (totalHullDamage > 0 && resistance > 0) {
+    const resistedAmount = totalHullDamage * resistance;
+    totalHullDamage = totalHullDamage - resistedAmount;
+  }
+
   if (totalHullDamage > 0) {
     newHull = Math.max(0, newHull - totalHullDamage);
   }
@@ -112,7 +161,8 @@ function applyDamage(targetUserId, damage) {
     shield: Math.floor(newShield),
     hull: Math.floor(newHull),
     isDead,
-    hitShield: hadShields // True if shields absorbed any damage
+    hitShield: hadShields, // True if shields absorbed any damage
+    resistedDamage: resistance > 0 ? Math.floor(totalHullDamage * resistance / (1 - resistance)) : 0
   };
 }
 
@@ -130,8 +180,9 @@ function handleDeath(userId) {
         quantity: dropAmount
       });
 
-      // Remove from inventory
+      // Remove from inventory (death cargo drop)
       const newQuantity = item.quantity - dropAmount;
+      console.log(`[INVENTORY] User ${userId} ${item.resource_type}: ${item.quantity} -> ${newQuantity} (death cargo drop -${dropAmount})`);
       if (newQuantity <= 0) {
         statements.removeInventoryItem.run(userId, item.resource_type);
       } else {
@@ -140,20 +191,26 @@ function handleDeath(userId) {
     }
   }
 
-  // Random respawn position (near origin for simplicity)
-  const respawnX = (Math.random() - 0.5) * config.SECTOR_SIZE * 2;
-  const respawnY = (Math.random() - 0.5) * config.SECTOR_SIZE * 2;
+  // Find safe respawn position (away from stars)
+  const safePos = world.findSafeSpawnLocation(0, 0, 5000);
 
   // Respawn ship
-  statements.respawnShip.run(respawnX, respawnY, userId);
+  statements.respawnShip.run(safePos.x, safePos.y, userId);
 
   return {
     droppedCargo,
-    respawnPosition: { x: respawnX, y: respawnY }
+    respawnPosition: safePos
   };
 }
 
-function updateShieldRecharge(userId, deltaTime) {
+/**
+ * Update shield recharge for a player with energy core bonus
+ * @param {number} userId - Player's user ID
+ * @param {number} deltaTime - Time since last update in milliseconds
+ * @param {number} energyCoreTier - Energy core tier (1-5) for bonus regen
+ * @returns {Object|null} New shield value, or null if no change
+ */
+function updateShieldRecharge(userId, deltaTime, energyCoreTier = null) {
   const lastDamage = shieldDelays.get(userId) || 0;
   const timeSinceDamage = Date.now() - lastDamage;
 
@@ -166,7 +223,15 @@ function updateShieldRecharge(userId, deltaTime) {
     return null; // Already full
   }
 
-  const rechargeAmount = config.SHIELD_RECHARGE_RATE * (deltaTime / 1000);
+  // Get energy core tier from ship if not provided
+  const coreTier = energyCoreTier !== null ? energyCoreTier : (ship.energy_core_tier || 1);
+
+  // Calculate recharge rate with energy core bonus
+  const baseRate = config.SHIELD_RECHARGE_RATE;
+  const bonusRate = config.ENERGY_CORE.SHIELD_REGEN_BONUS[coreTier] || 0;
+  const effectiveRate = baseRate + bonusRate;
+
+  const rechargeAmount = effectiveRate * (deltaTime / 1000);
   const newShield = Math.min(ship.shield_max, ship.shield_hp + rechargeAmount);
 
   statements.updateShipHealth.run(ship.hull_hp, Math.floor(newShield), userId);
@@ -175,6 +240,11 @@ function updateShieldRecharge(userId, deltaTime) {
 }
 
 function getWeaponRange(weaponTier) {
+  // Use per-tier weapon ranges that match client visual projectile distance
+  if (config.WEAPON_RANGES && config.WEAPON_RANGES[weaponTier]) {
+    return config.WEAPON_RANGES[weaponTier];
+  }
+  // Fallback to legacy formula
   return config.BASE_WEAPON_RANGE * Math.pow(config.TIER_MULTIPLIER, weaponTier - 1);
 }
 
@@ -186,5 +256,7 @@ module.exports = {
   applyDamage,
   handleDeath,
   updateShieldRecharge,
-  getWeaponRange
+  getWeaponRange,
+  getHullResistances,
+  getEffectiveCooldown
 };

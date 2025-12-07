@@ -28,6 +28,10 @@ app.get('/shared/physics.js', (req, res) => {
   res.sendFile(path.join(__dirname, '..', 'shared', 'physics.js'));
 });
 
+app.get('/shared/star-system.js', (req, res) => {
+  res.sendFile(path.join(__dirname, '..', 'shared', 'star-system.js'));
+});
+
 // Health check endpoint
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', uptime: process.uptime() });

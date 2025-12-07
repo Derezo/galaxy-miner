@@ -36,13 +36,13 @@ const DeathEffects = {
     },
     dissolve: {
       particles: 50,
-      colors: ['#00ff66', '#00cc44', '#66ff99', '#00ff88'],
+      colors: ['#1a1a1a', '#8b0000', '#990000', '#660000'],
       duration: 1000,
       fadeOut: true,
       particleSpeed: 80,
       particleSize: { min: 2, max: 5 },
       glow: true,
-      glowColor: '#00ff6680'
+      glowColor: '#8b000080'
     },
     implode: {
       particles: 40,

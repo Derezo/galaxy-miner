@@ -6,6 +6,7 @@ const combat = require('./combat');
 const mining = require('./mining');
 const loot = require('./loot');
 const world = require('../world');
+const starDamage = require('./star-damage');
 
 let io = null;
 let connectedPlayers = null;
@@ -14,6 +15,10 @@ let lastTickTime = Date.now();
 
 // Track which bases are currently active
 const lastBaseCheck = new Map(); // baseId -> lastCheckTime
+
+// Throttle base radar broadcasts (every 500ms)
+let lastBaseBroadcastTime = 0;
+const BASE_BROADCAST_INTERVAL = 500;
 
 function init(socketIo, players) {
   io = socketIo;
@@ -46,6 +51,8 @@ function tick() {
   updateNPCs(deltaTime);
   updateMining(deltaTime);
   updateWreckage(deltaTime);
+  updateStarDamage(deltaTime);  // Apply star heat damage
+  broadcastNearbyBasesToPlayers(now);  // Send base positions for radar
 
   // Schedule next tick
   const tickInterval = 1000 / config.SERVER_TICK_RATE;
@@ -273,6 +280,40 @@ function updateNPCs(deltaTime) {
     // Update NPC shield recharge
     npc.updateNPCShieldRecharge(npcEntity, deltaTime);
 
+    // Check for Swarm Queen spawning
+    if (npcEntity.spawnsUnits && npcEntity.type === 'swarm_queen') {
+      const spawnResult = npc.updateSwarmQueenSpawning(npcEntity, nearbyPlayers, deltaTime);
+
+      if (spawnResult && spawnResult.spawned && spawnResult.spawned.length > 0) {
+        // Broadcast queen spawn event for visual effects
+        broadcastNearNpc(npcEntity, 'npc:queenSpawn', {
+          queenId: npcEntity.id,
+          queenX: npcEntity.position.x,
+          queenY: npcEntity.position.y,
+          triggerType: spawnResult.type,
+          threshold: spawnResult.threshold,
+          spawned: spawnResult.spawned
+        });
+
+        // Also broadcast each minion as regular NPC spawns
+        for (const minion of spawnResult.spawned) {
+          broadcastNearNpc(npcEntity, 'npc:spawn', {
+            id: minion.id,
+            type: minion.type,
+            name: minion.name,
+            faction: minion.faction,
+            x: minion.x,
+            y: minion.y,
+            rotation: minion.rotation,
+            hull: minion.hull,
+            hullMax: minion.hullMax,
+            shield: minion.shield,
+            shieldMax: minion.shieldMax
+          });
+        }
+      }
+    }
+
     // Broadcast NPC position update
     // Include name/type/faction so players who just entered range get full data
     broadcastNearNpc(npcEntity, 'npc:update', {
@@ -398,6 +439,33 @@ function updateWreckage(deltaTime) {
   }
 }
 
+function updateStarDamage(deltaTime) {
+  // Apply heat damage from stars to nearby players
+  starDamage.update(connectedPlayers, io, deltaTime);
+}
+
+// Broadcast nearby bases to each player for radar display
+function broadcastNearbyBasesToPlayers(now) {
+  if (!connectedPlayers || connectedPlayers.size === 0) return;
+
+  // Throttle broadcasts
+  if (now - lastBaseBroadcastTime < BASE_BROADCAST_INTERVAL) return;
+  lastBaseBroadcastTime = now;
+
+  for (const [socketId, player] of connectedPlayers) {
+    // Calculate player's radar range based on their radar tier
+    const radarRange = config.BASE_RADAR_RANGE * Math.pow(config.TIER_MULTIPLIER, (player.radarTier || 1) - 1);
+
+    // Get bases within player's radar range (using existing npc.getBasesInRange)
+    const nearbyBases = npc.getBasesInRange(player.position, radarRange);
+
+    // Only send if there are bases to report
+    if (nearbyBases.length > 0) {
+      io.to(socketId).emit('bases:nearby', nearbyBases);
+    }
+  }
+}
+
 function broadcastWreckageNear(wreckage, event, data) {
   if (!connectedPlayers) return;
 
@@ -473,6 +541,28 @@ function playerAttackNPC(attackerId, npcId, weaponType, weaponTier) {
     // Add wreckage to result for socket handler
     result.wreckage = wreckage;
 
+    // Check for formation leader death (Void faction succession)
+    if (npcEntity.formationLeader || (npcEntity.isBoss && npcEntity.faction === 'void')) {
+      const formationInfo = npc.getFormationForNpc(npcId);
+      if (formationInfo && formationInfo.memberIds.size > 0) {
+        const successionResult = npc.handleLeaderDeath(formationInfo.formationId);
+        if (successionResult.success && successionResult.newLeader) {
+          broadcastNearNpc(npcEntity, 'formation:leaderChange', {
+            formationId: formationInfo.formationId,
+            oldLeaderId: npcId,
+            oldLeaderType: npcEntity.type,
+            newLeaderId: successionResult.newLeader.id,
+            newLeaderType: successionResult.newLeader.type,
+            newLeaderName: successionResult.newLeader.name,
+            newLeaderPosition: successionResult.newLeader.position,
+            memberIds: successionResult.memberIds,
+            confusionDuration: 1000,  // 1 second confusion
+            reformationDuration: 2000  // 2 seconds to reform
+          });
+        }
+      }
+    }
+
     return result;
   }
 
@@ -486,6 +576,63 @@ function playerAttackNPC(attackerId, npcId, weaponType, weaponTier) {
       shield: result.shield,
       hitShield: result.hitShield
     });
+
+    // Apply linked health damage for Swarm faction
+    if (npcEntity.linkedHealth && npcEntity.faction === 'swarm') {
+      const linkedResults = npc.applySwarmLinkedDamage(npcEntity, totalDamage);
+
+      if (linkedResults.length > 0) {
+        // Broadcast linked damage event for visual feedback
+        broadcastNearNpc(npcEntity, 'swarm:linkedDamage', {
+          sourceId: npcId,
+          sourceX: npcEntity.position.x,
+          sourceY: npcEntity.position.y,
+          affected: linkedResults.map(r => ({
+            id: r.id,
+            damage: Math.round(r.damage),
+            destroyed: r.destroyed,
+            hull: r.hull,
+            hullMax: r.hullMax,
+            x: npc.getNPC(r.id)?.position?.x || 0,
+            y: npc.getNPC(r.id)?.position?.y || 0
+          }))
+        });
+
+        // Handle any linked deaths
+        for (const linked of linkedResults) {
+          if (linked.destroyed) {
+            const linkedNpc = npc.getNPC(linked.id);
+            if (linkedNpc) {
+              // Spawn wreckage for linked death
+              const wreckage = loot.spawnWreckage(linkedNpc, linkedNpc.position);
+
+              broadcastNearNpc(linkedNpc, 'npc:destroyed', {
+                id: linked.id,
+                destroyedBy: attackerId,
+                participants: [attackerId],
+                participantCount: 1,
+                teamMultiplier: 1,
+                creditsPerPlayer: linkedNpc.creditReward || 0,
+                faction: linkedNpc.faction,
+                deathEffect: linkedNpc.deathEffect || 'dissolve',
+                wreckageId: wreckage.id,
+                linkedDeath: true
+              });
+
+              broadcastWreckageNear(wreckage, 'wreckage:spawn', {
+                id: wreckage.id,
+                x: wreckage.position.x,
+                y: wreckage.position.y,
+                faction: wreckage.faction,
+                npcName: wreckage.npcName,
+                contentCount: wreckage.contents.length,
+                despawnTime: wreckage.despawnTime
+              });
+            }
+          }
+        }
+      }
+    }
   }
 
   return result;
@@ -516,7 +663,7 @@ function playerAttackBase(attackerId, baseId, weaponType, weaponTier) {
       type: 'base'
     }, { x: baseObj.x, y: baseObj.y }, baseLoot);
 
-    // Broadcast base destruction with team info
+    // Broadcast base destruction with team info and visual data
     broadcastNearBase(baseObj, 'base:destroyed', {
       id: baseId,
       destroyedBy: attackerId,
@@ -526,7 +673,12 @@ function playerAttackBase(attackerId, baseId, weaponType, weaponTier) {
       creditsPerPlayer: result.creditsPerPlayer,
       faction: baseObj.faction,
       respawnTime: result.respawnTime,
-      wreckageId: wreckage.id
+      wreckageId: wreckage.id,
+      // Visual data for destruction sequence
+      x: baseObj.x,
+      y: baseObj.y,
+      baseType: baseObj.type,
+      size: baseObj.size || 80
     });
 
     // Broadcast wreckage spawn
@@ -553,7 +705,11 @@ function playerAttackBase(attackerId, baseId, weaponType, weaponTier) {
       attackerId: attackerId,
       damage: Math.round(totalDamage),
       health: result.health,
-      maxHealth: result.maxHealth
+      maxHealth: result.maxHealth,
+      x: baseObj.x,
+      y: baseObj.y,
+      faction: baseObj.faction,
+      size: baseObj.size || 80
     });
   }
 

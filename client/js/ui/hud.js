@@ -13,6 +13,11 @@ const HUD = {
     this.radarCanvas.width = 150;
     this.radarCanvas.height = 150;
 
+    // Initialize the modular radar system
+    if (typeof Radar !== 'undefined') {
+      Radar.init(this.radarCanvas);
+    }
+
     // Button handlers
     document.getElementById('btn-terminal').addEventListener('click', () => TerminalUI.toggle());
 
@@ -40,15 +45,27 @@ const HUD = {
     document.getElementById('hull-bar').style.width = `${hullPercent}%`;
     document.getElementById('shield-bar').style.width = `${shieldPercent}%`;
 
+    // Update boost bar
+    this.updateBoostBar();
+
     // Update radar
     this.drawRadar();
   },
 
   drawRadar() {
     const ctx = this.radarCtx;
+    const radarRange = Player.getRadarRange();
+    const radarTier = Player.ship.radarTier || 1;
+
+    // Use the modular radar system if available
+    if (typeof Radar !== 'undefined' && Radar.initialized) {
+      Radar.draw(ctx, radarRange, radarTier);
+      return;
+    }
+
+    // Fallback to basic radar rendering if modules not loaded
     const size = 150;
     const center = size / 2;
-    const radarRange = Player.getRadarRange();
 
     // Clear
     ctx.fillStyle = 'rgba(0, 0, 34, 0.8)';
@@ -165,5 +182,49 @@ const HUD = {
 
   updateLatency(latency) {
     this.latency = latency;
+  },
+
+  updateBoostBar() {
+    const boostBar = document.getElementById('boost-bar');
+    const boostStatus = document.getElementById('boost-status');
+    const boostContainer = document.querySelector('.boost-bar-container');
+
+    if (!boostBar || !Player.isBoostActive) {
+      // Player module not fully loaded or no boost methods
+      if (boostContainer) boostContainer.style.display = 'none';
+      return;
+    }
+
+    boostContainer.style.display = 'block';
+
+    if (Player.isBoostActive()) {
+      // Boost is active - show remaining duration
+      const remaining = Player.boostEndTime - Date.now();
+      const duration = CONSTANTS.ENERGY_CORE?.BOOST?.DURATION?.[Player.ship.energyCoreTier || 1] || 1000;
+      const percent = Math.max(0, (remaining / duration) * 100);
+
+      boostBar.style.width = `${percent}%`;
+      boostBar.classList.add('active');
+      boostBar.classList.remove('cooldown');
+      boostStatus.textContent = 'ACTIVE';
+      boostStatus.className = 'boost-status active';
+    } else if (Player.isBoostOnCooldown()) {
+      // Boost is on cooldown
+      const percent = Player.getBoostCooldownPercent();
+
+      boostBar.style.width = `${percent}%`;
+      boostBar.classList.add('cooldown');
+      boostBar.classList.remove('active');
+
+      const remainingSec = Math.ceil(Player.getBoostCooldownRemaining() / 1000);
+      boostStatus.textContent = `${remainingSec}s`;
+      boostStatus.className = 'boost-status cooldown';
+    } else {
+      // Boost is ready
+      boostBar.style.width = '100%';
+      boostBar.classList.remove('active', 'cooldown');
+      boostStatus.textContent = 'READY';
+      boostStatus.className = 'boost-status ready';
+    }
   }
 };

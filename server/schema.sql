@@ -32,6 +32,9 @@ CREATE TABLE IF NOT EXISTS ships (
   mining_tier INTEGER DEFAULT 1,
   cargo_tier INTEGER DEFAULT 1,
   radar_tier INTEGER DEFAULT 1,
+  energy_core_tier INTEGER DEFAULT 1,
+  hull_tier INTEGER DEFAULT 1,
+  ship_color_id TEXT DEFAULT 'green',
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -111,3 +114,13 @@ CREATE INDEX IF NOT EXISTS idx_components_user_id ON components(user_id);
 CREATE INDEX IF NOT EXISTS idx_relics_user_id ON relics(user_id);
 CREATE INDEX IF NOT EXISTS idx_active_buffs_user_id ON active_buffs(user_id);
 CREATE INDEX IF NOT EXISTS idx_active_buffs_expires ON active_buffs(expires_at);
+
+-- Migrations for existing databases
+-- Add ship_color_id column if it doesn't exist (SQLite doesn't support IF NOT EXISTS for columns)
+-- This will fail silently if the column already exists
+CREATE TRIGGER IF NOT EXISTS add_ship_color_id_migration
+AFTER INSERT ON ships
+WHEN NEW.ship_color_id IS NULL
+BEGIN
+  UPDATE ships SET ship_color_id = 'green' WHERE id = NEW.id AND ship_color_id IS NULL;
+END;

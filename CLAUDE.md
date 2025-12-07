@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Galaxy Miner is a multiplayer browser-based space mining game. Players navigate a procedurally generated galaxy, mine resources, upgrade ships, and trade with each other in real-time.
+Galaxy Miner is a multiplayer browser-based space mining game. Players navigate a procedurally generated galaxy, mine resources, fight NPCs, upgrade ships, and trade with each other in real-time.
 
 **Tech Stack**: Node.js + Express + Socket.io (backend), vanilla JavaScript + HTML5 Canvas (frontend), SQLite with better-sqlite3 (persistence)
 
@@ -24,92 +24,107 @@ Real-time bidirectional via Socket.io events:
 - **Auth**: `auth:login`, `auth:register`, `auth:token`, `auth:logout`
 - **Movement**: `player:input` (position/velocity sync)
 - **Mining**: `mining:start`, `mining:cancel`, `mining:complete`
+- **Combat**: `combat:fire`, `combat:hit`, `player:death`, `player:respawn`
+- **NPCs**: `npc:update`, `npc:death`, `loot:spawn`, `loot:collect`
 - **Marketplace**: `market:list`, `market:buy`, `market:cancel`, `market:getListings`
-- **Chat**: `chat:send`, `chat:message`
-- **Upgrades**: `ship:upgrade`, `ship:getData`
+- **Chat/Emotes**: `chat:send`, `chat:message`, `emote:send`, `emote:broadcast`
+- **Upgrades**: `ship:upgrade`, `ship:getData`, `ship:setColor`
 - **World**: `world:update` (asteroid depletion broadcasts)
 
 ### Procedural Generation
-Both client and server use identical seeded random generation (seed: `GALAXY_ALPHA_2025`) for world consistency. Sectors are 1000x1000 units, generated on-demand.
+Both client and server use identical seeded random generation (seed: `GALAXY_ALPHA_2025`) for world consistency. Sectors are 1000x1000 units, generated on-demand. Faction bases spawn procedurally with configurable rates per faction.
 
 ### Game Loop Architecture
-- **Server**: 20 ticks/second (`/server/game/engine.js`) - updates players, NPCs, mining progress
-- **Client**: 60 FPS via requestAnimationFrame - local prediction with server validation
+- **Server**: 20 ticks/second (`/server/game/engine.js`) - updates players, NPCs, combat, mining progress
+- **Client**: 60 FPS via requestAnimationFrame - local prediction with server reconciliation
 
-### Key Modules
+### Key Server Modules
 
-| Server | Purpose |
+| Module | Purpose |
 |--------|---------|
 | `/server/socket.js` | All Socket.io event handlers, dispatches to game systems |
 | `/server/game/engine.js` | Game tick loop, coordinates all subsystems |
+| `/server/game/combat.js` | Damage calculation, weapons, health, death/respawn |
+| `/server/game/npc.js` | NPC spawning, faction base management, AI coordination |
+| `/server/game/ai/*.js` | AI behavior strategies (see below) |
+| `/server/game/loot.js` | Loot drops, buffs, components, relics |
 | `/server/game/mining.js` | Mining mechanics and resource drops |
-| `/server/game/combat.js` | Damage calculation, weapons, health (TODO Phase 9) |
 | `/server/game/marketplace.js` | Player-to-player trading |
-| `/server/game/npc.js` | NPC spawning and AI behavior |
 | `/server/auth.js` | Authentication, bcrypt hashing, session management |
 | `/server/database.js` | SQLite setup and prepared statements |
 | `/server/world.js` | Server-side world generation |
 
-| Client | Purpose |
+### NPC AI System (`/server/game/ai/`)
+
+Modular AI with faction-specific strategies:
+- `flanking.js` - Pirates: aggressive flanking maneuvers
+- `swarm.js` - Swarm: coordinated group attacks, linked health pools
+- `territorial.js` - Rogue Miners: defend claimed territory
+- `retreat.js` - Scavengers: flee when damaged
+- `formation.js` - Void Entities: maintain formation patterns
+
+Each faction has a spawn hub type (bases) that continuously spawns NPCs. Hub destruction stops spawning until respawn timer.
+
+### Key Client Modules
+
+| Module | Purpose |
 |--------|---------|
 | `/client/js/network.js` | Socket.io client, event handlers |
 | `/client/js/game.js` | Client game loop controller |
 | `/client/js/renderer.js` | Canvas rendering, camera system |
 | `/client/js/player.js` | Local player physics and state |
 | `/client/js/world.js` | Client-side procedural generation |
+| `/client/js/entities.js` | Entity management (players, NPCs, projectiles) |
 | `/client/js/input.js` | Keyboard/mouse input handling |
-| `/client/js/ui/*.js` | UI modules (auth, hud, chat, terminal, upgrades) |
-| `/client/js/ui/core/*.js` | Core UI infrastructure (Component, Modal, State) |
-| `/client/js/ui/icons/*.js` | Parameterized SVG icon system |
-| `/client/js/ui/panels/*.js` | Panel components (CargoPanel, MarketPanel) |
 
-### UI System
+### Graphics System (`/client/js/graphics/`)
 
-See `/client/js/ui/README.md` for detailed documentation.
+Canvas rendering modules for visual effects:
+- `ships.js` / `npc-ships.js` - Ship rendering with faction-specific designs
+- `weapons.js` / `npc-weapons.js` - Projectiles and beam weapons
+- `particles.js` - Particle system for explosions, trails
+- `death-effects.js` - Per-faction death animations
+- `faction-bases.js` - Spawn hub rendering
+- `hit-effects.js` - Damage feedback visuals
+- `thrust.js` / `tractor-beam.js` - Engine and mining beam effects
 
-**Core modules** (`/client/js/ui/core/`):
-- `Component.js` - Lightweight component factory with lifecycle hooks
-- `Modal.js` - Centralized modal controller with stacking, confirm/prompt dialogs
-- `State.js` - Reactive pub/sub state store (UIState)
+### UI System (`/client/js/ui/`)
 
-**Icon system** (`/client/js/ui/icons/`):
-- `IconFactory.js` - Generates parameterized SVG icons for all 13 resource types
-- Three shape generators: Crystal (minerals), Orbital (gases), Material (metals)
-- CSS animations for shimmer, spin, and pulse effects
+See `/client/js/ui/README.md` for detailed API documentation.
 
-**Panels** (`/client/js/ui/panels/`):
-- `CargoPanel.js` - Two-column cargo with slide-out detail panel, integrated selling
-- `MarketPanel.js` - Browse/My Listings tabs with filter, sort, quick-buy
-
-**CSS architecture** (`/client/css/`):
-- Modular CSS with `index.css` as entry point
-- CSS custom properties for theming in `base.css`
-- Component styles in `components.css`, `panels.css`, `icons.css`
+- **Core** (`core/`): Component factory, Modal controller, reactive UIState store, Toast notifications
+- **Icons** (`icons/`): Parameterized SVG generator for 26 resource types (Crystal/Orbital/Material shapes)
+- **Panels** (`panels/`): CargoPanel, MarketPanel, ShipCustomizationPanel
 
 ### Shared Constants
-`/shared/constants.js` is used by both client and server - contains world generation params, resource types/values, upgrade costs, physics settings, object sizes. Changes here affect both sides.
+`/shared/constants.js` is used by both client and server - contains world generation params, resource types/values, NPC factions, weapon definitions, upgrade costs, physics settings. Changes here affect both sides.
 
 ### Database Schema
 SQLite tables in `/server/schema.sql`:
 - `users` - credentials
-- `ships` - player state (position, health, tiers, credits)
+- `ships` - player state (position, health, tiers, credits, color)
 - `inventory` - cargo (user_id, resource_type, quantity)
 - `marketplace` - active listings
 - `world_changes` - depleted resources with respawn timers
 - `chat_messages` - global chat history
+- `components` - upgrade components for tier 6+ (future)
+- `relics` - rare collectibles
+- `active_buffs` - temporary power-ups with expiry
 
 ### Proximity System
 Updates only broadcast to players within radar range (base 500 units, scales with tier). Broadcast range = 2x radar range. Positions persist to DB every 5 seconds.
 
 ## Game Systems Reference
 
-**Mining**: Range 50 units, base time 3000ms, cargo capacity 50 base + tier upgrades, resources respawn 30-60 min
+**Resources**: 26 types across 4 rarities (common/uncommon/rare/ultrarare) and 4 categories (metal/gas/crystal/exotic)
 
-**Ship Upgrades**: 6 components (engine, weapon, shield, mining, cargo, radar), max tier 5, costs escalate ($500 → $15000)
+**NPC Factions**: Pirates (flanking), Scavengers (retreat), Swarm (linked health), Void (formation), Rogue Miners (territorial)
 
-**Physics**: Base speed 150 units/sec (scales with engine tier), rotation 3 rad/sec, drag 0.98/frame
+**Ship Upgrades**: 6 components (engine, weapon, shield, mining, cargo, radar), max tier 5, costs $500→$15000
 
-**Auth**: bcrypt (10 rounds), UUID session tokens (24h expiry, in-memory), rate limits on login/registration
+**Combat**: Weapon types (kinetic/energy/explosive), shield recharge with delay, 50% cargo drop on death
+
+**Mining**: Range 50 units, base time 3000ms, resources respawn 30-60 min
 
 ## Node Version
 

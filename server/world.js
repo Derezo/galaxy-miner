@@ -1,13 +1,18 @@
 // Galaxy Miner - Server-side World Generation
 // Mirrors client-side generation for validation
+// Now uses StarSystem layer for Solar System model generation
 
 const config = require('./config');
 const { statements } = require('./database');
 const Physics = require('../shared/physics');
+const StarSystem = require('../shared/star-system');
 
 // Cache generated sectors
 const sectorCache = new Map();
 const MAX_CACHED_SECTORS = 100;
+
+// Feature flag for new generation model
+const useStarSystemModel = true;
 
 // Seeded random number generator - Mulberry32 (deterministic across platforms)
 function seededRandom(seed) {
@@ -70,6 +75,240 @@ function generateSector(sectorX, sectorY) {
     return sectorCache.get(key);
   }
 
+  // Use new StarSystem model if enabled
+  if (useStarSystemModel) {
+    return generateSectorFromStarSystem(sectorX, sectorY);
+  }
+
+  // Fallback to legacy generation
+  return generateSectorLegacy(sectorX, sectorY);
+}
+
+// New Solar System model generation
+function generateSectorFromStarSystem(sectorX, sectorY) {
+  const key = `${sectorX}_${sectorY}`;
+  const rng = seededRandom(hash(config.GALAXY_SEED, sectorX, sectorY));
+
+  const sector = {
+    x: sectorX,
+    y: sectorY,
+    stars: [],
+    planets: [],
+    asteroids: [],
+    wormholes: [],
+    bases: [],
+    systems: [] // Reference to parent star systems
+  };
+
+  const sectorMinX = sectorX * config.SECTOR_SIZE;
+  const sectorMinY = sectorY * config.SECTOR_SIZE;
+  const sectorMaxX = sectorMinX + config.SECTOR_SIZE;
+  const sectorMaxY = sectorMinY + config.SECTOR_SIZE;
+
+  // Helper: check if position is within this sector
+  const isInSector = (x, y) => {
+    return x >= sectorMinX && x < sectorMaxX && y >= sectorMinY && y < sectorMaxY;
+  };
+
+  // Get all star systems that could influence this sector
+  const systems = StarSystem.getStarSystemsForSector(sectorX, sectorY);
+  sector.systems = systems.map(s => s.id);
+
+  for (const system of systems) {
+    // Add primary star if in this sector
+    if (isInSector(system.primaryStar.x, system.primaryStar.y)) {
+      sector.stars.push({
+        ...system.primaryStar,
+        systemId: system.id,
+        isBinary: !!system.binaryInfo
+      });
+    }
+
+    // Add binary companion if exists and in sector
+    if (system.binaryInfo) {
+      const secondary = system.binaryInfo.secondaryStar;
+      if (isInSector(secondary.x, secondary.y)) {
+        sector.stars.push({
+          ...secondary,
+          systemId: system.id,
+          isPrimaryBinary: false,
+          binaryInfo: system.binaryInfo
+        });
+      }
+    }
+
+    // Add planets that could be in this sector (orbit might cross it)
+    for (const planet of system.planets) {
+      const starX = system.primaryStar.x;
+      const starY = system.primaryStar.y;
+      const maxReach = planet.orbitRadius + planet.size;
+
+      // Simple bounding box check for orbit
+      if (starX + maxReach >= sectorMinX && starX - maxReach < sectorMaxX &&
+          starY + maxReach >= sectorMinY && starY - maxReach < sectorMaxY) {
+        sector.planets.push({
+          ...planet,
+          starX: starX,
+          starY: starY,
+          systemId: system.id
+        });
+      }
+    }
+
+    // Generate belt asteroids for this sector
+    for (const belt of system.asteroidBelts) {
+      const beltAsteroids = StarSystem.generateBeltAsteroidsForSector(
+        system, belt, sectorX, sectorY, rng
+      );
+      for (const asteroid of beltAsteroids) {
+        sector.asteroids.push({
+          ...asteroid,
+          starX: system.primaryStar.x,
+          starY: system.primaryStar.y,
+          systemId: system.id,
+          isOrbital: true
+        });
+      }
+    }
+
+    // Add bases from this system that are in this sector
+    // Include starX/starY for position computation in binary systems
+    for (const base of system.bases) {
+      // For bases with orbital parameters, check if orbit could cross this sector
+      const starX = system.primaryStar.x;
+      const starY = system.primaryStar.y;
+
+      if (base.orbitRadius && base.orbitSpeed) {
+        // Orbital base - check if orbit crosses sector
+        const maxReach = base.orbitRadius + (base.size || 100);
+        if (starX + maxReach >= sectorMinX && starX - maxReach < sectorMaxX &&
+            starY + maxReach >= sectorMinY && starY - maxReach < sectorMaxY) {
+          sector.bases.push({
+            ...base,
+            starX: starX,
+            starY: starY,
+            systemId: system.id
+          });
+        }
+      } else if (isInSector(base.x, base.y)) {
+        // Static base - just check if in sector
+        sector.bases.push({
+          ...base,
+          starX: starX,
+          starY: starY,
+          systemId: system.id
+        });
+      }
+    }
+
+    // Add wormholes from this system that are in this sector
+    for (const wormhole of system.wormholes) {
+      if (isInSector(wormhole.x, wormhole.y)) {
+        sector.wormholes.push({
+          ...wormhole,
+          systemId: system.id,
+          destinationSector: {
+            x: wormhole.destinationSectorX,
+            y: wormhole.destinationSectorY
+          }
+        });
+      }
+    }
+  }
+
+  // Generate deep-space content (void rifts, scavenger yards) if no systems nearby
+  if (systems.length === 0) {
+    generateDeepSpaceContent(sector, sectorX, sectorY, rng);
+  }
+
+  // Cache management
+  if (sectorCache.size >= MAX_CACHED_SECTORS) {
+    const firstKey = sectorCache.keys().next().value;
+    sectorCache.delete(firstKey);
+  }
+  sectorCache.set(key, sector);
+
+  return sector;
+}
+
+// Generate content for sectors far from any star
+function generateDeepSpaceContent(sector, sectorX, sectorY, rng) {
+  const sectorMinX = sectorX * config.SECTOR_SIZE;
+  const sectorMinY = sectorY * config.SECTOR_SIZE;
+
+  // Void rifts prefer deep space
+  const voidRift = config.SPAWN_HUB_TYPES?.void_rift;
+  if (voidRift && rng() < voidRift.spawnChance * 3) {
+    const size = voidRift.size || 120;
+    const x = sectorMinX + size + rng() * (config.SECTOR_SIZE - size * 2);
+    const y = sectorMinY + size + rng() * (config.SECTOR_SIZE - size * 2);
+
+    sector.bases.push({
+      id: `${sectorX}_${sectorY}_base_void_rift`,
+      x, y, size,
+      type: 'void_rift',
+      faction: 'void',
+      name: 'Void Rift',
+      health: voidRift.health,
+      maxHealth: voidRift.health,
+      patrolRadius: voidRift.patrolRadius || 4,
+      isDeepSpace: true
+    });
+  }
+
+  // Scavenger yards in debris fields
+  const scavengerYard = config.SPAWN_HUB_TYPES?.scavenger_yard;
+  if (scavengerYard && rng() < scavengerYard.spawnChance * 2) {
+    const size = scavengerYard.size || 100;
+    const x = sectorMinX + size + rng() * (config.SECTOR_SIZE - size * 2);
+    const y = sectorMinY + size + rng() * (config.SECTOR_SIZE - size * 2);
+
+    sector.bases.push({
+      id: `${sectorX}_${sectorY}_base_scavenger_yard`,
+      x, y, size,
+      type: 'scavenger_yard',
+      faction: 'scavenger',
+      name: 'Scavenger Yard',
+      health: scavengerYard.health,
+      maxHealth: scavengerYard.health,
+      patrolRadius: scavengerYard.patrolRadius || 2,
+      isDeepSpace: true
+    });
+  }
+
+  // Some drifting debris/asteroids in deep space
+  const debrisCount = Math.floor(rng() * 3) + 1;
+  for (let i = 0; i < debrisCount; i++) {
+    const size = config.ASTEROID_SIZE_MIN + rng() * (config.ASTEROID_SIZE_MAX - config.ASTEROID_SIZE_MIN);
+    const x = sectorMinX + size + rng() * (config.SECTOR_SIZE - size * 2);
+    const y = sectorMinY + size + rng() * (config.SECTOR_SIZE - size * 2);
+
+    const speed = 2 + rng() * 5;
+    const angle = rng() * Math.PI * 2;
+
+    sector.asteroids.push({
+      id: `${sectorX}_${sectorY}_debris_${i}`,
+      x, y, size,
+      resources: [['IRON', 'CARBON'][Math.floor(rng() * 2)]],
+      initialX: x,
+      initialY: y,
+      initialVx: Math.cos(angle) * speed,
+      initialVy: Math.sin(angle) * speed,
+      sectorBounds: {
+        minX: sectorMinX,
+        minY: sectorMinY,
+        maxX: sectorMinX + config.SECTOR_SIZE,
+        maxY: sectorMinY + config.SECTOR_SIZE
+      },
+      isDeepSpace: true,
+      isOrbital: false
+    });
+  }
+}
+
+// Legacy sector generation (fallback)
+function generateSectorLegacy(sectorX, sectorY) {
+  const key = `${sectorX}_${sectorY}`;
   const rng = seededRandom(hash(config.GALAXY_SEED, sectorX, sectorY));
 
   const sector = {
@@ -297,8 +536,29 @@ function generateSector(sectorX, sectorY) {
   return sector;
 }
 
-function getObjectById(objectId) {
-  // Parse object ID to get sector and type
+// Helper function to find object in a specific sector
+function findInSector(sector, type, objectId) {
+  if (type === 'asteroid' || type === 'debris') {
+    return sector.asteroids.find(a => a.id === objectId);
+  } else if (type === 'planet') {
+    return sector.planets.find(p => p.id === objectId);
+  } else if (type === 'star') {
+    return sector.stars.find(s => s.id === objectId);
+  } else if (type === 'wormhole') {
+    return sector.wormholes.find(w => w.id === objectId);
+  } else if (type === 'base') {
+    return sector.bases.find(b => b.id === objectId);
+  }
+  return null;
+}
+
+function getObjectById(objectId, debug = false) {
+  // Check for StarSystem ID format: ss_{superX}_{superY}_{systemIndex}_{type}_{objectIndex}
+  if (objectId.startsWith('ss_')) {
+    return getStarSystemObjectById(objectId, debug);
+  }
+
+  // Legacy format: {sectorX}_{sectorY}_{type}_{index}
   const parts = objectId.split('_');
   if (parts.length < 4) {
     console.log('[World] Invalid objectId format:', objectId, 'parts:', parts);
@@ -309,31 +569,167 @@ function getObjectById(objectId) {
   const sectorY = parseInt(parts[1]);
   const type = parts[2];
 
+  if (debug) {
+    console.log('[World] Looking up legacy object:', {
+      objectId,
+      parsedSector: { x: sectorX, y: sectorY },
+      type,
+      idParts: parts
+    });
+  }
+
   const sector = generateSector(sectorX, sectorY);
 
-  // Find object
-  let result = null;
-  if (type === 'asteroid') {
-    result = sector.asteroids.find(a => a.id === objectId);
-    if (!result) {
-      console.log('[World] Asteroid not found:', objectId);
-      console.log('[World] Available asteroids:', sector.asteroids.map(a => a.id));
+  if (debug) {
+    const count = type === 'asteroid' || type === 'debris'
+      ? sector.asteroids.length
+      : type === 'planet'
+        ? sector.planets.length
+        : 0;
+    console.log(`[World] Sector ${sectorX},${sectorY} has ${count} ${type}s`);
+  }
+
+  // Try primary sector first
+  let result = findInSector(sector, type, objectId);
+
+  if (debug && result) {
+    console.log('[World] Found in primary sector');
+  }
+
+  // For orbital objects, check neighboring sectors
+  if (!result && (type === 'asteroid' || type === 'debris' || type === 'planet')) {
+    if (debug) {
+      console.log('[World] Not found in primary sector, checking neighbors...');
     }
-  } else if (type === 'planet') {
-    result = sector.planets.find(p => p.id === objectId);
-    if (!result) {
-      console.log('[World] Planet not found:', objectId);
-      console.log('[World] Available planets:', sector.planets.map(p => p.id));
+    for (let dx = -1; dx <= 1 && !result; dx++) {
+      for (let dy = -1; dy <= 1 && !result; dy++) {
+        if (dx === 0 && dy === 0) continue;
+        const neighborSector = generateSector(sectorX + dx, sectorY + dy);
+        result = findInSector(neighborSector, type, objectId);
+        if (debug && result) {
+          console.log(`[World] Found in neighbor sector ${sectorX + dx},${sectorY + dy}`);
+        }
+      }
     }
-  } else if (type === 'star') {
-    result = sector.stars.find(s => s.id === objectId);
-  } else if (type === 'wormhole') {
-    result = sector.wormholes.find(w => w.id === objectId);
-  } else if (type === 'base') {
-    result = sector.bases.find(b => b.id === objectId);
+  }
+
+  if (!result && (type === 'asteroid' || type === 'debris' || type === 'planet')) {
+    console.log('[World] Object not found after checking neighbors:', objectId);
   }
 
   return result;
+}
+
+// Handle StarSystem ID format:
+// - Stars: ss_{superX}_{superY}_{systemIndex}_star (5 parts)
+// - Others: ss_{superX}_{superY}_{systemIndex}_{type}_{objectIndex} (6 parts)
+function getStarSystemObjectById(objectId, debug = false) {
+  const parts = objectId.split('_');
+  // Stars have 5 parts, other objects (planets, bases, etc.) have 6 parts
+  if (parts.length < 5) {
+    console.log('[World] Invalid StarSystem objectId format:', objectId, 'parts:', parts);
+    return null;
+  }
+
+  // Determine type: for 5-part IDs, type is index 4; for 6-part IDs, type is also index 4
+  const type = parts[4];
+
+  // Stars and wormholes only have 5 parts - validate these cases
+  const singletonTypes = ['star', 'wormhole'];
+  if (singletonTypes.includes(type) && parts.length !== 5) {
+    console.log(`[World] Invalid ${type} objectId format:`, objectId, 'expected 5 parts');
+    return null;
+  }
+
+  // Other objects (planets, bases, asteroids) should have 6 parts (with object index/subtype)
+  if (!singletonTypes.includes(type) && parts.length < 6) {
+    console.log('[World] Invalid StarSystem objectId format:', objectId, 'expected 6 parts for type:', type);
+    return null;
+  }
+
+  const superX = parseInt(parts[1]);
+  const superY = parseInt(parts[2]);
+  const systemIndex = parseInt(parts[3]);
+  // type already declared above at line 635
+  const systemId = `ss_${superX}_${superY}_${systemIndex}`;
+
+  if (debug) {
+    console.log('[World] Looking up StarSystem object:', {
+      objectId,
+      systemId,
+      superSector: { x: superX, y: superY },
+      systemIndex,
+      type
+    });
+  }
+
+  // Get the star system directly
+  const system = StarSystem.getStarSystemById(systemId);
+
+  if (!system) {
+    if (debug) {
+      console.log('[World] StarSystem not found:', systemId);
+    }
+    // Fallback: search through sectors near the super-sector
+    return findStarSystemObjectInSectors(objectId, type, superX, superY, debug);
+  }
+
+  // Find the object within the system
+  let result = null;
+  if (type === 'planet') {
+    result = system.planets.find(p => p.id === objectId);
+  } else if (type === 'asteroid') {
+    // Belt asteroids are generated per-sector, search nearby sectors
+    return findStarSystemObjectInSectors(objectId, type, superX, superY, debug);
+  } else if (type === 'star') {
+    if (system.primaryStar.id === objectId) {
+      result = system.primaryStar;
+    } else if (system.binaryInfo && system.binaryInfo.secondaryStar.id === objectId) {
+      result = system.binaryInfo.secondaryStar;
+    }
+  } else if (type === 'base') {
+    result = system.bases.find(b => b.id === objectId);
+  } else if (type === 'wormhole') {
+    result = system.wormholes.find(w => w.id === objectId);
+  }
+
+  if (debug) {
+    console.log('[World] StarSystem lookup result:', result ? 'Found' : 'Not found');
+  }
+
+  return result;
+}
+
+// Fallback: search for StarSystem objects through generated sectors
+function findStarSystemObjectInSectors(objectId, type, superX, superY, debug = false) {
+  // Super-sectors are larger, convert to approximate regular sector coordinates
+  // Super-sector coordinates map to multiple regular sectors
+  const superSectorSize = config.SUPER_SECTOR_SIZE || 5;
+  const baseSectorX = superX * superSectorSize;
+  const baseSectorY = superY * superSectorSize;
+
+  if (debug) {
+    console.log('[World] Searching sectors around:', { baseSectorX, baseSectorY });
+  }
+
+  // Search a grid of sectors that could contain objects from this super-sector
+  for (let dx = -2; dx <= superSectorSize + 2; dx++) {
+    for (let dy = -2; dy <= superSectorSize + 2; dy++) {
+      const sector = generateSector(baseSectorX + dx, baseSectorY + dy);
+      const result = findInSector(sector, type, objectId);
+      if (result) {
+        if (debug) {
+          console.log(`[World] Found in sector ${baseSectorX + dx},${baseSectorY + dy}`);
+        }
+        return result;
+      }
+    }
+  }
+
+  if (debug) {
+    console.log('[World] StarSystem object not found in any searched sector');
+  }
+  return null;
 }
 
 function isObjectDepleted(objectId) {
@@ -373,40 +769,230 @@ function getObjectPosition(objectId, time) {
   if (!object) return null;
 
   time = time || Physics.getPhysicsTime();
+  const orbitTime = Physics.getOrbitTime();
 
-  // Parse object type from ID
+  // Parse object type from ID - handle both legacy and StarSystem formats
   const parts = objectId.split('_');
-  const type = parts[2];
+  let type, sector;
 
-  // Stars and wormholes don't move
-  if (type === 'star' || type === 'wormhole') {
-    return { x: object.x, y: object.y };
+  if (objectId.startsWith('ss_')) {
+    // StarSystem format: ss_{superX}_{superY}_{systemIndex}_{type}_{objectIndex}
+    type = parts[4]; // type is at index 4
+    // Get sector from object's position or starX/starY
+    const objX = object.starX !== undefined ? object.starX : (object.x || 0);
+    const objY = object.starY !== undefined ? object.starY : (object.y || 0);
+    const sectorX = Math.floor(objX / config.SECTOR_SIZE);
+    const sectorY = Math.floor(objY / config.SECTOR_SIZE);
+    sector = generateSector(sectorX, sectorY);
+  } else {
+    // Legacy format: {sectorX}_{sectorY}_{type}_{index}
+    type = parts[2];
+    const sectorX = parseInt(parts[0]);
+    const sectorY = parseInt(parts[1]);
+    sector = generateSector(sectorX, sectorY);
   }
 
-  // Get sector for stars lookup
-  const sectorX = parseInt(parts[0]);
-  const sectorY = parseInt(parts[1]);
-  const sector = generateSector(sectorX, sectorY);
-
-  // Planets orbit their stars
-  if (type === 'planet') {
-    const star = sector.stars.find(s => s.id === object.starId);
-    if (star && object.orbitSpeed) {
-      return Physics.computePlanetPosition(object, star, time);
+  // Stars - check for binary systems
+  if (type === 'star') {
+    if (object.binaryInfo) {
+      // Binary star - compute current position
+      const positions = Physics.computeBinaryStarPositions(
+        { binaryInfo: object.binaryInfo },
+        orbitTime
+      );
+      if (object.isPrimaryBinary === false) {
+        return { x: positions.secondary.x, y: positions.secondary.y };
+      }
+      return { x: positions.primary.x, y: positions.primary.y };
     }
     return { x: object.x, y: object.y };
   }
 
-  // Asteroids move with physics
-  if (type === 'asteroid') {
+  // Wormholes don't move
+  if (type === 'wormhole') {
+    return { x: object.x, y: object.y };
+  }
+
+  // Planets orbit their stars
+  if (type === 'planet') {
+    // Find parent star to check for binary system
+    const parentStar = object.starId
+      ? sector.stars.find(s => s.id === object.starId)
+      : null;
+
+    let starPos;
+    if (parentStar && parentStar.binaryInfo) {
+      // Binary system - compute current star position
+      const positions = Physics.computeBinaryStarPositions(
+        { binaryInfo: parentStar.binaryInfo },
+        orbitTime
+      );
+      // Use primary or secondary based on which star the planet orbits
+      starPos = parentStar.isPrimaryBinary === false ? positions.secondary : positions.primary;
+    } else if (object.starX !== undefined) {
+      // Static position (non-binary or legacy)
+      starPos = { x: object.starX, y: object.starY };
+    } else if (parentStar) {
+      starPos = { x: parentStar.x, y: parentStar.y };
+    }
+
+    if (starPos && object.orbitSpeed) {
+      return Physics.computePlanetPosition(object, starPos, orbitTime);
+    }
+    return { x: object.x, y: object.y };
+  }
+
+  // Asteroids - orbital vs bouncing
+  if (type === 'asteroid' || type === 'debris') {
+    if (object.isOrbital) {
+      // Orbital belt asteroid - check for binary star system
+      const parentStar = object.starId
+        ? sector.stars.find(s => s.id === object.starId)
+        : null;
+
+      let starPos;
+      if (parentStar && parentStar.binaryInfo) {
+        // Binary system - compute current star position
+        const positions = Physics.computeBinaryStarPositions(
+          { binaryInfo: parentStar.binaryInfo },
+          orbitTime
+        );
+        starPos = parentStar.isPrimaryBinary === false ? positions.secondary : positions.primary;
+      } else if (object.starX !== undefined) {
+        starPos = { x: object.starX, y: object.starY };
+      } else if (parentStar) {
+        starPos = { x: parentStar.x, y: parentStar.y };
+      } else {
+        starPos = { x: object.starX || object.x, y: object.starY || object.y };
+      }
+
+      const pos = Physics.computeBeltAsteroidPosition(object, starPos, orbitTime);
+      return { x: pos.x, y: pos.y, state: 'orbiting', currentAngle: pos.angle };
+    }
     if (object.initialX !== undefined) {
+      // Bouncing/drifting asteroid
       const state = Physics.getAsteroidPosition(object, sector.stars, time);
       return { x: state.x, y: state.y, state: state.state };
     }
     return { x: object.x, y: object.y };
   }
 
+  // Bases - handle orbital bases and binary star systems
+  if (type === 'base') {
+    // Find parent star to check for binary system
+    const parentStar = object.starId
+      ? sector.stars.find(s => s.id === object.starId)
+      : null;
+
+    let starPos;
+    if (parentStar && parentStar.binaryInfo) {
+      // Binary system - compute current star position
+      const positions = Physics.computeBinaryStarPositions(
+        { binaryInfo: parentStar.binaryInfo },
+        orbitTime
+      );
+      starPos = parentStar.isPrimaryBinary === false ? positions.secondary : positions.primary;
+    } else if (object.starX !== undefined) {
+      starPos = { x: object.starX, y: object.starY };
+    } else if (parentStar) {
+      starPos = { x: parentStar.x, y: parentStar.y };
+    }
+
+    // If base has orbital parameters, compute current position
+    if (starPos && object.orbitRadius && object.orbitSpeed) {
+      // Use same calculation as planets/asteroids
+      const elapsedSeconds = orbitTime / 1000;
+      const currentAngle = object.orbitAngle + (object.orbitSpeed * elapsedSeconds);
+      return {
+        x: starPos.x + Math.cos(currentAngle) * object.orbitRadius,
+        y: starPos.y + Math.sin(currentAngle) * object.orbitRadius
+      };
+    }
+
+    // Static base in binary system - compute offset from moving star
+    if (starPos && object.starX !== undefined) {
+      // Base was generated with offset from star's initial position
+      // Compute current position based on star's current position
+      const offsetX = object.x - object.starX;
+      const offsetY = object.y - object.starY;
+      return {
+        x: starPos.x + offsetX,
+        y: starPos.y + offsetY
+      };
+    }
+
+    return { x: object.x, y: object.y };
+  }
+
   return { x: object.x, y: object.y };
+}
+
+/**
+ * Find a safe spawn location away from stars
+ * @param {number} preferX - Preferred X coordinate
+ * @param {number} preferY - Preferred Y coordinate
+ * @param {number} searchRadius - Radius to search for safe spots
+ * @returns {{x: number, y: number}} Safe spawn position
+ */
+function findSafeSpawnLocation(preferX = 0, preferY = 0, searchRadius = 3000) {
+  const minDistFromStar = config.STAR_SIZE_MAX * 2; // Stay 2x max star size away
+
+  // Try the preferred location first
+  if (isLocationSafe(preferX, preferY, minDistFromStar)) {
+    return { x: preferX, y: preferY };
+  }
+
+  // Search in expanding rings
+  for (let radius = 500; radius <= searchRadius; radius += 500) {
+    for (let angle = 0; angle < Math.PI * 2; angle += Math.PI / 4) {
+      const testX = preferX + Math.cos(angle) * radius;
+      const testY = preferY + Math.sin(angle) * radius;
+
+      if (isLocationSafe(testX, testY, minDistFromStar)) {
+        return { x: testX, y: testY };
+      }
+    }
+  }
+
+  // Fallback: find a deep space location (sector far from any system)
+  // Try sectors in a spiral pattern
+  for (let i = 1; i <= 10; i++) {
+    const sectorX = i * 2;
+    const sectorY = i * 2;
+    const testX = sectorX * config.SECTOR_SIZE + config.SECTOR_SIZE / 2;
+    const testY = sectorY * config.SECTOR_SIZE + config.SECTOR_SIZE / 2;
+
+    if (isLocationSafe(testX, testY, minDistFromStar)) {
+      return { x: testX, y: testY };
+    }
+  }
+
+  // Ultimate fallback - return (5000, 5000) which is likely in deep space
+  return { x: 5000, y: 5000 };
+}
+
+/**
+ * Check if a location is safe (not too close to any star)
+ */
+function isLocationSafe(x, y, minDistFromStar) {
+  const sectorX = Math.floor(x / config.SECTOR_SIZE);
+  const sectorY = Math.floor(y / config.SECTOR_SIZE);
+
+  // Check 3x3 sectors around the position
+  for (let dx = -1; dx <= 1; dx++) {
+    for (let dy = -1; dy <= 1; dy++) {
+      const sector = generateSector(sectorX + dx, sectorY + dy);
+
+      for (const star of sector.stars) {
+        const dist = Math.sqrt((x - star.x) ** 2 + (y - star.y) ** 2);
+        if (dist < minDistFromStar) {
+          return false;
+        }
+      }
+    }
+  }
+
+  return true;
 }
 
 module.exports = {
@@ -414,5 +1000,7 @@ module.exports = {
   getObjectById,
   getObjectPosition,
   isObjectDepleted,
-  depleteObject
+  depleteObject,
+  findSafeSpawnLocation,
+  isLocationSafe
 };

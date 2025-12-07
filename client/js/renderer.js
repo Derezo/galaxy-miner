@@ -31,6 +31,21 @@ const Renderer = {
       DeathEffects.init();
     }
 
+    // Initialize base destruction sequence if available
+    if (typeof BaseDestructionSequence !== 'undefined') {
+      BaseDestructionSequence.init();
+    }
+
+    // Initialize linked damage effect if available
+    if (typeof LinkedDamageEffect !== 'undefined') {
+      LinkedDamageEffect.init();
+    }
+
+    // Initialize formation succession effect if available
+    if (typeof FormationSuccessionEffect !== 'undefined') {
+      FormationSuccessionEffect.init();
+    }
+
     // Initialize NPC weapon effects if available
     if (typeof NPCWeaponEffects !== 'undefined') {
       NPCWeaponEffects.init();
@@ -39,6 +54,11 @@ const Renderer = {
     // Initialize faction bases if available
     if (typeof FactionBases !== 'undefined') {
       FactionBases.init();
+    }
+
+    // Initialize star effects if available
+    if (typeof StarEffects !== 'undefined') {
+      StarEffects.init();
     }
 
     console.log('Renderer initialized with advanced graphics');
@@ -67,9 +87,35 @@ const Renderer = {
       DeathEffects.update(dt);
     }
 
+    // Update base destruction sequences
+    if (typeof BaseDestructionSequence !== 'undefined') {
+      BaseDestructionSequence.update(dt);
+    }
+
+    // Update linked damage effect
+    if (typeof LinkedDamageEffect !== 'undefined') {
+      LinkedDamageEffect.update(dt);
+    }
+
+    // Update formation succession effect
+    if (typeof FormationSuccessionEffect !== 'undefined') {
+      FormationSuccessionEffect.update(dt);
+    }
+
     // Update faction bases animation
     if (typeof FactionBases !== 'undefined') {
       FactionBases.update(dt);
+    }
+
+    // Update star effects (corona flares, heat overlay)
+    if (typeof StarEffects !== 'undefined' && typeof Player !== 'undefined') {
+      const objects = World.getVisibleObjects(Player.position, Math.max(this.canvas.width, this.canvas.height));
+      StarEffects.update(dt, objects.stars, Player.position);
+    }
+
+    // Update player death effect sequence
+    if (typeof PlayerDeathEffect !== 'undefined') {
+      PlayerDeathEffect.update(dt);
     }
   },
 
@@ -104,6 +150,20 @@ const Renderer = {
     // Center camera on player
     this.camera.x = Player.position.x - this.canvas.width / 2;
     this.camera.y = Player.position.y - this.canvas.height / 2;
+
+    // Apply screen shake offset from base destruction sequences
+    if (typeof BaseDestructionSequence !== 'undefined') {
+      const shake = BaseDestructionSequence.getScreenShakeOffset();
+      this.camera.x += shake.x;
+      this.camera.y += shake.y;
+    }
+
+    // Apply screen shake from player death effect
+    if (typeof PlayerDeathEffect !== 'undefined') {
+      const deathShake = PlayerDeathEffect.getScreenShakeOffset();
+      this.camera.x += deathShake.x;
+      this.camera.y += deathShake.y;
+    }
   },
 
   worldToScreen(x, y) {
@@ -151,37 +211,161 @@ const Renderer = {
     }
 
     // Draw faction bases (skip destroyed ones)
+    // Use server-sent positions when available for accurate hit detection
     for (const base of objects.bases) {
-      if (!this.isOnScreen(base.x, base.y, base.size)) continue;
       // Skip destroyed bases
       if (typeof Entities !== 'undefined' && Entities.isBaseDestroyed(base.id)) continue;
-      this.drawBase(base);
+
+      // Get server-authoritative position and state if available
+      let renderBase = base;
+      if (typeof Entities !== 'undefined') {
+        const serverBase = Entities.bases.get(base.id);
+        if (serverBase && serverBase.position) {
+          // Use server position for rendering to match hit detection
+          renderBase = {
+            ...base,
+            x: serverBase.position.x,
+            y: serverBase.position.y,
+            health: serverBase.health,
+            maxHealth: serverBase.maxHealth
+          };
+        } else {
+          // Fallback: check for health state only
+          const state = Entities.getBaseState(base.id);
+          if (state && state.health !== undefined) {
+            renderBase = { ...base, health: state.health, maxHealth: state.maxHealth };
+          }
+        }
+      }
+
+      if (!this.isOnScreen(renderBase.x, renderBase.y, renderBase.size)) continue;
+
+      // Merge health state from Entities into base object for rendering
+      let baseWithHealth = renderBase;
+
+      // Use FactionBases module for rendering (with fallback)
+      if (typeof FactionBases !== 'undefined' && FactionBases.draw) {
+        FactionBases.draw(this.ctx, baseWithHealth, this.camera);
+      } else {
+        this.drawBase(baseWithHealth);
+      }
+    }
+
+    // Also render server-known bases that aren't in the procedural list
+    if (typeof Entities !== 'undefined') {
+      const proceduralIds = new Set(objects.bases.map(b => b.id));
+      for (const [baseId, serverBase] of Entities.bases) {
+        if (proceduralIds.has(baseId)) continue; // Already rendered
+        if (Entities.isBaseDestroyed(baseId)) continue;
+        if (!serverBase.position) continue;
+
+        const base = {
+          id: baseId,
+          x: serverBase.position.x,
+          y: serverBase.position.y,
+          size: serverBase.size || 100,
+          faction: serverBase.faction,
+          type: serverBase.type,
+          name: serverBase.name,
+          health: serverBase.health,
+          maxHealth: serverBase.maxHealth
+        };
+
+        if (!this.isOnScreen(base.x, base.y, base.size)) continue;
+
+        if (typeof FactionBases !== 'undefined' && FactionBases.draw) {
+          FactionBases.draw(this.ctx, base, this.camera);
+        } else {
+          this.drawBase(base);
+        }
+      }
     }
   },
 
   drawStar(star) {
     const screen = this.worldToScreen(star.x, star.y);
     const ctx = this.ctx;
+    const size = star.size || 400;
 
-    // Glow effect
+    // Draw corona glow effect first (background layer)
+    if (typeof StarEffects !== 'undefined') {
+      StarEffects.drawCoronaGlow(ctx, screen.x, screen.y, star);
+    }
+
+    // Animated surface turbulence
+    const time = Date.now() * 0.001;
+    const turbulence = 0.95 + Math.sin(time * 3 + star.x * 0.01) * 0.05;
+
+    // Main star body with multi-layer gradient
     const gradient = ctx.createRadialGradient(
       screen.x, screen.y, 0,
-      screen.x, screen.y, star.size
+      screen.x, screen.y, size * turbulence
     );
-    gradient.addColorStop(0, star.color);
-    gradient.addColorStop(0.5, star.color + '88');
+
+    // Get star colors based on type
+    const colorSchemes = {
+      '#ffff00': { core: '#ffffff', mid: '#ffff88', outer: '#ffaa00' },
+      '#ffaa00': { core: '#ffffff', mid: '#ffcc44', outer: '#ff6600' },
+      '#ff6600': { core: '#ffff88', mid: '#ff8844', outer: '#cc2200' },
+      '#ffffff': { core: '#ffffff', mid: '#ddddff', outer: '#8888cc' },
+      '#aaaaff': { core: '#ffffff', mid: '#aaddff', outer: '#4466aa' }
+    };
+    const scheme = colorSchemes[star.color] || colorSchemes['#ffff00'];
+
+    gradient.addColorStop(0, scheme.core);
+    gradient.addColorStop(0.25, scheme.mid);
+    gradient.addColorStop(0.7, star.color);
+    gradient.addColorStop(0.9, scheme.outer + 'aa');
     gradient.addColorStop(1, 'transparent');
 
     ctx.fillStyle = gradient;
     ctx.beginPath();
-    ctx.arc(screen.x, screen.y, star.size, 0, Math.PI * 2);
+    ctx.arc(screen.x, screen.y, size * turbulence, 0, Math.PI * 2);
     ctx.fill();
 
-    // Core
-    ctx.fillStyle = '#ffffff';
+    // Animated dark spots on surface (sunspots)
+    ctx.save();
+    ctx.globalAlpha = 0.15;
+    ctx.fillStyle = '#000000';
+    for (let i = 0; i < 3; i++) {
+      const spotAngle = time * 0.2 + i * 2;
+      const spotDist = size * 0.4 * (0.5 + Math.sin(time * 0.5 + i) * 0.3);
+      const spotX = screen.x + Math.cos(spotAngle) * spotDist;
+      const spotY = screen.y + Math.sin(spotAngle) * spotDist;
+      const spotSize = size * 0.08 * (0.5 + Math.sin(time + i * 1.5) * 0.5);
+
+      ctx.beginPath();
+      ctx.arc(spotX, spotY, spotSize, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
+
+    // Bright white core
+    const coreGradient = ctx.createRadialGradient(
+      screen.x, screen.y, 0,
+      screen.x, screen.y, size * 0.3
+    );
+    coreGradient.addColorStop(0, '#ffffff');
+    coreGradient.addColorStop(0.5, '#ffffee');
+    coreGradient.addColorStop(1, 'transparent');
+
+    ctx.fillStyle = coreGradient;
     ctx.beginPath();
-    ctx.arc(screen.x, screen.y, star.size * 0.3, 0, Math.PI * 2);
+    ctx.arc(screen.x, screen.y, size * 0.3, 0, Math.PI * 2);
     ctx.fill();
+
+    // Draw danger zone indicator (subtle ring at warm zone boundary)
+    const zones = CONSTANTS.STAR_ZONES || { CORONA: 1.5, WARM: 1.3 };
+    ctx.save();
+    ctx.globalAlpha = 0.1 + Math.sin(time * 2) * 0.05;
+    ctx.strokeStyle = '#ff6600';
+    ctx.lineWidth = 2;
+    ctx.setLineDash([10, 20]);
+    ctx.beginPath();
+    ctx.arc(screen.x, screen.y, size * zones.WARM, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.restore();
   },
 
   drawPlanet(planet) {
@@ -251,305 +435,35 @@ const Renderer = {
     ctx.stroke();
   },
 
+  /**
+   * Legacy fallback for base drawing (only used if FactionBases module is unavailable)
+   * @deprecated Use FactionBases module for rendering
+   */
   drawBase(base) {
     const screen = this.worldToScreen(base.x, base.y);
     const ctx = this.ctx;
-    const time = Date.now() / 1000;
 
-    // Faction colors
-    const FACTION_COLORS = {
-      pirate: { primary: '#ff3300', secondary: '#cc2200', glow: '#ff6600' },
-      scavenger: { primary: '#999966', secondary: '#666644', glow: '#cccc88' },
-      swarm: { primary: '#00ff66', secondary: '#00cc44', glow: '#66ff99' },
-      void: { primary: '#9900ff', secondary: '#6600cc', glow: '#cc66ff' },
-      rogue_miner: { primary: '#ff9900', secondary: '#cc7700', glow: '#ffcc00' }
+    // Simple fallback rendering - octagonal base with faction color
+    const colors = {
+      pirate: '#ff3300',
+      scavenger: '#999966',
+      swarm: '#8b0000',
+      void: '#9900ff',
+      rogue_miner: '#ff9900'
     };
 
-    const colors = FACTION_COLORS[base.faction] || FACTION_COLORS.pirate;
+    const color = colors[base.faction] || '#888888';
 
     ctx.save();
     ctx.translate(screen.x, screen.y);
 
-    // Draw based on base type
-    switch (base.type) {
-      case 'pirate_outpost':
-        this.drawPirateOutpost(ctx, base.size, colors, time);
-        break;
-      case 'scavenger_yard':
-        this.drawScavengerYard(ctx, base.size, colors, time);
-        break;
-      case 'swarm_hive':
-        this.drawSwarmHive(ctx, base.size, colors, time);
-        break;
-      case 'void_rift':
-        this.drawVoidRift(ctx, base.size, colors, time);
-        break;
-      case 'mining_claim':
-        this.drawMiningClaim(ctx, base.size, colors, time);
-        break;
-      default:
-        // Generic base
-        this.drawGenericBase(ctx, base.size, colors, time);
-    }
-
-    // Draw name label
-    ctx.fillStyle = '#ffffff';
-    ctx.font = '12px monospace';
-    ctx.textAlign = 'center';
-    ctx.fillText(base.name, 0, base.size + 20);
-
-    // Draw health bar if damaged
-    if (base.health < base.maxHealth) {
-      const barWidth = base.size * 1.5;
-      const barHeight = 6;
-      const healthPct = base.health / base.maxHealth;
-
-      ctx.fillStyle = '#333333';
-      ctx.fillRect(-barWidth / 2, base.size + 25, barWidth, barHeight);
-      ctx.fillStyle = healthPct > 0.5 ? '#00ff00' : healthPct > 0.25 ? '#ffff00' : '#ff0000';
-      ctx.fillRect(-barWidth / 2, base.size + 25, barWidth * healthPct, barHeight);
-    }
-
-    ctx.restore();
-  },
-
-  drawPirateOutpost(ctx, size, colors, time) {
-    // Central station - angular, aggressive design
-    const pulse = 0.9 + Math.sin(time * 2) * 0.1;
-
-    // Main structure (hexagonal)
-    ctx.fillStyle = colors.primary;
-    ctx.beginPath();
-    for (let i = 0; i < 6; i++) {
-      const angle = (i / 6) * Math.PI * 2 - Math.PI / 2;
-      const x = Math.cos(angle) * size * 0.7;
-      const y = Math.sin(angle) * size * 0.7;
-      if (i === 0) ctx.moveTo(x, y);
-      else ctx.lineTo(x, y);
-    }
-    ctx.closePath();
-    ctx.fill();
-
-    // Center core
-    ctx.fillStyle = colors.glow;
-    ctx.globalAlpha = pulse;
-    ctx.beginPath();
-    ctx.arc(0, 0, size * 0.25, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.globalAlpha = 1;
-
-    // Docking arms (3 extending outward)
-    ctx.strokeStyle = colors.secondary;
-    ctx.lineWidth = 8;
-    for (let i = 0; i < 3; i++) {
-      const angle = (i / 3) * Math.PI * 2 + time * 0.1;
-      ctx.beginPath();
-      ctx.moveTo(Math.cos(angle) * size * 0.5, Math.sin(angle) * size * 0.5);
-      ctx.lineTo(Math.cos(angle) * size, Math.sin(angle) * size);
-      ctx.stroke();
-
-      // Docked ship indicator
-      ctx.fillStyle = colors.glow;
-      ctx.beginPath();
-      ctx.arc(Math.cos(angle) * size, Math.sin(angle) * size, 8, 0, Math.PI * 2);
-      ctx.fill();
-    }
-
-    // Warning lights
-    ctx.fillStyle = Math.sin(time * 5) > 0 ? '#ff0000' : '#440000';
-    ctx.beginPath();
-    ctx.arc(size * 0.6, 0, 5, 0, Math.PI * 2);
-    ctx.fill();
-  },
-
-  drawScavengerYard(ctx, size, colors, time) {
-    // Debris field with hidden ships - asymmetric, patched together
-    const pulse = 0.8 + Math.sin(time * 1.5) * 0.2;
-
-    // Scattered debris (irregular shapes)
-    for (let i = 0; i < 8; i++) {
-      const angle = (i / 8) * Math.PI * 2 + i * 0.3;
-      const dist = size * (0.3 + (i % 3) * 0.25);
-      const debrisSize = 10 + (i % 4) * 8;
-
-      ctx.save();
-      ctx.translate(Math.cos(angle) * dist, Math.sin(angle) * dist);
-      ctx.rotate(time * 0.2 + i);
-
-      ctx.fillStyle = i % 3 === 0 ? colors.primary : colors.secondary;
-      ctx.fillRect(-debrisSize / 2, -debrisSize / 3, debrisSize, debrisSize * 0.6);
-      ctx.restore();
-    }
-
-    // Hidden glow at center
-    ctx.fillStyle = colors.glow;
-    ctx.globalAlpha = pulse * 0.5;
-    ctx.beginPath();
-    ctx.arc(0, 0, size * 0.4, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.globalAlpha = 1;
-
-    // Central salvager ship
-    ctx.fillStyle = colors.primary;
-    ctx.beginPath();
-    ctx.moveTo(0, -size * 0.2);
-    ctx.lineTo(size * 0.15, size * 0.15);
-    ctx.lineTo(-size * 0.15, size * 0.15);
-    ctx.closePath();
-    ctx.fill();
-  },
-
-  drawSwarmHive(ctx, size, colors, time) {
-    // Organic biomass cluster with pulsing veins
-    const pulse = 0.8 + Math.sin(time * 3) * 0.2;
-    const breathe = 1 + Math.sin(time * 1.5) * 0.05;
-
-    // Outer membrane
-    ctx.fillStyle = colors.secondary;
-    ctx.beginPath();
-    for (let i = 0; i < 12; i++) {
-      const angle = (i / 12) * Math.PI * 2;
-      const wobble = Math.sin(time * 2 + i) * size * 0.1;
-      const r = size * breathe + wobble;
-      const x = Math.cos(angle) * r;
-      const y = Math.sin(angle) * r;
-      if (i === 0) ctx.moveTo(x, y);
-      else {
-        const cp1x = Math.cos(angle - 0.15) * r * 1.1;
-        const cp1y = Math.sin(angle - 0.15) * r * 1.1;
-        ctx.quadraticCurveTo(cp1x, cp1y, x, y);
-      }
-    }
-    ctx.closePath();
-    ctx.fill();
-
-    // Inner core (pulsing)
-    ctx.fillStyle = colors.glow;
-    ctx.globalAlpha = pulse;
-    ctx.beginPath();
-    ctx.arc(0, 0, size * 0.5 * breathe, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.globalAlpha = 1;
-
-    // Bioluminescent veins
-    ctx.strokeStyle = colors.glow;
-    ctx.lineWidth = 3;
-    ctx.globalAlpha = 0.7;
-    for (let i = 0; i < 6; i++) {
-      const angle = (i / 6) * Math.PI * 2 + time * 0.3;
-      ctx.beginPath();
-      ctx.moveTo(0, 0);
-      const endX = Math.cos(angle) * size * 0.9;
-      const endY = Math.sin(angle) * size * 0.9;
-      const cpX = Math.cos(angle + 0.3) * size * 0.5;
-      const cpY = Math.sin(angle + 0.3) * size * 0.5;
-      ctx.quadraticCurveTo(cpX, cpY, endX, endY);
-      ctx.stroke();
-    }
-    ctx.globalAlpha = 1;
-  },
-
-  drawVoidRift(ctx, size, colors, time) {
-    // Swirling dark portal with purple energy
-    const pulse = 0.7 + Math.sin(time * 4) * 0.3;
-
-    // Outer energy ring
-    ctx.strokeStyle = colors.glow;
-    ctx.lineWidth = 4;
-    ctx.globalAlpha = pulse;
-    ctx.beginPath();
-    ctx.arc(0, 0, size, 0, Math.PI * 2);
-    ctx.stroke();
-    ctx.globalAlpha = 1;
-
-    // Dark center (the rift itself)
-    const gradient = ctx.createRadialGradient(0, 0, 0, 0, 0, size * 0.8);
-    gradient.addColorStop(0, '#000000');
-    gradient.addColorStop(0.5, colors.secondary);
-    gradient.addColorStop(1, 'transparent');
-    ctx.fillStyle = gradient;
-    ctx.beginPath();
-    ctx.arc(0, 0, size * 0.8, 0, Math.PI * 2);
-    ctx.fill();
-
-    // Swirling energy tendrils
-    ctx.strokeStyle = colors.primary;
-    ctx.lineWidth = 2;
-    for (let i = 0; i < 4; i++) {
-      const baseAngle = time * 2 + (i / 4) * Math.PI * 2;
-      ctx.beginPath();
-      for (let j = 0; j < 20; j++) {
-        const t = j / 20;
-        const angle = baseAngle + t * Math.PI * 2;
-        const r = size * 0.2 + t * size * 0.6;
-        const x = Math.cos(angle) * r;
-        const y = Math.sin(angle) * r;
-        if (j === 0) ctx.moveTo(x, y);
-        else ctx.lineTo(x, y);
-      }
-      ctx.stroke();
-    }
-
-    // Central singularity
-    ctx.fillStyle = '#000000';
-    ctx.beginPath();
-    ctx.arc(0, 0, size * 0.15, 0, Math.PI * 2);
-    ctx.fill();
-  },
-
-  drawMiningClaim(ctx, size, colors, time) {
-    // Industrial platform with asteroid
-    const pulse = 0.9 + Math.sin(time * 2) * 0.1;
-
-    // Industrial platform (rectangular)
-    ctx.fillStyle = colors.secondary;
-    ctx.fillRect(-size * 0.8, -size * 0.3, size * 1.6, size * 0.6);
-
-    // Platform details (stripes)
-    ctx.fillStyle = '#000000';
-    for (let i = 0; i < 5; i++) {
-      ctx.fillRect(-size * 0.7 + i * size * 0.35, -size * 0.25, size * 0.05, size * 0.5);
-    }
-
-    // Warning stripes
-    ctx.fillStyle = '#ffff00';
-    ctx.fillRect(-size * 0.8, -size * 0.35, size * 1.6, size * 0.05);
-    ctx.fillRect(-size * 0.8, size * 0.3, size * 1.6, size * 0.05);
-
-    // Central drill/mining rig
-    ctx.fillStyle = colors.primary;
-    ctx.beginPath();
-    ctx.moveTo(0, -size * 0.5);
-    ctx.lineTo(size * 0.2, 0);
-    ctx.lineTo(-size * 0.2, 0);
-    ctx.closePath();
-    ctx.fill();
-
-    // Attached asteroid
-    ctx.fillStyle = '#666666';
-    ctx.beginPath();
-    ctx.arc(size * 0.5, -size * 0.4, size * 0.3, 0, Math.PI * 2);
-    ctx.fill();
-
-    // Mining laser (active)
-    ctx.strokeStyle = colors.glow;
-    ctx.lineWidth = 2;
-    ctx.globalAlpha = pulse;
-    ctx.beginPath();
-    ctx.moveTo(0, -size * 0.3);
-    ctx.lineTo(size * 0.35, -size * 0.35);
-    ctx.stroke();
-    ctx.globalAlpha = 1;
-  },
-
-  drawGenericBase(ctx, size, colors, time) {
     // Simple octagonal base
-    ctx.fillStyle = colors.primary;
+    ctx.fillStyle = color;
     ctx.beginPath();
     for (let i = 0; i < 8; i++) {
       const angle = (i / 8) * Math.PI * 2;
-      const x = Math.cos(angle) * size * 0.8;
-      const y = Math.sin(angle) * size * 0.8;
+      const x = Math.cos(angle) * base.size * 0.8;
+      const y = Math.sin(angle) * base.size * 0.8;
       if (i === 0) ctx.moveTo(x, y);
       else ctx.lineTo(x, y);
     }
@@ -557,15 +471,17 @@ const Renderer = {
     ctx.fill();
 
     // Border
-    ctx.strokeStyle = colors.glow;
-    ctx.lineWidth = 3;
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 2;
     ctx.stroke();
 
-    // Center
-    ctx.fillStyle = colors.glow;
-    ctx.beginPath();
-    ctx.arc(0, 0, size * 0.3, 0, Math.PI * 2);
-    ctx.fill();
+    // Name label
+    ctx.fillStyle = '#ffffff';
+    ctx.font = '12px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText(base.name, 0, base.size + 20);
+
+    ctx.restore();
   },
 
   drawWreckage() {
@@ -576,7 +492,7 @@ const Renderer = {
     const FACTION_COLORS = {
       pirate: '#ff3300',
       scavenger: '#999966',
-      swarm: '#00ff66',
+      swarm: '#8b0000',
       void: '#9900ff',
       rogue_miner: '#ff9900',
       unknown: '#888888'
@@ -745,7 +661,7 @@ const Renderer = {
         );
       }
 
-      this.drawShip(player.position, player.rotation, 'other', player.username, 1);
+      this.drawShip(player.position, player.rotation, 'other', player.username, 1, player.colorId);
 
       // Draw status icon above player if not idle
       if (player.status && player.status !== 'idle') {
@@ -795,6 +711,26 @@ const Renderer = {
       DeathEffects.draw(ctx, this.camera);
     }
 
+    // Draw player death wreckage particles (in world space)
+    if (typeof PlayerDeathEffect !== 'undefined') {
+      PlayerDeathEffect.drawWreckage(ctx, this.camera);
+    }
+
+    // Draw base destruction sequences
+    if (typeof BaseDestructionSequence !== 'undefined') {
+      BaseDestructionSequence.draw(ctx, this.camera);
+    }
+
+    // Draw linked damage effects (swarm)
+    if (typeof LinkedDamageEffect !== 'undefined') {
+      LinkedDamageEffect.draw(ctx, this.camera);
+    }
+
+    // Draw formation succession effects (void)
+    if (typeof FormationSuccessionEffect !== 'undefined') {
+      FormationSuccessionEffect.draw(ctx, this.camera);
+    }
+
     // Draw emotes
     if (typeof EmoteRenderer !== 'undefined') {
       EmoteRenderer.update();
@@ -812,12 +748,19 @@ const Renderer = {
     const ctx = this.ctx;
     const dt = this.lastDt;
     const visualTier = ShipGeometry.getVisualTier(Player.ship);
+    const screen = this.worldToScreen(Player.position.x, Player.position.y);
 
-    // Draw player ship
-    this.drawShip(Player.position, Player.rotation, 'player', Player.username, visualTier);
+    // Draw invulnerability glow if active (behind ship)
+    if (typeof PlayerDeathEffect !== 'undefined' && PlayerDeathEffect.isInvulnerable()) {
+      PlayerDeathEffect.drawInvulnerabilityGlow(ctx, screen.x, screen.y, ShipGeometry.SIZE);
+    }
+
+    // Draw player ship with custom color
+    this.drawShip(Player.position, Player.rotation, 'player', Player.username, visualTier, Player.colorId);
 
     // Draw thrust effect
     if (Player.isThrusting()) {
+      const isBoosting = Player.isBoostActive && Player.isBoostActive();
       ThrustRenderer.draw(
         ctx,
         Player.position,
@@ -826,8 +769,12 @@ const Renderer = {
         this.camera,
         Player.ship.engineTier,
         Player.getThrustIntensity(),
-        dt
+        dt,
+        isBoosting
       );
+    } else if (Player.isBoostActive && Player.isBoostActive()) {
+      // Clear boost trail when not thrusting
+      ThrustRenderer.clearBoostTrail();
     }
 
     // Draw mining progress bar if mining
@@ -842,75 +789,43 @@ const Renderer = {
   },
 
   /**
-   * Draw a ship with tier-based graphics
+   * Draw a ship with tier-based graphics and custom colors
    * @param {Object} position - World position
    * @param {number} rotation - Rotation in radians
    * @param {string} type - 'player', 'other', or 'npc'
    * @param {string} name - Player name (null for NPCs)
    * @param {number} tier - Visual tier 1-5
+   * @param {string} colorId - Optional custom color ID for players
    */
-  drawShip(position, rotation, type, name, tier) {
+  drawShip(position, rotation, type, name, tier, colorId = null) {
     tier = tier || 1;
     const screen = this.worldToScreen(position.x, position.y);
     const ctx = this.ctx;
 
-    // Get colors and scale for this tier
-    const colors = ShipGeometry.COLORS[type]?.[tier] || ShipGeometry.COLORS.other[1];
+    // Get colors using the new getShipColors method that supports custom colors
+    const colors = ShipGeometry.getShipColors(type, tier, colorId);
     const scale = ShipGeometry.SIZE_SCALE[tier] || 1;
     const glowIntensity = ShipGeometry.GLOW_INTENSITY[tier] || 0;
+    const isPlayer = type === 'player';
 
     ctx.save();
     ctx.translate(screen.x, screen.y);
     ctx.rotate(rotation);
-    ctx.scale(scale, scale);
 
-    // Draw outer glow for tier 3+
-    if (glowIntensity > 0) {
-      const glowRadius = CONSTANTS.SHIP_SIZE * (1.5 + tier * 0.2);
-      const gradient = ctx.createRadialGradient(0, 0, CONSTANTS.SHIP_SIZE * 0.5, 0, 0, glowRadius);
-      gradient.addColorStop(0, colors.glow);
-      gradient.addColorStop(1, 'transparent');
-
-      ctx.globalAlpha = glowIntensity;
-      ctx.fillStyle = gradient;
-      ctx.beginPath();
-      ctx.arc(0, 0, glowRadius, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.globalAlpha = 1;
-    }
-
-    // Draw main hull using cached Path2D
-    const shipPath = ShipGeometry.cachedPaths[tier];
-    if (shipPath) {
-      ctx.fillStyle = colors.hull;
-      ctx.fill(shipPath);
-
-      ctx.strokeStyle = '#ffffff';
-      ctx.lineWidth = 1.5;
-      ctx.stroke(shipPath);
-    }
-
-    // Draw cockpit accent (tier 2+)
-    const cockpitPath = ShipGeometry.cachedCockpits[tier];
-    if (cockpitPath) {
-      ctx.fillStyle = colors.accent;
-      ctx.fill(cockpitPath);
-
-      ctx.strokeStyle = '#ffffff40';
-      ctx.lineWidth = 0.5;
-      ctx.stroke(cockpitPath);
-    }
+    // Use the gradient-based drawing for better visuals
+    ShipGeometry.drawWithGradient(ctx, tier, colors, isPlayer);
 
     ctx.restore();
 
-    // Draw name above ship
+    // Draw cockpit accent (tier 2+) - handled by drawWithGradient
+
+    // Draw name tag below ship
     if (name) {
-      const size = CONSTANTS.SHIP_SIZE * scale;
-      ctx.fillStyle = '#ffffff';
+      ctx.fillStyle = colors.accent;
       ctx.font = '12px monospace';
       ctx.textAlign = 'center';
-      ctx.textBaseline = 'bottom';
-      ctx.fillText(name, screen.x, screen.y - size - 8);
+      ctx.textBaseline = 'top';
+      ctx.fillText(name, screen.x, screen.y + ShipGeometry.SIZE * scale + 5);
     }
   },
 
@@ -967,14 +882,18 @@ const Renderer = {
 
     // Get target name and resources
     let targetName = target.type || 'Asteroid';
-    if (target.resources && target.resources.length > 0) {
-      // Show potential resources
-      const resourceNames = target.resources.map(r => {
-        const info = CONSTANTS.RESOURCE_TYPES[r];
-        return info ? info.name : r;
-      });
-      targetName = resourceNames.slice(0, 2).join(', ');
-      if (target.resources.length > 2) targetName += '...';
+    if (target.resources) {
+      // Handle both array and string resources
+      const resourceList = Array.isArray(target.resources) ? target.resources : [target.resources];
+      if (resourceList.length > 0) {
+        // Show potential resources
+        const resourceNames = resourceList.map(r => {
+          const info = CONSTANTS.RESOURCE_TYPES[r];
+          return info ? info.name : r;
+        });
+        targetName = resourceNames.slice(0, 2).join(', ');
+        if (resourceList.length > 2) targetName += '...';
+      }
     }
 
     // Draw progress bar
@@ -1038,8 +957,19 @@ const Renderer = {
   },
 
   drawUI() {
+    // Draw heat overlay when near stars
+    if (typeof StarEffects !== 'undefined') {
+      StarEffects.drawHeatOverlay(this.ctx, this.canvas.width, this.canvas.height);
+      StarEffects.drawZoneWarning(this.ctx, this.canvas.width, this.canvas.height);
+    }
+
     // Draw mining result notification
     this.drawMiningNotification();
+
+    // Draw player death effect overlay (on top of everything)
+    if (typeof PlayerDeathEffect !== 'undefined') {
+      PlayerDeathEffect.draw(this.ctx, this.canvas.width, this.canvas.height);
+    }
   },
 
   addEffect(effect) {
@@ -1056,16 +986,7 @@ const Renderer = {
       const screen = this.worldToScreen(effect.x, effect.y);
       const ctx = this.ctx;
 
-      if (effect.type === 'fire') {
-        // Legacy fire effect - now handled by WeaponRenderer
-        const alpha = 1 - elapsed / effect.duration;
-        ctx.globalAlpha = alpha;
-        ctx.fillStyle = '#ffff00';
-        ctx.beginPath();
-        ctx.arc(screen.x, screen.y, 5, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.globalAlpha = 1;
-      } else if (effect.type === 'damage_number') {
+      if (effect.type === 'damage_number') {
         // Floating damage number
         const alpha = 1 - elapsed / effect.duration;
         const yOffset = -30 - (elapsed * 0.05); // Float upward
@@ -1084,5 +1005,12 @@ const Renderer = {
 
       return true;
     });
+  }
+};
+
+// Global callback for PlayerDeathEffect to complete respawn after death sequence
+window.handleRespawnComplete = function(respawnData) {
+  if (typeof Player !== 'undefined') {
+    Player.onRespawn(respawnData);
   }
 };

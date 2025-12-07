@@ -30,6 +30,23 @@ const TerminalUI = {
       MarketPanel.init();
     }
 
+    if (typeof ShipCustomizationPanel !== 'undefined') {
+      ShipCustomizationPanel.init();
+    }
+
+    // Initialize new ShipUpgradePanel
+    if (typeof ShipUpgradePanel !== 'undefined') {
+      const upgradesContainer = document.getElementById('upgrades-content');
+      if (upgradesContainer) {
+        ShipUpgradePanel.init(upgradesContainer);
+      }
+    }
+
+    // Initialize RelicsPanel
+    if (typeof RelicsPanel !== 'undefined') {
+      RelicsPanel.init();
+    }
+
     console.log('Terminal UI initialized');
   },
 
@@ -89,6 +106,12 @@ const TerminalUI = {
       case 'market':
         document.getElementById('market-content').classList.add('active');
         break;
+      case 'customize':
+        document.getElementById('customize-content').classList.add('active');
+        break;
+      case 'relics':
+        document.getElementById('relics-content').classList.add('active');
+        break;
     }
 
     this.refreshCurrentTab();
@@ -115,7 +138,14 @@ const TerminalUI = {
         }
         break;
       case 'upgrades':
-        if (typeof UpgradesUI !== 'undefined') {
+        // Use new ShipUpgradePanel if available, fallback to old UpgradesUI
+        if (typeof ShipUpgradePanel !== 'undefined') {
+          ShipUpgradePanel.updateData({
+            ship: Player.ship,
+            inventory: Player.inventory || [],
+            credits: Player.credits || 0
+          });
+        } else if (typeof UpgradesUI !== 'undefined') {
           UpgradesUI.refresh();
         }
         break;
@@ -125,6 +155,16 @@ const TerminalUI = {
           MarketPanel.refresh();
         } else if (typeof MarketplaceUI !== 'undefined') {
           MarketplaceUI.refresh();
+        }
+        break;
+      case 'customize':
+        if (typeof ShipCustomizationPanel !== 'undefined') {
+          ShipCustomizationPanel.render();
+        }
+        break;
+      case 'relics':
+        if (typeof RelicsPanel !== 'undefined') {
+          RelicsPanel.refresh();
         }
         break;
     }

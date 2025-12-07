@@ -12,6 +12,12 @@
 const FactionBases = {
   // Animation state
   animationTime: 0,
+  lastParticleSpawn: 0,
+  particleSpawnInterval: 0.1, // Spawn particles every 100ms
+
+  // Damage flash effects (baseId -> { intensity, isShield, time })
+  damageFlashes: new Map(),
+  FLASH_DURATION: 0.3, // seconds
 
   // Base configurations
   CONFIGS: {
@@ -30,11 +36,14 @@ const FactionBases = {
       glowColor: '#cccc0040'
     },
     swarm_hive: {
+      // Stealthy predator hive - black with crimson veins
       size: 90,
-      color: '#00ff66',
-      secondaryColor: '#006633',
-      accentColor: '#66ffaa',
-      glowColor: '#00ff6660'
+      color: '#1a1a1a',
+      secondaryColor: '#0d0d0d',
+      accentColor: '#8b0000',
+      glowColor: '#8b000040',
+      veinColor: '#990000',
+      eyeColor: '#ff0000'
     },
     void_rift: {
       size: 70,
@@ -58,6 +67,36 @@ const FactionBases = {
 
   update(dt) {
     this.animationTime += dt;
+
+    // Update and decay damage flashes
+    for (const [baseId, flash] of this.damageFlashes) {
+      flash.time += dt;
+      flash.intensity = Math.max(0, 1 - (flash.time / this.FLASH_DURATION));
+      if (flash.intensity <= 0) {
+        this.damageFlashes.delete(baseId);
+      }
+    }
+  },
+
+  /**
+   * Add a damage flash effect to a base
+   * @param {string} baseId - Base identifier
+   * @param {number} x - World X position
+   * @param {number} y - World Y position
+   * @param {number} size - Base size
+   * @param {string} faction - Faction type
+   * @param {boolean} isShield - True for shield hit (blue), false for hull hit (orange)
+   */
+  addDamageFlash(baseId, x, y, size, faction, isShield) {
+    this.damageFlashes.set(baseId, {
+      intensity: 1,
+      isShield: isShield,
+      time: 0,
+      x: x,
+      y: y,
+      size: size,
+      faction: faction
+    });
   },
 
   /**
@@ -70,6 +109,12 @@ const FactionBases = {
     const screenX = base.x - camera.x;
     const screenY = base.y - camera.y;
     const config = this.CONFIGS[base.type] || this.CONFIGS.pirate_outpost;
+
+    // Spawn environmental particles (throttled)
+    if (this.animationTime - this.lastParticleSpawn > this.particleSpawnInterval) {
+      this.spawnEnvironmentParticles(base, config);
+      this.lastParticleSpawn = this.animationTime;
+    }
 
     ctx.save();
     ctx.translate(screenX, screenY);
@@ -95,6 +140,12 @@ const FactionBases = {
         this.drawGenericBase(ctx, config);
     }
 
+    // Draw damage flash effect if active
+    const flash = this.damageFlashes.get(base.id);
+    if (flash && flash.intensity > 0) {
+      this.drawDamageFlash(ctx, config.size, flash);
+    }
+
     // Draw health bar if damaged
     if (base.health !== undefined && base.maxHealth !== undefined) {
       const healthPercent = base.health / base.maxHealth;
@@ -104,6 +155,184 @@ const FactionBases = {
     }
 
     ctx.restore();
+  },
+
+  /**
+   * Draw damage flash overlay effect
+   * @param {CanvasRenderingContext2D} ctx
+   * @param {number} baseSize - Size of the base
+   * @param {object} flash - Flash state { intensity, isShield }
+   */
+  drawDamageFlash(ctx, baseSize, flash) {
+    const alpha = flash.intensity * 0.6;
+
+    // Shield hit: blue ripple effect
+    // Hull hit: orange/red flash effect
+    if (flash.isShield) {
+      // Blue shield ripple - expands outward
+      const rippleSize = baseSize * (1.2 + (1 - flash.intensity) * 0.5);
+      const gradient = ctx.createRadialGradient(0, 0, baseSize * 0.3, 0, 0, rippleSize);
+      gradient.addColorStop(0, 'transparent');
+      gradient.addColorStop(0.6, `rgba(0, 170, 255, ${alpha * 0.3})`);
+      gradient.addColorStop(0.8, `rgba(0, 170, 255, ${alpha})`);
+      gradient.addColorStop(1, 'transparent');
+
+      ctx.fillStyle = gradient;
+      ctx.beginPath();
+      ctx.arc(0, 0, rippleSize, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Inner shield glow
+      ctx.fillStyle = `rgba(100, 200, 255, ${alpha * 0.4})`;
+      ctx.beginPath();
+      ctx.arc(0, 0, baseSize * 0.9, 0, Math.PI * 2);
+      ctx.fill();
+    } else {
+      // Hull damage - orange/red flash
+      const gradient = ctx.createRadialGradient(0, 0, 0, 0, 0, baseSize * 1.1);
+      gradient.addColorStop(0, `rgba(255, 100, 0, ${alpha})`);
+      gradient.addColorStop(0.5, `rgba(255, 50, 0, ${alpha * 0.6})`);
+      gradient.addColorStop(1, 'transparent');
+
+      ctx.fillStyle = gradient;
+      ctx.beginPath();
+      ctx.arc(0, 0, baseSize * 1.1, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Fire/damage sparks at random positions
+      if (flash.intensity > 0.5) {
+        ctx.fillStyle = `rgba(255, 200, 0, ${alpha})`;
+        for (let i = 0; i < 5; i++) {
+          const angle = (Math.PI * 2 * i) / 5 + flash.time * 3;
+          const dist = baseSize * (0.4 + Math.random() * 0.4);
+          const sparkX = Math.cos(angle) * dist;
+          const sparkY = Math.sin(angle) * dist;
+          ctx.beginPath();
+          ctx.arc(sparkX, sparkY, 3 + Math.random() * 3, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+    }
+  },
+
+  /**
+   * Spawn environmental particles around the base
+   */
+  spawnEnvironmentParticles(base, config) {
+    if (typeof ParticleSystem === 'undefined') return;
+    if (Math.random() > 0.3) return; // Only spawn sometimes
+
+    const size = config.size;
+
+    switch (base.type) {
+      case 'pirate_outpost':
+        // Exhaust vents - smoke particles
+        if (Math.random() > 0.5) {
+          const ventAngle = Math.random() * Math.PI * 2;
+          ParticleSystem.spawn({
+            x: base.x + Math.cos(ventAngle) * size * 0.6,
+            y: base.y + Math.sin(ventAngle) * size * 0.6,
+            vx: Math.cos(ventAngle) * 20,
+            vy: Math.sin(ventAngle) * 20 - 15,
+            color: '#666666',
+            size: 3 + Math.random() * 3,
+            life: 600 + Math.random() * 400,
+            type: 'smoke',
+            drag: 0.99,
+            decay: 0.7,
+            gravity: -5
+          });
+        }
+        break;
+
+      case 'scavenger_yard':
+        // Cutting sparks
+        if (Math.random() > 0.7) {
+          const sparkX = base.x + (Math.random() - 0.5) * size;
+          const sparkY = base.y + (Math.random() - 0.5) * size;
+          for (let i = 0; i < 3; i++) {
+            const angle = Math.random() * Math.PI * 2;
+            ParticleSystem.spawn({
+              x: sparkX,
+              y: sparkY,
+              vx: Math.cos(angle) * (50 + Math.random() * 80),
+              vy: Math.sin(angle) * (50 + Math.random() * 80),
+              color: '#ffcc00',
+              size: 1 + Math.random(),
+              life: 150 + Math.random() * 100,
+              type: 'spark',
+              drag: 0.95,
+              decay: 1.2
+            });
+          }
+        }
+        break;
+
+      case 'swarm_hive':
+        // Crimson spores
+        if (Math.random() > 0.6) {
+          const sporeAngle = Math.random() * Math.PI * 2;
+          const sporeDist = size * 0.5 + Math.random() * size * 0.5;
+          ParticleSystem.spawn({
+            x: base.x + Math.cos(sporeAngle) * sporeDist,
+            y: base.y + Math.sin(sporeAngle) * sporeDist,
+            vx: (Math.random() - 0.5) * 30,
+            vy: (Math.random() - 0.5) * 30,
+            color: config.veinColor || '#990000',
+            size: 2 + Math.random() * 2,
+            life: 800 + Math.random() * 600,
+            type: 'glow',
+            drag: 0.995,
+            decay: 0.8,
+            pulse: true,
+            pulseSpeed: 3
+          });
+        }
+        break;
+
+      case 'void_rift':
+        // Dust being sucked in
+        if (Math.random() > 0.4) {
+          const dustAngle = Math.random() * Math.PI * 2;
+          const dustDist = size * 1.5 + Math.random() * size;
+          const pullSpeed = 60 + Math.random() * 40;
+          ParticleSystem.spawn({
+            x: base.x + Math.cos(dustAngle) * dustDist,
+            y: base.y + Math.sin(dustAngle) * dustDist,
+            vx: -Math.cos(dustAngle) * pullSpeed,
+            vy: -Math.sin(dustAngle) * pullSpeed,
+            color: config.color,
+            size: 1.5 + Math.random() * 2,
+            life: 400 + Math.random() * 300,
+            type: 'energy',
+            drag: 0.98,
+            decay: 1,
+            pulse: true,
+            pulseSpeed: 5
+          });
+        }
+        break;
+
+      case 'mining_claim':
+        // Rock dust from drilling
+        if (Math.random() > 0.5) {
+          const dustY = base.y + size * 0.1;
+          ParticleSystem.spawn({
+            x: base.x + (Math.random() - 0.5) * 20,
+            y: dustY,
+            vx: (Math.random() - 0.5) * 40,
+            vy: -20 - Math.random() * 30,
+            color: '#aa8866',
+            size: 2 + Math.random() * 2,
+            life: 500 + Math.random() * 300,
+            type: 'smoke',
+            drag: 0.98,
+            decay: 0.9,
+            gravity: 20
+          });
+        }
+        break;
+    }
   },
 
   drawPirateOutpost(ctx, config) {
@@ -143,16 +372,60 @@ const FactionBases = {
     ctx.arc(0, 0, size * 0.25, 0, Math.PI * 2);
     ctx.fill();
 
-    // Docking arms (4 extending arms)
+    // Skull insignia in center
+    this.drawSkullInsignia(ctx, 0, 0, size * 0.18);
+
+    // Rotating turrets on docking arms
+    const turretRotation = time * 0.5;
     ctx.strokeStyle = config.secondaryColor;
     ctx.lineWidth = 8;
     for (let i = 0; i < 4; i++) {
       const angle = (Math.PI * 2 * i) / 4 + Math.PI / 4;
+      const armEndX = Math.cos(angle) * size;
+      const armEndY = Math.sin(angle) * size;
+
+      // Docking arm
       ctx.beginPath();
       ctx.moveTo(Math.cos(angle) * size * 0.5, Math.sin(angle) * size * 0.5);
-      ctx.lineTo(Math.cos(angle) * size, Math.sin(angle) * size);
+      ctx.lineTo(armEndX, armEndY);
+      ctx.stroke();
+
+      // Turret base
+      ctx.fillStyle = config.secondaryColor;
+      ctx.beginPath();
+      ctx.arc(armEndX, armEndY, 8, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Rotating turret barrel
+      const barrelAngle = turretRotation + i * 0.7;
+      const barrelLength = 12;
+      ctx.strokeStyle = config.color;
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(armEndX, armEndY);
+      ctx.lineTo(
+        armEndX + Math.cos(barrelAngle) * barrelLength,
+        armEndY + Math.sin(barrelAngle) * barrelLength
+      );
       ctx.stroke();
     }
+
+    // Scanning light beam
+    const scanAngle = time * 1.5;
+    const scanLength = size * 1.2;
+    ctx.save();
+    ctx.rotate(scanAngle);
+    const scanGradient = ctx.createLinearGradient(0, 0, scanLength, 0);
+    scanGradient.addColorStop(0, '#ff000060');
+    scanGradient.addColorStop(1, 'transparent');
+    ctx.fillStyle = scanGradient;
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    ctx.lineTo(scanLength, -8);
+    ctx.lineTo(scanLength, 8);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
 
     // Blinking red lights
     const blinkPhase = Math.floor(time * 2) % 4;
@@ -174,6 +447,54 @@ const FactionBases = {
         ctx.fill();
       }
     }
+  },
+
+  /**
+   * Draw a skull insignia
+   */
+  drawSkullInsignia(ctx, x, y, size) {
+    ctx.save();
+    ctx.translate(x, y);
+
+    // Skull outline
+    ctx.fillStyle = '#ffffff';
+    ctx.strokeStyle = '#000000';
+    ctx.lineWidth = 1;
+
+    // Head shape
+    ctx.beginPath();
+    ctx.ellipse(0, -size * 0.1, size * 0.7, size * 0.8, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+
+    // Jaw
+    ctx.beginPath();
+    ctx.moveTo(-size * 0.5, size * 0.3);
+    ctx.lineTo(-size * 0.3, size * 0.8);
+    ctx.lineTo(size * 0.3, size * 0.8);
+    ctx.lineTo(size * 0.5, size * 0.3);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+
+    // Eye sockets
+    ctx.fillStyle = '#000000';
+    ctx.beginPath();
+    ctx.ellipse(-size * 0.25, -size * 0.15, size * 0.2, size * 0.25, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.ellipse(size * 0.25, -size * 0.15, size * 0.2, size * 0.25, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Nose hole
+    ctx.beginPath();
+    ctx.moveTo(0, size * 0.15);
+    ctx.lineTo(-size * 0.1, size * 0.35);
+    ctx.lineTo(size * 0.1, size * 0.35);
+    ctx.closePath();
+    ctx.fill();
+
+    ctx.restore();
   },
 
   drawScavengerYard(ctx, config) {
@@ -220,6 +541,39 @@ const FactionBases = {
       ctx.restore();
     }
 
+    // Crane arm with animated swing
+    const craneAngle = Math.sin(time * 0.3) * 0.4;
+    const craneLength = size * 0.8;
+    ctx.save();
+    ctx.rotate(craneAngle - Math.PI / 4);
+
+    // Crane base
+    ctx.fillStyle = config.color;
+    ctx.beginPath();
+    ctx.arc(0, 0, 12, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Crane arm
+    ctx.strokeStyle = config.secondaryColor;
+    ctx.lineWidth = 6;
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    ctx.lineTo(craneLength, 0);
+    ctx.stroke();
+
+    // Claw at end (open/close animation)
+    const clawOpen = 0.3 + Math.sin(time * 2) * 0.15;
+    ctx.strokeStyle = config.color;
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(craneLength, 0);
+    ctx.lineTo(craneLength + 15, -15 * clawOpen);
+    ctx.moveTo(craneLength, 0);
+    ctx.lineTo(craneLength + 15, 15 * clawOpen);
+    ctx.stroke();
+
+    ctx.restore();
+
     // Central salvage node with hidden glow
     const pulseIntensity = 0.5 + Math.sin(time * 2) * 0.3;
     ctx.fillStyle = `rgba(204, 204, 0, ${pulseIntensity * 0.3})`;
@@ -227,10 +581,46 @@ const FactionBases = {
     ctx.arc(0, 0, size * 0.4, 0, Math.PI * 2);
     ctx.fill();
 
-    ctx.fillStyle = config.accentColor;
+    // Gear insignia in center
+    this.drawGearInsignia(ctx, 0, 0, 15);
+  },
+
+  /**
+   * Draw a gear insignia
+   */
+  drawGearInsignia(ctx, x, y, size) {
+    ctx.save();
+    ctx.translate(x, y);
+
+    const teeth = 8;
+    const innerRadius = size * 0.5;
+    const outerRadius = size * 0.85;
+
+    ctx.fillStyle = '#cccc00';
+    ctx.strokeStyle = '#666666';
+    ctx.lineWidth = 1;
+
     ctx.beginPath();
-    ctx.arc(0, 0, 8, 0, Math.PI * 2);
+    for (let i = 0; i < teeth * 2; i++) {
+      const angle = (Math.PI * 2 * i) / (teeth * 2);
+      const r = (i % 2 === 0) ? outerRadius : innerRadius;
+      if (i === 0) {
+        ctx.moveTo(Math.cos(angle) * r, Math.sin(angle) * r);
+      } else {
+        ctx.lineTo(Math.cos(angle) * r, Math.sin(angle) * r);
+      }
+    }
+    ctx.closePath();
     ctx.fill();
+    ctx.stroke();
+
+    // Center hole
+    ctx.fillStyle = '#333333';
+    ctx.beginPath();
+    ctx.arc(0, 0, size * 0.25, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.restore();
   },
 
   drawSwarmHive(ctx, config) {
@@ -247,13 +637,50 @@ const FactionBases = {
     ctx.arc(0, 0, size * 1.4, 0, Math.PI * 2);
     ctx.fill();
 
+    // Spawn pods (bulging sacs around the edge)
+    for (let i = 0; i < 5; i++) {
+      const podAngle = (Math.PI * 2 * i) / 5 + time * 0.1;
+      const podDist = size * 0.55;
+      const podX = Math.cos(podAngle) * podDist;
+      const podY = Math.sin(podAngle) * podDist;
+
+      // Pod bulge animation (one at a time cycles through)
+      const activePod = Math.floor(time * 0.5) % 5;
+      const isActive = i === activePod;
+      const bulgePhase = isActive ? Math.sin((time * 2) % Math.PI) : 0;
+      const podSize = size * 0.18 * (1 + bulgePhase * 0.4);
+
+      // Pod membrane
+      const podGradient = ctx.createRadialGradient(podX, podY, 0, podX, podY, podSize);
+      podGradient.addColorStop(0, config.veinColor || '#990000');
+      podGradient.addColorStop(0.6, config.secondaryColor);
+      podGradient.addColorStop(1, config.color);
+
+      ctx.fillStyle = podGradient;
+      ctx.beginPath();
+      ctx.ellipse(podX, podY, podSize * 0.8, podSize, podAngle, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Veins on pod
+      if (isActive) {
+        ctx.strokeStyle = config.eyeColor || '#ff0000';
+        ctx.lineWidth = 1;
+        ctx.globalAlpha = 0.6;
+        ctx.beginPath();
+        ctx.moveTo(podX, podY);
+        ctx.lineTo(podX + Math.cos(podAngle) * podSize, podY + Math.sin(podAngle) * podSize);
+        ctx.stroke();
+        ctx.globalAlpha = 1;
+      }
+    }
+
     // Organic mass - bulbous shape
     ctx.fillStyle = config.secondaryColor;
     ctx.beginPath();
     for (let i = 0; i < 36; i++) {
       const angle = (Math.PI * 2 * i) / 36;
       const wobble = Math.sin(angle * 5 + time) * size * 0.1;
-      const r = size * 0.7 + wobble;
+      const r = size * 0.5 + wobble;
       if (i === 0) {
         ctx.moveTo(Math.cos(angle) * r, Math.sin(angle) * r);
       } else {
@@ -263,39 +690,63 @@ const FactionBases = {
     ctx.closePath();
     ctx.fill();
 
-    // Pulsing veins
-    ctx.strokeStyle = config.color;
+    // Blood flow veins (animated pulse traveling along vein)
     ctx.lineWidth = 3;
     for (let i = 0; i < 6; i++) {
       const baseAngle = (Math.PI * 2 * i) / 6;
-      const pulseOffset = Math.sin(time * 3 + i) * 0.2;
 
-      ctx.globalAlpha = 0.6 + pulseOffset;
+      // Vein base
+      ctx.strokeStyle = config.veinColor || '#990000';
+      ctx.globalAlpha = 0.4;
       ctx.beginPath();
       ctx.moveTo(0, 0);
-
-      // Curved vein path
-      const midX = Math.cos(baseAngle + 0.2) * size * 0.4;
-      const midY = Math.sin(baseAngle + 0.2) * size * 0.4;
-      const endX = Math.cos(baseAngle) * size * 0.65;
-      const endY = Math.sin(baseAngle) * size * 0.65;
-
+      const midX = Math.cos(baseAngle + 0.2) * size * 0.25;
+      const midY = Math.sin(baseAngle + 0.2) * size * 0.25;
+      const endX = Math.cos(baseAngle) * size * 0.45;
+      const endY = Math.sin(baseAngle) * size * 0.45;
       ctx.quadraticCurveTo(midX, midY, endX, endY);
       ctx.stroke();
+
+      // Blood pulse traveling along vein
+      const pulsePos = (time * 2 + i * 0.5) % 1;
+      const pulseX = midX * pulsePos * 2;
+      const pulseY = midY * pulsePos * 2;
+
+      ctx.fillStyle = config.eyeColor || '#ff0000';
+      ctx.globalAlpha = 0.8 * (1 - pulsePos);
+      ctx.beginPath();
+      ctx.arc(pulseX, pulseY, 3, 0, Math.PI * 2);
+      ctx.fill();
     }
     ctx.globalAlpha = 1;
 
-    // Central eye/core
+    // Central eye/core with mandible design
     const eyePulse = 0.8 + Math.sin(time * 4) * 0.2;
+    const eyeSize = size * 0.15 * eyePulse;
+
+    // Outer ring (mandible/eye socket)
+    ctx.strokeStyle = config.veinColor || '#990000';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(0, 0, eyeSize * 1.3, 0, Math.PI * 2);
+    ctx.stroke();
+
+    // Eye glow
     ctx.fillStyle = config.accentColor;
     ctx.beginPath();
-    ctx.arc(0, 0, size * 0.15 * eyePulse, 0, Math.PI * 2);
+    ctx.arc(0, 0, eyeSize, 0, Math.PI * 2);
     ctx.fill();
 
-    // Pupil
+    // Pupil (vertical slit)
     ctx.fillStyle = '#000000';
     ctx.beginPath();
-    ctx.arc(0, 0, size * 0.06, 0, Math.PI * 2);
+    ctx.ellipse(0, 0, size * 0.02, size * 0.08, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Eye highlight
+    ctx.fillStyle = '#ffffff40';
+    ctx.beginPath();
+    ctx.arc(-size * 0.03, -size * 0.04, size * 0.02, 0, Math.PI * 2);
     ctx.fill();
   },
 

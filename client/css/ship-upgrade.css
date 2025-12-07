@@ -1,0 +1,547 @@
+/* Ship Upgrade Panel Styles */
+
+/* Main panel container */
+.ship-upgrade-panel {
+  display: flex;
+  gap: 12px;
+  padding: 10px;
+  background: linear-gradient(135deg, rgba(10, 20, 30, 0.95), rgba(20, 30, 50, 0.95));
+  border: 1px solid rgba(0, 255, 255, 0.3);
+  border-radius: 8px;
+  color: #e0e0e0;
+  font-family: 'Consolas', 'Monaco', monospace;
+}
+
+/* Left panel - Ship preview and part selector */
+.ship-upgrade-left {
+  flex: 0 0 260px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* Ship preview canvas container */
+.ship-preview-container {
+  background: radial-gradient(ellipse at center, rgba(0, 50, 80, 0.4), rgba(0, 20, 40, 0.8));
+  border: 1px solid rgba(0, 255, 255, 0.2);
+  border-radius: 6px;
+  padding: 6px;
+  position: relative;
+  overflow: hidden;
+}
+
+.ship-preview-container::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background:
+    linear-gradient(90deg, transparent 49%, rgba(0, 255, 255, 0.03) 50%, transparent 51%),
+    linear-gradient(0deg, transparent 49%, rgba(0, 255, 255, 0.03) 50%, transparent 51%);
+  background-size: 20px 20px;
+  pointer-events: none;
+}
+
+.ship-preview-canvas {
+  display: block;
+  width: 100%;
+  height: 180px;
+}
+
+.ship-preview-label {
+  position: absolute;
+  top: 8px;
+  left: 10px;
+  font-size: 10px;
+  color: rgba(0, 255, 255, 0.5);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+/* Part selector grid */
+.part-selector {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+}
+
+.part-icon-wrapper {
+  position: relative;
+  aspect-ratio: 1;
+  cursor: pointer;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.3);
+  border: 2px solid rgba(100, 100, 100, 0.3);
+  transition: all 0.2s ease;
+  overflow: hidden;
+}
+
+.part-icon-wrapper:hover {
+  border-color: rgba(0, 255, 255, 0.5);
+  background: rgba(0, 50, 80, 0.4);
+  transform: scale(1.05);
+}
+
+.part-icon-wrapper.selected {
+  border-color: #00ffff;
+  background: rgba(0, 100, 150, 0.4);
+  box-shadow: 0 0 15px rgba(0, 255, 255, 0.3);
+}
+
+.part-icon-wrapper.selected::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border: 1px solid rgba(0, 255, 255, 0.5);
+  border-radius: 4px;
+  animation: selectedPulse 1.5s ease-in-out infinite;
+}
+
+@keyframes selectedPulse {
+  0%, 100% { opacity: 0.3; }
+  50% { opacity: 0.8; }
+}
+
+.part-icon {
+  width: 100%;
+  height: 100%;
+  padding: 6px;
+  box-sizing: border-box;
+}
+
+/* Tier badge on part icons */
+.part-tier-badge {
+  position: absolute;
+  bottom: 2px;
+  right: 2px;
+  font-size: 9px;
+  font-weight: bold;
+  padding: 1px 4px;
+  border-radius: 3px;
+  background: rgba(0, 0, 0, 0.7);
+  color: #00ffff;
+  border: 1px solid rgba(0, 255, 255, 0.3);
+}
+
+.part-tier-badge.tier-1 { color: #888; border-color: #444; }
+.part-tier-badge.tier-2 { color: #4a9eff; border-color: rgba(74, 158, 255, 0.5); }
+.part-tier-badge.tier-3 { color: #9b4aff; border-color: rgba(155, 74, 255, 0.5); }
+.part-tier-badge.tier-4 { color: #ff9b4a; border-color: rgba(255, 155, 74, 0.5); }
+.part-tier-badge.tier-5 { color: #ff4a4a; border-color: rgba(255, 74, 74, 0.5); }
+
+/* Part tooltip */
+.part-tooltip {
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(0, 0, 0, 0.9);
+  border: 1px solid rgba(0, 255, 255, 0.4);
+  padding: 6px 10px;
+  border-radius: 4px;
+  white-space: nowrap;
+  font-size: 11px;
+  color: #fff;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.2s;
+  z-index: 100;
+  margin-bottom: 5px;
+}
+
+.part-icon-wrapper:hover .part-tooltip {
+  opacity: 1;
+}
+
+.part-tooltip::after {
+  content: '';
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  border: 5px solid transparent;
+  border-top-color: rgba(0, 255, 255, 0.4);
+}
+
+/* Right panel - Upgrade details */
+.ship-upgrade-right {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+/* Component header */
+.component-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid rgba(0, 255, 255, 0.2);
+}
+
+.component-icon-large {
+  width: 40px;
+  height: 40px;
+  flex-shrink: 0;
+}
+
+.component-title {
+  flex: 1;
+}
+
+.component-name {
+  font-size: 16px;
+  font-weight: bold;
+  color: #00ffff;
+  text-transform: uppercase;
+  margin: 0;
+}
+
+.component-tier-display {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 2px;
+}
+
+.tier-dots {
+  display: flex;
+  gap: 3px;
+}
+
+.tier-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: rgba(50, 50, 50, 0.8);
+  border: 1px solid rgba(100, 100, 100, 0.5);
+  transition: all 0.3s ease;
+}
+
+.tier-dot.filled {
+  background: linear-gradient(135deg, #00ffff, #0088ff);
+  border-color: #00ffff;
+  box-shadow: 0 0 6px rgba(0, 255, 255, 0.5);
+}
+
+.tier-dot.next {
+  background: rgba(0, 255, 255, 0.2);
+  border-color: rgba(0, 255, 255, 0.5);
+  animation: nextTierPulse 1s ease-in-out infinite;
+}
+
+@keyframes nextTierPulse {
+  0%, 100% { opacity: 0.5; }
+  50% { opacity: 1; }
+}
+
+/* Stats section - vertical layout */
+.stats-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.stats-column {
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid rgba(0, 255, 255, 0.15);
+  border-radius: 4px;
+  padding: 8px 10px;
+}
+
+.stats-column.next-tier {
+  background: rgba(0, 40, 60, 0.4);
+  border-color: rgba(74, 255, 74, 0.2);
+}
+
+.stats-column-header {
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.5);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  margin-bottom: 6px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid rgba(0, 255, 255, 0.1);
+}
+
+.stats-column.next-tier .stats-column-header {
+  color: rgba(74, 255, 74, 0.7);
+  border-bottom-color: rgba(74, 255, 74, 0.15);
+}
+
+.stat-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 2px 0;
+  font-size: 11px;
+}
+
+.stat-name {
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.stat-value {
+  color: #00ffff;
+  font-weight: bold;
+}
+
+.stat-value.improved {
+  color: #4aff4a;
+}
+
+.stat-value.new {
+  color: #ffcc00;
+}
+
+.stat-change {
+  font-size: 9px;
+  color: #4aff4a;
+  margin-left: 4px;
+}
+
+/* Requirements section */
+.requirements-section {
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid rgba(0, 255, 255, 0.15);
+  border-radius: 4px;
+  padding: 8px 10px;
+}
+
+.requirements-header {
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.5);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  margin-bottom: 6px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid rgba(0, 255, 255, 0.1);
+}
+
+.requirement-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 3px 0;
+  font-size: 11px;
+}
+
+.requirement-name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: rgba(255, 255, 255, 0.8);
+}
+
+.requirement-icon {
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+}
+
+.requirement-values {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.requirement-have {
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.requirement-need {
+  font-weight: bold;
+}
+
+.requirement-need.affordable {
+  color: #4aff4a;
+}
+
+.requirement-need.insufficient {
+  color: #ff4a4a;
+}
+
+.requirement-check {
+  width: 16px;
+  text-align: center;
+}
+
+.requirement-check.met::before {
+  content: '\2713';
+  color: #4aff4a;
+}
+
+.requirement-check.unmet::before {
+  content: '\2717';
+  color: #ff4a4a;
+}
+
+/* Upgrade button - positioned in header */
+.upgrade-button {
+  padding: 8px 16px;
+  font-size: 11px;
+  font-weight: bold;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  position: relative;
+  overflow: hidden;
+  flex-shrink: 0;
+  min-width: 90px;
+}
+
+.upgrade-button.available {
+  background: linear-gradient(135deg, #006666, #009999);
+  color: #ffffff;
+  border: 2px solid #00ffff;
+  box-shadow: 0 0 20px rgba(0, 255, 255, 0.3);
+}
+
+.upgrade-button.available:hover {
+  background: linear-gradient(135deg, #008888, #00bbbb);
+  box-shadow: 0 0 30px rgba(0, 255, 255, 0.5);
+  transform: translateY(-2px);
+}
+
+.upgrade-button.available:active {
+  transform: translateY(0);
+  box-shadow: 0 0 15px rgba(0, 255, 255, 0.3);
+}
+
+.upgrade-button.available::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.2), transparent);
+  animation: buttonShine 2s infinite;
+}
+
+@keyframes buttonShine {
+  0% { left: -100%; }
+  50%, 100% { left: 100%; }
+}
+
+.upgrade-button.unavailable {
+  background: rgba(50, 50, 50, 0.8);
+  color: rgba(255, 255, 255, 0.4);
+  border: 2px solid rgba(100, 100, 100, 0.4);
+  cursor: not-allowed;
+}
+
+.upgrade-button.max-tier {
+  background: linear-gradient(135deg, #333, #444);
+  color: #888;
+  border: 2px solid #555;
+  cursor: default;
+}
+
+.upgrade-button.max-tier::after {
+  content: 'MAX TIER';
+}
+
+/* Max tier state */
+.max-tier-message {
+  text-align: center;
+  padding: 12px;
+  color: rgba(255, 255, 255, 0.5);
+  font-style: italic;
+  font-size: 12px;
+}
+
+.max-tier-badge {
+  display: inline-block;
+  padding: 3px 10px;
+  background: linear-gradient(135deg, #ff9900, #ffcc00);
+  color: #000;
+  font-weight: bold;
+  font-size: 11px;
+  border-radius: 20px;
+  margin-bottom: 6px;
+}
+
+/* Loading state */
+.upgrade-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.upgrade-loading-spinner {
+  width: 14px;
+  height: 14px;
+  border: 2px solid rgba(0, 255, 255, 0.3);
+  border-top-color: #00ffff;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* Success animation */
+.upgrade-success-flash {
+  animation: successFlash 0.5s ease-out;
+}
+
+@keyframes successFlash {
+  0% {
+    background-color: rgba(0, 255, 100, 0.3);
+    box-shadow: inset 0 0 50px rgba(0, 255, 100, 0.5);
+  }
+  100% {
+    background-color: transparent;
+    box-shadow: none;
+  }
+}
+
+/* Error message */
+.upgrade-error {
+  background: rgba(255, 50, 50, 0.2);
+  border: 1px solid rgba(255, 50, 50, 0.4);
+  border-radius: 4px;
+  padding: 8px 12px;
+  font-size: 12px;
+  color: #ff6666;
+  margin-top: 10px;
+}
+
+/* Responsive adjustments */
+@media (max-width: 600px) {
+  .ship-upgrade-panel {
+    flex-direction: column;
+  }
+
+  .ship-upgrade-left {
+    flex: none;
+  }
+}
+
+/* Scrollbar styling for the panel */
+.ship-upgrade-panel::-webkit-scrollbar {
+  width: 6px;
+}
+
+.ship-upgrade-panel::-webkit-scrollbar-track {
+  background: rgba(0, 0, 0, 0.3);
+  border-radius: 3px;
+}
+
+.ship-upgrade-panel::-webkit-scrollbar-thumb {
+  background: rgba(0, 255, 255, 0.3);
+  border-radius: 3px;
+}
+
+.ship-upgrade-panel::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 255, 255, 0.5);
+}

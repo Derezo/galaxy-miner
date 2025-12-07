@@ -2,17 +2,37 @@
 
 const config = require('../config');
 const world = require('../world');
-const { statements } = require('../database');
+const { statements, safeUpsertInventory } = require('../database');
 
 // Track active mining sessions: playerId -> { objectId, startTime, ... }
 const activeMining = new Map();
 
 function startMining(playerId, playerPosition, objectId) {
+  // Debug logging for mining issues
+  console.log('[Mining] Start request:', {
+    playerId,
+    objectId,
+    playerPosition: { x: Math.round(playerPosition.x), y: Math.round(playerPosition.y) },
+    playerSector: {
+      x: Math.floor(playerPosition.x / config.SECTOR_SIZE),
+      y: Math.floor(playerPosition.y / config.SECTOR_SIZE)
+    }
+  });
+
   // Check if object exists
-  const object = world.getObjectById(objectId);
+  const object = world.getObjectById(objectId, true); // Enable debug mode
   if (!object) {
+    console.log('[Mining] FAILED - Object not found:', objectId);
     return { success: false, error: 'Object not found' };
   }
+
+  console.log('[Mining] Object found:', {
+    id: object.id,
+    hasResources: !!object.resources,
+    size: object.size,
+    isOrbital: object.isOrbital,
+    starId: object.starId
+  });
 
   // Check if already depleted
   if (world.isObjectDepleted(objectId)) {
@@ -36,7 +56,8 @@ function startMining(playerId, playerPosition, objectId) {
   // Check cargo capacity
   const ship = statements.getShipByUserId.get(playerId);
   const cargoUsed = statements.getTotalCargoCount.get(playerId).total;
-  const cargoMax = config.BASE_CARGO_CAPACITY * Math.pow(config.TIER_MULTIPLIER, ship.cargo_tier - 1);
+  const cargoTier = ship.cargo_tier || 1;
+  const cargoMax = config.CARGO_CAPACITY[cargoTier] || config.CARGO_CAPACITY[1];
 
   if (cargoUsed >= cargoMax) {
     return { success: false, error: 'Cargo hold full' };
@@ -52,7 +73,9 @@ function startMining(playerId, playerPosition, objectId) {
   });
 
   // Return target info for broadcast
-  const resources = object.resources || [];
+  // Handle both array and string resources
+  const rawResources = object.resources || [];
+  const resources = Array.isArray(rawResources) ? rawResources : [rawResources];
   return {
     success: true,
     object,
@@ -95,9 +118,10 @@ function completeMining(playerId) {
     return { success: false, error: 'Resource was depleted' };
   }
 
-  // Get resources from object
-  const resources = session.object.resources || [];
-  if (resources.length === 0) {
+  // Get resources from object (handle both array and string)
+  const rawResources = session.object.resources || [];
+  const resources = Array.isArray(rawResources) ? rawResources : [rawResources];
+  if (resources.length === 0 || (resources.length === 1 && !resources[0])) {
     activeMining.delete(playerId);
     return { success: false, error: 'No resources to mine' };
   }
@@ -119,16 +143,21 @@ function completeMining(playerId) {
   // Check cargo space
   const cargoUsed = statements.getTotalCargoCount.get(playerId).total;
   const ship = statements.getShipByUserId.get(playerId);
-  const cargoMax = config.BASE_CARGO_CAPACITY * Math.pow(config.TIER_MULTIPLIER, ship.cargo_tier - 1);
+  const cargoTier = ship.cargo_tier || 1;
+  const cargoMax = config.CARGO_CAPACITY[cargoTier] || config.CARGO_CAPACITY[1];
 
   const actualQuantity = Math.min(quantity, Math.floor(cargoMax - cargoUsed));
-  if (actualQuantity <= 0) {
+  if (actualQuantity <= 0 || Number.isNaN(actualQuantity)) {
     activeMining.delete(playerId);
     return { success: false, error: 'Cargo hold full' };
   }
 
-  // Add to inventory
-  statements.upsertInventory.run(playerId, resourceType, actualQuantity);
+  // Add to inventory using safe wrapper (validates inputs)
+  const insertResult = safeUpsertInventory(playerId, resourceType, actualQuantity);
+  if (insertResult.changes === 0) {
+    activeMining.delete(playerId);
+    return { success: false, error: 'Failed to add resource to inventory' };
+  }
 
   // Mark object as depleted
   world.depleteObject(session.objectId);

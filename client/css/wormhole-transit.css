@@ -1,0 +1,190 @@
+/**
+ * Wormhole Transit UI Styles
+ */
+
+/* Full-screen overlay */
+.wormhole-transit-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  z-index: 1000;
+  pointer-events: all;
+}
+
+.wormhole-transit-overlay.hidden {
+  display: none;
+}
+
+/* Canvas fills the background */
+#wormhole-transit-canvas {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: radial-gradient(ellipse at center, #0a0015 0%, #050008 50%, #000000 100%);
+}
+
+/* Content layer above canvas */
+.wormhole-transit-content {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+
+/* Title */
+.wormhole-title {
+  font-size: 2rem;
+  font-weight: bold;
+  color: #cc88ff;
+  text-shadow: 0 0 20px #9900ff, 0 0 40px #6600cc;
+  letter-spacing: 0.3em;
+  margin-bottom: 2rem;
+  animation: title-pulse 2s ease-in-out infinite;
+}
+
+@keyframes title-pulse {
+  0%, 100% { opacity: 0.8; text-shadow: 0 0 20px #9900ff, 0 0 40px #6600cc; }
+  50% { opacity: 1; text-shadow: 0 0 30px #cc00ff, 0 0 60px #9900ff; }
+}
+
+/* Destinations container */
+.wormhole-destinations {
+  position: relative;
+  width: 100%;
+  height: 400px;
+  pointer-events: auto;
+}
+
+.no-destinations {
+  text-align: center;
+  color: #aa88cc;
+  font-size: 1.2rem;
+  padding: 2rem;
+}
+
+/* Destination buttons */
+.wormhole-destination-btn {
+  position: absolute;
+  width: 160px;
+  padding: 1rem;
+  background: rgba(80, 0, 120, 0.6);
+  border: 2px solid #9900ff;
+  border-radius: 10px;
+  color: #eeddff;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  text-align: center;
+  pointer-events: auto;
+}
+
+.wormhole-destination-btn:hover {
+  background: rgba(120, 0, 180, 0.8);
+  border-color: #cc00ff;
+  transform: scale(1.1);
+  box-shadow: 0 0 30px rgba(153, 0, 255, 0.6);
+}
+
+.wormhole-destination-btn:active {
+  transform: scale(0.95);
+}
+
+.wormhole-destination-btn.disabled {
+  opacity: 0.4;
+  pointer-events: none;
+}
+
+.dest-sector {
+  font-weight: bold;
+  font-size: 1rem;
+  margin-bottom: 0.3rem;
+}
+
+.dest-distance {
+  font-size: 0.85rem;
+  color: #aa88cc;
+}
+
+/* Progress bar */
+.wormhole-progress {
+  width: 300px;
+  text-align: center;
+  pointer-events: auto;
+}
+
+.wormhole-progress.hidden {
+  display: none;
+}
+
+.progress-label {
+  font-size: 1.1rem;
+  color: #cc88ff;
+  margin-bottom: 0.5rem;
+  animation: transit-text-pulse 1s ease-in-out infinite;
+}
+
+@keyframes transit-text-pulse {
+  0%, 100% { opacity: 0.7; }
+  50% { opacity: 1; }
+}
+
+.progress-bar-container {
+  width: 100%;
+  height: 12px;
+  background: rgba(50, 0, 80, 0.5);
+  border: 1px solid #6600cc;
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.progress-bar-fill {
+  height: 100%;
+  width: 0%;
+  background: linear-gradient(90deg, #6600cc 0%, #9900ff 50%, #cc00ff 100%);
+  border-radius: 6px;
+  transition: width 0.1s linear;
+  box-shadow: 0 0 10px #9900ff;
+}
+
+/* Cancel button */
+.wormhole-cancel-btn {
+  margin-top: 2rem;
+  padding: 0.8rem 2rem;
+  background: rgba(80, 0, 60, 0.6);
+  border: 1px solid #cc00aa;
+  border-radius: 5px;
+  color: #ffaaee;
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  pointer-events: auto;
+}
+
+.wormhole-cancel-btn:hover {
+  background: rgba(120, 0, 90, 0.8);
+  border-color: #ff00cc;
+}
+
+.wormhole-cancel-btn.hidden {
+  display: none;
+}
+
+/* Wormhole hint in HUD */
+#wormhole-hint {
+  color: #cc88ff;
+  text-shadow: 0 0 10px #9900ff;
+  animation: wormhole-hint-pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes wormhole-hint-pulse {
+  0%, 100% { opacity: 0.7; }
+  50% { opacity: 1; text-shadow: 0 0 15px #cc00ff; }
+}

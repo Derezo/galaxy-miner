@@ -53,7 +53,7 @@ const RELIC_POOLS = {
   pirate: ['PIRATE_TREASURE'],
   scavenger: ['PIRATE_TREASURE', 'ANCIENT_STAR_MAP'],
   swarm: ['SWARM_HIVE_CORE'],
-  void: ['VOID_CRYSTAL', 'ANCIENT_STAR_MAP'],
+  void: ['VOID_CRYSTAL', 'ANCIENT_STAR_MAP', 'WORMHOLE_GEM'],
   rogue_miner: ['ANCIENT_STAR_MAP', 'PIRATE_TREASURE']
 };
 
@@ -69,12 +69,15 @@ function generateLootContents(npc) {
   const rates = DROP_RATES[tier];
   const contents = [];
 
-  // Credits (always)
-  if (Math.random() < rates.credits) {
-    contents.push({
-      type: 'credits',
-      amount: npc.creditReward
-    });
+  // Credits (always, but only if creditReward is valid)
+  const creditReward = npc.creditReward;
+  if (typeof creditReward === 'number' && creditReward > 0 && !Number.isNaN(creditReward)) {
+    if (Math.random() < rates.credits) {
+      contents.push({
+        type: 'credits',
+        amount: creditReward
+      });
+    }
   }
 
   // Resources from NPC's loot table
@@ -82,12 +85,15 @@ function generateLootContents(npc) {
     const numDrops = Math.floor(Math.random() * 3) + 1; // 1-3 resource types
     for (let i = 0; i < numDrops; i++) {
       const resourceType = npc.lootTable[Math.floor(Math.random() * npc.lootTable.length)];
-      const quantity = Math.floor(Math.random() * 5) + 1; // 1-5 of each
-      contents.push({
-        type: 'resource',
-        resourceType,
-        quantity
-      });
+      // Only add resource if resourceType is valid
+      if (resourceType && typeof resourceType === 'string') {
+        const quantity = Math.floor(Math.random() * 5) + 1; // 1-5 of each
+        contents.push({
+          type: 'resource',
+          resourceType,
+          quantity
+        });
+      }
     }
   }
 
@@ -122,13 +128,15 @@ function generateLootContents(npc) {
   return contents;
 }
 
-function spawnWreckage(npc, position) {
+function spawnWreckage(npc, position, providedContents = null) {
   const wreckageId = `wreckage_${++wreckageIdCounter}`;
-  const contents = generateLootContents(npc);
+  // Use provided contents (e.g., from base destruction) or generate from NPC
+  const contents = providedContents || generateLootContents(npc);
 
   const wreckage = {
     id: wreckageId,
     position: { x: position.x, y: position.y },
+    size: 20, // Standard wreckage size for range calculations
     faction: npc.faction,
     npcType: npc.type,
     npcName: npc.name,
