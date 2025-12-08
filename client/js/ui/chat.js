@@ -8,8 +8,11 @@ const ChatUI = {
   autoHideTimeout: null,
 
   init() {
-    // Chat indicator click handler
-    document.getElementById('chat-indicator').addEventListener('click', () => this.toggle());
+    // Chat icon click handler (now in bottom-left)
+    const chatIcon = document.getElementById('chat-icon');
+    if (chatIcon) {
+      chatIcon.addEventListener('click', () => this.toggle());
+    }
 
     // Chat input and send handlers
     document.getElementById('chat-send').addEventListener('click', () => this.sendMessage());
@@ -26,13 +29,18 @@ const ChatUI = {
     // Auto-hide when clicking outside
     document.addEventListener('click', (e) => {
       const overlay = document.getElementById('chat-overlay');
-      const indicator = document.getElementById('chat-indicator');
-      if (this.visible && !overlay.contains(e.target) && !indicator.contains(e.target)) {
+      const icon = document.getElementById('chat-icon');
+      if (this.visible && !overlay.contains(e.target) && (!icon || !icon.contains(e.target))) {
         this.hide();
       }
     });
 
-    console.log('Chat UI initialized');
+    Logger.log('Chat UI initialized');
+  },
+
+  // Expose toggleOverlay for HUD to call
+  toggleOverlay() {
+    this.toggle();
   },
 
   toggle() {

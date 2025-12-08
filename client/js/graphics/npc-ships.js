@@ -103,7 +103,7 @@ const NPCShipGeometry = {
     this.generateVoidPaths(SIZE);
     this.generateRogueMinerPaths(SIZE);
 
-    console.log('NPCShipGeometry initialized with faction ships');
+    Logger.log('NPCShipGeometry initialized with faction ships');
   },
 
   generatePiratePaths(SIZE) {

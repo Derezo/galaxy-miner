@@ -24,7 +24,7 @@ const CONSTANTS = {
   PLANETS_PER_STAR_MAX: 8,
   ASTEROIDS_PER_SECTOR_MIN: 3,
   ASTEROIDS_PER_SECTOR_MAX: 15,
-  WORMHOLE_CHANCE: 0.05,
+  WORMHOLE_CHANCE: 0.08,  // 8% of star systems have wormholes (spawn area guaranteed)
 
   // Physics
   PHYSICS_TIME_ORIGIN: 0,
@@ -54,6 +54,7 @@ const CONSTANTS = {
   // Ship component tiers
   MAX_TIER: 5,
   TIER_MULTIPLIER: 1.5,
+  SHIELD_TIER_MULTIPLIER: 2.0,  // Shields scale 2x per tier (T5 = 800 HP base)
 
   // Radar tier configuration - progressive feature unlocks
   RADAR_TIERS: {
@@ -429,8 +430,8 @@ const CONSTANTS = {
   ENERGY_CORE: {
     // Weapon cooldown reduction per tier (index = tier, 0 unused)
     COOLDOWN_REDUCTION: [0, 0.05, 0.10, 0.15, 0.20, 0.25],
-    // Shield recharge bonus per tier (HP/sec added to base rate)
-    SHIELD_REGEN_BONUS: [0, 0.5, 1.0, 1.5, 2.0, 2.5],
+    // Shield recharge bonus per tier (HP/sec added to base rate) - doubled for combat viability
+    SHIELD_REGEN_BONUS: [0, 1.0, 2.0, 3.0, 4.0, 5.0],
     // Thrust boost configuration
     BOOST: {
       DOUBLE_TAP_WINDOW: 300,  // ms to detect double-tap
@@ -470,7 +471,7 @@ const CONSTANTS = {
   PLANET_SIZE_MAX: 60,
   ASTEROID_SIZE_MIN: 10,
   ASTEROID_SIZE_MAX: 30,
-  WORMHOLE_SIZE: 100,
+  WORMHOLE_SIZE: 200,
 
   // Star danger zones (multipliers of star radius)
   STAR_ZONES: {
@@ -547,7 +548,7 @@ const CONSTANTS = {
     STAR: '#ffff00',
     PLANET: '#4488ff',
     ASTEROID: '#888888',
-    WORMHOLE: '#ff00ff',
+    WORMHOLE: '#00ccff',
     BACKGROUND: '#000011'
   },
 
@@ -609,6 +610,27 @@ const CONSTANTS = {
     { id: 'gold', name: 'Gold', primary: '#ffcc00', accent: '#cc9900', glow: '#ffcc0060' },
     { id: 'white', name: 'Silver', primary: '#dddddd', accent: '#aaaaaa', glow: '#dddddd60' },
     { id: 'pink', name: 'Pink', primary: '#ff66aa', accent: '#cc5588', glow: '#ff66aa60' }
+  ],
+
+  // Shield visual configuration by tier
+  SHIELD_VISUALS: {
+    1: { shape: 'circle', color: '#4488ff', glow: 'rgba(68, 136, 255, 0.25)', pulseSpeed: 0, size: 1.0 },
+    2: { shape: 'circle', color: '#55aaff', glow: 'rgba(85, 170, 255, 0.3)', pulseSpeed: 0.5, size: 1.0 },
+    3: { shape: 'hexagon', color: '#66ccff', glow: 'rgba(102, 204, 255, 0.35)', pulseSpeed: 1.0, size: 1.05 },
+    4: { shape: 'hexagon', color: '#88ddff', glow: 'rgba(136, 221, 255, 0.4)', pulseSpeed: 1.5, size: 1.08 },
+    5: { shape: 'dodecagon', color: '#aaeeff', glow: 'rgba(170, 238, 255, 0.45)', pulseSpeed: 2.0, size: 1.12 }
+  },
+
+  // Profile avatar options (emoji placeholders for now)
+  PROFILE_OPTIONS: [
+    { id: 'pilot', emoji: '\u{1F680}', name: 'Pilot' },
+    { id: 'pirate', emoji: '\u{2620}', name: 'Pirate' },
+    { id: 'trader', emoji: '\u{1F4B0}', name: 'Trader' },
+    { id: 'explorer', emoji: '\u{1F52D}', name: 'Explorer' },
+    { id: 'miner', emoji: '\u{26CF}', name: 'Miner' },
+    { id: 'warrior', emoji: '\u{2694}', name: 'Warrior' },
+    { id: 'scientist', emoji: '\u{1F52C}', name: 'Scientist' },
+    { id: 'alien', emoji: '\u{1F47D}', name: 'Alien' }
   ],
 
   // Network

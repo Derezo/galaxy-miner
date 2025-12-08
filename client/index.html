@@ -41,21 +41,81 @@
 
     <!-- HUD (in-game) -->
     <div id="hud" class="hidden">
-      <!-- Top bar -->
-      <div id="top-bar">
-        <div id="player-info">
-          <span id="player-name">Player</span>
-          <span id="player-credits">Credits: 0</span>
-        </div>
-        <div id="position-info">
-          Sector: <span id="sector-coords">0, 0</span>
-        </div>
-        <div id="chat-indicator" class="chat-indicator">
-          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+      <!-- Terminal icon (top-left) -->
+      <div id="terminal-icon" class="hud-icon" title="Ship Terminal [T]">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+          <rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect>
+          <polyline points="6 9 9 12 6 15"></polyline>
+          <line x1="12" y1="15" x2="18" y2="15"></line>
+        </svg>
+      </div>
+
+      <!-- Radial menu for terminal (hidden by default) -->
+      <div id="terminal-radial-menu" class="radial-menu hidden">
+        <div class="radial-item" data-tab="cargo" title="Cargo" style="--angle: 15deg; --distance: 65px;">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path>
           </svg>
-          <span id="chat-unread-badge" class="unread-badge hidden">0</span>
         </div>
+        <div class="radial-item" data-tab="upgrades" title="Upgrades" style="--angle: 55deg; --distance: 65px;">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="3"></circle>
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+          </svg>
+        </div>
+        <div class="radial-item" data-tab="market" title="Market" style="--angle: 95deg; --distance: 65px;">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="9" cy="21" r="1"></circle>
+            <circle cx="20" cy="21" r="1"></circle>
+            <path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"></path>
+          </svg>
+        </div>
+        <div class="radial-item" data-tab="customize" title="Customize" style="--angle: 135deg; --distance: 65px;">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="10"></circle>
+            <circle cx="12" cy="12" r="4"></circle>
+            <line x1="12" y1="2" x2="12" y2="4"></line>
+            <line x1="12" y1="20" x2="12" y2="22"></line>
+          </svg>
+        </div>
+        <div class="radial-item" data-tab="relics" title="Relics" style="--angle: 175deg; --distance: 65px;">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polygon points="12,2 16,4 17,20 14,23 10,23 7,20 8,4"></polygon>
+            <circle cx="12" cy="10" r="2"></circle>
+          </svg>
+        </div>
+      </div>
+
+      <!-- Profile display (top-right) -->
+      <div id="profile-display">
+        <div id="credits-display">
+          <div id="credit-icon-container">
+            <svg id="credit-icon" viewBox="0 0 24 24">
+              <defs>
+                <linearGradient id="coin-gradient" x1="0%" y1="0%" x2="100%" y2="100%">
+                  <stop offset="0%" style="stop-color:#ffd700"/>
+                  <stop offset="50%" style="stop-color:#ffec8b"/>
+                  <stop offset="100%" style="stop-color:#daa520"/>
+                </linearGradient>
+              </defs>
+              <ellipse cx="12" cy="12" rx="10" ry="10" fill="url(#coin-gradient)" stroke="#b8860b" stroke-width="1"/>
+              <text x="12" y="16" text-anchor="middle" font-size="10" font-weight="bold" fill="#8b6914">$</text>
+            </svg>
+          </div>
+          <span id="credit-value">0</span>
+        </div>
+        <div id="profile-image-container" title="Click to edit profile">
+          <div id="profile-image">🚀</div>
+        </div>
+        <span id="profile-username">Player</span>
+      </div>
+
+      <!-- Chat icon (bottom-left) -->
+      <div id="chat-icon" class="hud-icon" title="Chat [Enter]">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+        </svg>
+        <span id="chat-unread-badge" class="unread-badge hidden">0</span>
       </div>
 
       <!-- Chat overlay (hidden by default) -->
@@ -67,44 +127,18 @@
         </div>
       </div>
 
-      <!-- Health/Shield bars -->
-      <div id="status-bars">
-        <div class="bar-container">
-          <div id="hull-bar" class="bar hull"></div>
-          <span class="bar-label">Hull</span>
-        </div>
-        <div class="bar-container">
-          <div id="shield-bar" class="bar shield"></div>
-          <span class="bar-label">Shield</span>
-        </div>
-        <div class="bar-container boost-bar-container">
-          <div id="boost-bar" class="bar boost"></div>
-          <span class="bar-label">Boost</span>
-          <span id="boost-status" class="boost-status"></span>
-        </div>
-      </div>
-
-      <!-- Radar minimap -->
+      <!-- Radar minimap with sector display -->
       <div id="radar">
         <canvas id="radar-canvas"></canvas>
+        <div id="radar-sector">
+          Sector: <span id="sector-coords">0, 0</span>
+        </div>
       </div>
 
       <!-- Action hints -->
       <div id="action-hints">
         <span id="mining-hint" class="hidden">Press [M] to mine</span>
         <span id="wormhole-hint" class="hidden">Press [M] to enter wormhole</span>
-      </div>
-
-      <!-- Bottom buttons -->
-      <div id="bottom-bar">
-        <button id="btn-terminal" class="hud-btn terminal-btn">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align: middle; margin-right: 5px;">
-            <rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect>
-            <line x1="8" y1="21" x2="16" y2="21"></line>
-            <line x1="12" y1="17" x2="12" y2="21"></line>
-          </svg>
-          Terminal [T]
-        </button>
       </div>
     </div>
 
@@ -188,9 +222,11 @@
 
   <!-- Scripts -->
   <script src="/socket.io/socket.io.js"></script>
-  <script src="/shared/constants.js?v=8"></script>
-  <script src="/shared/physics.js?v=8"></script>
-  <script src="/shared/star-system.js?v=8"></script>
+  <script src="/shared/constants.js?v=9"></script>
+  <script src="/shared/physics.js?v=9"></script>
+  <script src="/shared/star-system.js?v=9"></script>
+  <script src="/shared/logger.js?v=9"></script>
+  <script src="/shared/utils.js?v=9"></script>
   <script src="js/network.js?v=8"></script>
   <script src="js/world.js?v=8"></script>
   <script src="js/input.js"></script>
@@ -214,6 +250,10 @@
   <script src="js/graphics/linked-damage.js"></script>
   <script src="js/graphics/formation-succession.js"></script>
   <script src="js/graphics/player-death.js"></script>
+  <!-- New HUD visual modules -->
+  <script src="js/graphics/shield-visual.js"></script>
+  <script src="js/graphics/hull-bar.js"></script>
+  <script src="js/graphics/boost-indicator.js"></script>
   <script src="js/renderer.js"></script>
   <!-- Core UI infrastructure -->
   <script src="js/ui/core/Component.js"></script>
@@ -253,6 +293,8 @@
   <script src="js/ui/panels/ShipUpgradePanel.js"></script>
   <script src="js/ui/panels/RelicsPanel.js"></script>
   <script src="js/ui/WormholeTransitUI.js"></script>
+  <script src="js/ui/credit-animation.js"></script>
+  <script src="js/ui/profile-modal.js"></script>
   <script src="js/ui/terminal.js"></script>
   <script src="js/ui/emote-wheel.js"></script>
   <script src="js/game.js"></script>

@@ -7,17 +7,26 @@ const marketplace = require('./game/marketplace');
 const npc = require('./game/npc');
 const engine = require('./game/engine');
 const wormhole = require('./game/wormhole');
+const world = require('./world');
+const logger = require('../shared/logger');
 
 // Track connected players: socketId -> { userId, username, position, etc. }
 const connectedPlayers = new Map();
 // Reverse lookup: userId -> socketId
 const userSockets = new Map();
-// Track player status: oderId -> { status, statusTimeout }
+// Track player status: userId -> { status, statusTimeout }
 const playerStatus = new Map();
+// Track active intervals per socket for cleanup: socketId -> Set of intervalIds
+const activeIntervals = new Map();
+
+// Pre-computed Sets for O(1) validation (avoid Array.includes in hot paths)
+const VALID_COMPONENTS = new Set(['engine', 'weapon', 'shield', 'mining', 'cargo', 'radar', 'energy_core', 'hull']);
+const VALID_COLORS = new Set(config.PLAYER_COLOR_OPTIONS.map(c => c.id));
+const VALID_PROFILES = new Set((config.PROFILE_OPTIONS || []).map(p => p.id));
 
 module.exports = function(io) {
   io.on('connection', (socket) => {
-    console.log(`Client connected: ${socket.id}`);
+    logger.log(`Client connected: ${socket.id}`);
     let authenticatedUserId = null;
 
     // Authentication: Login
@@ -101,7 +110,7 @@ module.exports = function(io) {
       // Basic sanity check on velocity
       const speed = Math.sqrt(data.vx * data.vx + data.vy * data.vy);
       if (speed > maxSpeed * 2) {
-        console.warn(`Player ${player.username} moving too fast: ${speed}`);
+        logger.warn(`Player ${player.username} moving too fast: ${speed}`);
         return;
       }
 
@@ -210,47 +219,9 @@ module.exports = function(io) {
             socket.emit('combat:npcHit', {
               npcId: npcData.id,
               damage: config.BASE_WEAPON_DAMAGE * Math.pow(config.TIER_MULTIPLIER, weaponTier - 1),
-              destroyed: result.destroyed,
-              loot: result.loot || null
+              destroyed: result.destroyed
+              // Note: rewards are now granted only when collecting wreckage/scrap
             });
-
-            // If NPC was destroyed, give loot and credits to player
-            if (result.destroyed) {
-              try {
-                // Award credit reward (with team bonus)
-                if (result.creditsPerPlayer > 0) {
-                  const ship = statements.getShipByUserId.get(authenticatedUserId);
-                  const currentCredits = getSafeCredits(ship);
-                  safeUpdateCredits(currentCredits + result.creditsPerPlayer, authenticatedUserId);
-                }
-
-                // Add loot to player inventory using safe wrapper
-                if (result.loot) {
-                  for (const item of result.loot) {
-                    safeUpsertInventory(authenticatedUserId, item.resourceType, item.quantity);
-                  }
-                }
-
-                // Send updated inventory and credits
-                const inventory = statements.getInventory.all(authenticatedUserId);
-                const updatedShip = statements.getShipByUserId.get(authenticatedUserId);
-                socket.emit('inventory:update', {
-                  inventory,
-                  credits: getSafeCredits(updatedShip)
-                });
-
-                // Notify player of rewards
-                socket.emit('npc:reward', {
-                  credits: result.creditsPerPlayer,
-                  teamMultiplier: result.teamMultiplier,
-                  participantCount: result.participantCount,
-                  loot: result.loot
-                });
-              } catch (err) {
-                console.error(`[COMBAT REWARD ERROR] User ${authenticatedUserId} NPC loot:`, err.message);
-                socket.emit('error:generic', { message: 'Failed to award combat rewards. Please check your inventory.' });
-              }
-            }
           }
           break; // Only hit one NPC per shot
         }
@@ -328,7 +299,7 @@ module.exports = function(io) {
                   faction: baseData.faction
                 });
               } catch (err) {
-                console.error(`[COMBAT REWARD ERROR] User ${authenticatedUserId} base loot:`, err.message);
+                logger.error(`[COMBAT REWARD ERROR] User ${authenticatedUserId} base loot:`, err.message);
                 socket.emit('error:generic', { message: 'Failed to award base destruction rewards. Please check your inventory.' });
               }
             }
@@ -371,11 +342,13 @@ module.exports = function(io) {
 
           if (!progress) {
             clearInterval(checkMining);
+            untrackInterval(socket.id, checkMining);
             return;
           }
 
           if (progress.cancelled) {
             clearInterval(checkMining);
+            untrackInterval(socket.id, checkMining);
             socket.emit('mining:cancelled', { reason: progress.reason });
             // Clear player status
             setPlayerStatus(authenticatedUserId, 'idle');
@@ -388,6 +361,7 @@ module.exports = function(io) {
 
           if (progress.success) {
             clearInterval(checkMining);
+            untrackInterval(socket.id, checkMining);
             socket.emit('mining:complete', {
               resourceType: progress.resourceType,
               resourceName: progress.resourceName,
@@ -412,8 +386,10 @@ module.exports = function(io) {
             });
           }
         }, 100);
+        // Track interval for cleanup on disconnect
+        trackInterval(socket.id, checkMining);
       } else {
-        console.log('[Socket] Mining error for user', authenticatedUserId, ':', result.error, 'objectId:', data.objectId);
+        logger.log('[Socket] Mining error for user', authenticatedUserId, ':', result.error, 'objectId:', data.objectId);
         socket.emit('mining:error', { message: result.error, objectId: data.objectId });
       }
     });
@@ -569,7 +545,7 @@ module.exports = function(io) {
 
     // Ship upgrade (with resource requirements)
     socket.on('ship:upgrade', (data) => {
-      console.log('[UPGRADE] Received upgrade request:', data, 'from user:', authenticatedUserId);
+      logger.log('[UPGRADE] Received upgrade request:', data, 'from user:', authenticatedUserId);
       try {
         if (!authenticatedUserId) {
           socket.emit('upgrade:error', { message: 'Not authenticated' });
@@ -589,9 +565,8 @@ module.exports = function(io) {
         }
 
         const { component } = data;
-        const validComponents = ['engine', 'weapon', 'shield', 'mining', 'cargo', 'radar', 'energy_core', 'hull'];
 
-        if (!validComponents.includes(component)) {
+        if (!VALID_COMPONENTS.has(component)) {
           socket.emit('upgrade:error', { message: 'Invalid component' });
           return;
         }
@@ -641,13 +616,22 @@ module.exports = function(io) {
         if (component === 'mining') player.miningTier = result.newTier;
         if (component === 'weapon') player.weaponTier = result.newTier;
         if (component === 'energy_core') player.energyCoreTier = result.newTier;
-        if (component === 'hull') player.hullTier = result.newTier;
+        if (component === 'hull') {
+          player.hullTier = result.newTier;
+          player.hullMax = updatedShip.hull_max;
+        }
+        if (component === 'shield') {
+          player.shieldTier = result.newTier;
+          player.shieldMax = updatedShip.shield_max;
+        }
 
-        // Send upgrade success
+        // Send upgrade success with updated max values for shield/hull
         socket.emit('upgrade:success', {
           component,
           newTier: result.newTier,
-          credits: player.credits
+          credits: player.credits,
+          shieldMax: updatedShip.shield_max,
+          hullMax: updatedShip.hull_max
         });
 
         // Also send updated inventory since resources were consumed
@@ -656,8 +640,8 @@ module.exports = function(io) {
           credits: player.credits
         });
       } catch (err) {
-        console.error(`[UPGRADE ERROR] User ${authenticatedUserId} upgrading ${data?.component}:`, err.message);
-        console.error(err.stack);
+        logger.error(`[UPGRADE ERROR] User ${authenticatedUserId} upgrading ${data?.component}:`, err.message);
+        logger.error(err.stack);
         socket.emit('upgrade:error', { message: 'Upgrade failed due to a server error. Please try again.' });
       }
     });
@@ -679,7 +663,8 @@ module.exports = function(io) {
           energy_core_tier: ship.energy_core_tier || 1,
           hull_tier: ship.hull_tier || 1,
           credits: ship.credits,
-          ship_color_id: ship.ship_color_id || 'green'
+          ship_color_id: ship.ship_color_id || 'green',
+          profile_id: ship.profile_id || 'pilot'
         });
       }
     });
@@ -693,9 +678,8 @@ module.exports = function(io) {
 
       const { colorId } = data;
 
-      // Validate color ID against available options
-      const validColors = config.PLAYER_COLOR_OPTIONS.map(c => c.id);
-      if (!validColors.includes(colorId)) {
+      // Validate color ID against available options (O(1) Set lookup)
+      if (!VALID_COLORS.has(colorId)) {
         socket.emit('ship:colorError', { message: 'Invalid color selection' });
         return;
       }
@@ -704,7 +688,7 @@ module.exports = function(io) {
       try {
         statements.updateShipColor.run(colorId, authenticatedUserId);
       } catch (err) {
-        console.error(`[COLOR ERROR] User ${authenticatedUserId} setting color:`, err.message);
+        logger.error(`[COLOR ERROR] User ${authenticatedUserId} setting color:`, err.message);
         socket.emit('ship:colorError', { message: 'Failed to save color preference' });
         return;
       }
@@ -719,6 +703,43 @@ module.exports = function(io) {
       broadcastToNearby(socket, player, 'player:colorChanged', {
         playerId: authenticatedUserId,
         colorId
+      });
+    });
+
+    // Ship profile customization
+    socket.on('ship:setProfile', (data) => {
+      if (!authenticatedUserId) return;
+
+      const player = connectedPlayers.get(socket.id);
+      if (!player) return;
+
+      const { profileId } = data;
+
+      // Validate profile ID against available options (O(1) Set lookup)
+      if (!VALID_PROFILES.has(profileId)) {
+        socket.emit('ship:profileError', { message: 'Invalid profile selection' });
+        return;
+      }
+
+      // Update database
+      try {
+        statements.updateShipProfile.run(profileId, authenticatedUserId);
+      } catch (err) {
+        logger.error(`[PROFILE ERROR] User ${authenticatedUserId} setting profile:`, err.message);
+        socket.emit('ship:profileError', { message: 'Failed to save profile preference' });
+        return;
+      }
+
+      // Update player state
+      player.profileId = profileId;
+
+      // Confirm to the player
+      socket.emit('ship:profileChanged', { profileId });
+
+      // Broadcast to nearby players (in case we want to show profiles on ships)
+      broadcastToNearby(socket, player, 'player:profileChanged', {
+        playerId: authenticatedUserId,
+        profileId
       });
     });
 
@@ -802,6 +823,7 @@ module.exports = function(io) {
           const currentPlayer = connectedPlayers.get(socket.id);
           if (!currentPlayer) {
             clearInterval(checkCollection);
+            untrackInterval(socket.id, checkCollection);
             engine.cancelWreckageCollection(wreckageId, authenticatedUserId);
             return;
           }
@@ -811,20 +833,33 @@ module.exports = function(io) {
 
           if (!progress) {
             clearInterval(checkCollection);
+            untrackInterval(socket.id, checkCollection);
             setPlayerStatus(authenticatedUserId, 'idle');
             return;
           }
 
           if (progress.complete) {
             clearInterval(checkCollection);
+            untrackInterval(socket.id, checkCollection);
 
-            // Process collected loot
-            const lootResults = processCollectedLoot(authenticatedUserId, progress.contents);
+            // Distribute credits to team members who contributed damage
+            const teamCredits = distributeTeamCredits(
+              progress.creditReward,
+              progress.damageContributors,
+              authenticatedUserId
+            );
+
+            // Process collected loot (non-credit items go to collector only)
+            // Filter out credits from contents - they're handled via team distribution
+            const nonCreditContents = progress.contents.filter(item => item.type !== 'credits');
+            const lootResults = processCollectedLoot(authenticatedUserId, nonCreditContents);
+            lootResults.credits = teamCredits.collectorCredits;
 
             socket.emit('loot:complete', {
               wreckageId,
               contents: progress.contents,
-              results: lootResults
+              results: lootResults,
+              teamCredits: teamCredits.total
             });
 
             // Update inventory and credits
@@ -854,6 +889,8 @@ module.exports = function(io) {
             });
           }
         }, 100);
+        // Track interval for cleanup on disconnect
+        trackInterval(socket.id, checkCollection);
       }
     });
 
@@ -1025,6 +1062,32 @@ module.exports = function(io) {
       socket.emit('wormhole:progress', progress);
     });
 
+    // Wormhole: Get nearest wormhole position (for wormhole gem directional indicator)
+    socket.on('wormhole:getNearestPosition', () => {
+      if (!authenticatedUserId) return;
+
+      const player = connectedPlayers.get(socket.id);
+      if (!player || !player.position) {
+        console.log('[Wormhole] getNearestPosition - no player or position');
+        return;
+      }
+
+      console.log('[Wormhole] getNearestPosition request from player at', Math.round(player.position.x), Math.round(player.position.y));
+
+      const nearestWormhole = world.findNearestWormhole(
+        player.position.x,
+        player.position.y
+      );
+
+      if (nearestWormhole) {
+        console.log('[Wormhole] Found nearest at', Math.round(nearestWormhole.x), Math.round(nearestWormhole.y), 'distance:', Math.round(nearestWormhole.distance));
+      } else {
+        console.log('[Wormhole] No wormhole found in search radius');
+      }
+
+      socket.emit('wormhole:nearestPosition', nearestWormhole);
+    });
+
     // Ping for latency measurement
     socket.on('ping', (timestamp) => {
       socket.emit('pong', timestamp);
@@ -1032,7 +1095,7 @@ module.exports = function(io) {
 
     // Disconnect
     socket.on('disconnect', () => {
-      console.log(`Client disconnected: ${socket.id}`);
+      logger.log(`Client disconnected: ${socket.id}`);
       if (authenticatedUserId) {
         cleanupPlayer(socket, authenticatedUserId);
       }
@@ -1067,13 +1130,14 @@ module.exports = function(io) {
       miningTier: playerData.mining_tier,
       weaponTier: playerData.weapon_tier,
       credits: playerData.credits,
-      colorId: playerData.ship_color_id || 'green'
+      colorId: playerData.ship_color_id || 'green',
+      profileId: playerData.profile_id || 'pilot'
     };
 
     connectedPlayers.set(socket.id, player);
     userSockets.set(playerData.id, socket.id);
 
-    console.log(`Player ${playerData.username} authenticated`);
+    logger.log(`Player ${playerData.username} authenticated`);
 
     // Notify nearby players of new player
     broadcastToNearby(socket, player, 'player:update', {
@@ -1102,14 +1166,26 @@ module.exports = function(io) {
           userId
         );
       } catch (err) {
-        console.error(`[DISCONNECT ERROR] Failed to save position for user ${userId}:`, err.message);
+        logger.error(`[DISCONNECT ERROR] Failed to save position for user ${userId}:`, err.message);
       }
 
       // Notify others
       broadcastToNearby(socket, player, 'player:leave', userId);
 
-      console.log(`Player ${player.username} disconnected`);
+      logger.log(`Player ${player.username} disconnected`);
     }
+
+    // Clean up any active intervals (mining, loot collection, etc.)
+    const intervals = activeIntervals.get(socket.id);
+    if (intervals) {
+      for (const intervalId of intervals) {
+        clearInterval(intervalId);
+      }
+      activeIntervals.delete(socket.id);
+    }
+
+    // Cancel any active mining session
+    mining.cancelMining(userId);
 
     connectedPlayers.delete(socket.id);
     userSockets.delete(userId);
@@ -1122,6 +1198,25 @@ module.exports = function(io) {
 
     // Clean up any active wormhole transit
     wormhole.cleanupPlayer(userId);
+  }
+
+  // Helper: Track an interval for cleanup on disconnect
+  function trackInterval(socketId, intervalId) {
+    if (!activeIntervals.has(socketId)) {
+      activeIntervals.set(socketId, new Set());
+    }
+    activeIntervals.get(socketId).add(intervalId);
+  }
+
+  // Helper: Remove a tracked interval (when it completes normally)
+  function untrackInterval(socketId, intervalId) {
+    const intervals = activeIntervals.get(socketId);
+    if (intervals) {
+      intervals.delete(intervalId);
+      if (intervals.size === 0) {
+        activeIntervals.delete(socketId);
+      }
+    }
   }
 
   // Helper: Set player status with optional timeout
@@ -1165,6 +1260,93 @@ module.exports = function(io) {
         io.to(socketId).emit(event, data);
       }
     }
+  }
+
+  // Helper: Distribute credits to team members who contributed damage
+  function distributeTeamCredits(baseCredits, damageContributors, collectorId) {
+    // If no base credits or invalid, return 0 for all
+    if (!baseCredits || typeof baseCredits !== 'number' || baseCredits <= 0) {
+      return { total: 0, collectorCredits: 0, distributed: [] };
+    }
+
+    // If no damage contributors, collector gets all credits
+    if (!damageContributors || Object.keys(damageContributors).length === 0) {
+      // Solo kill - collector gets base credits
+      const ship = statements.getShipByUserId.get(collectorId);
+      if (ship) {
+        const currentCredits = getSafeCredits(ship);
+        safeUpdateCredits(currentCredits + baseCredits, collectorId);
+      }
+      return { total: baseCredits, collectorCredits: baseCredits, distributed: [{ playerId: collectorId, credits: baseCredits }] };
+    }
+
+    const participants = Object.keys(damageContributors);
+    const participantCount = participants.length;
+    // Convert collectorId to string to match Object.keys() output (keys are always strings)
+    const collectorIdStr = String(collectorId);
+
+    // Apply team bonus multiplier
+    const teamMultipliers = config.TEAM_MULTIPLIERS || { 1: 1.0, 2: 1.5, 3: 2.0, 4: 2.5 };
+    const teamMultiplier = teamMultipliers[Math.min(participantCount, 4)] || 2.5;
+    const totalCredits = Math.round(baseCredits * teamMultiplier);
+    const creditsPerPlayer = Math.round(totalCredits / participantCount);
+
+    const distributed = [];
+    let collectorCredits = 0;
+
+    // Distribute credits to all contributors
+    for (const playerId of participants) {
+      try {
+        const ship = statements.getShipByUserId.get(playerId);
+        if (ship) {
+          const currentCredits = getSafeCredits(ship);
+          safeUpdateCredits(currentCredits + creditsPerPlayer, playerId);
+
+          distributed.push({ playerId, credits: creditsPerPlayer });
+
+          if (playerId === collectorIdStr) {
+            collectorCredits = creditsPerPlayer;
+          }
+
+          // Notify non-collector team members of their credit reward
+          if (playerId !== collectorIdStr) {
+            const socketId = userSockets.get(playerId);
+            if (socketId) {
+              io.to(socketId).emit('team:creditReward', {
+                credits: creditsPerPlayer,
+                totalTeamCredits: totalCredits,
+                participantCount
+              });
+
+              // Also update their inventory display
+              const inventory = statements.getInventory.all(playerId);
+              const updatedShip = statements.getShipByUserId.get(playerId);
+              io.to(socketId).emit('inventory:update', {
+                inventory,
+                credits: getSafeCredits(updatedShip)
+              });
+            }
+          }
+        }
+      } catch (err) {
+        logger.error(`[TEAM CREDITS] Error distributing to ${playerId}:`, err.message);
+      }
+    }
+
+    // If collector wasn't a contributor (rare - e.g., collected someone else's kill), they still get share
+    if (!participants.includes(collectorIdStr)) {
+      const ship = statements.getShipByUserId.get(collectorId);
+      if (ship) {
+        const currentCredits = getSafeCredits(ship);
+        safeUpdateCredits(currentCredits + creditsPerPlayer, collectorId);
+        collectorCredits = creditsPerPlayer;
+        distributed.push({ playerId: collectorId, credits: creditsPerPlayer });
+      }
+    }
+
+    logger.log(`[TEAM CREDITS] Distributed ${totalCredits} credits (${teamMultiplier}x bonus) to ${participantCount} players`);
+
+    return { total: totalCredits, collectorCredits, distributed };
   }
 
   // Helper: Process collected loot and add to player
@@ -1242,7 +1424,7 @@ module.exports = function(io) {
             break;
         }
       } catch (err) {
-        console.error(`[LOOT ERROR] User ${userId} processing ${item.type}:`, err.message);
+        logger.error(`[LOOT ERROR] User ${userId} processing ${item.type}:`, err.message);
         results.errors.push({ type: item.type, error: err.message });
       }
     }

@@ -9,7 +9,7 @@ const Network = {
     this.socket = io();
 
     this.socket.on('connect', () => {
-      console.log('Connected to server');
+      Logger.log('Connected to server');
       this.connected = true;
 
       // Try to restore session
@@ -20,12 +20,12 @@ const Network = {
     });
 
     this.socket.on('disconnect', () => {
-      console.log('Disconnected from server');
+      Logger.log('Disconnected from server');
       this.connected = false;
     });
 
     this.socket.on('auth:success', (data) => {
-      console.log('Authentication successful');
+      Logger.log('Authentication successful');
       this.token = data.token;
       localStorage.setItem('galaxy-miner-token', data.token);
       GalaxyMiner.startGame(data.player);
@@ -50,7 +50,7 @@ const Network = {
       if (typeof Player !== 'undefined') {
         Player.colorId = data.colorId;
       }
-      console.log('Ship color changed to:', data.colorId);
+      Logger.log('Ship color changed to:', data.colorId);
     });
 
     this.socket.on('ship:colorError', (data) => {
@@ -60,9 +60,25 @@ const Network = {
       }
     });
 
+    // Ship profile customization events
+    this.socket.on('ship:profileChanged', (data) => {
+      // Update local player profile
+      if (typeof Player !== 'undefined') {
+        Player.ship.profileId = data.profileId;
+      }
+      Logger.log('Ship profile changed to:', data.profileId);
+    });
+
+    this.socket.on('ship:profileError', (data) => {
+      console.error('Profile change error:', data.message);
+      if (typeof Toast !== 'undefined') {
+        Toast.error(data.message);
+      }
+    });
+
     // Upgrade event handlers
     this.socket.on('upgrade:success', (data) => {
-      console.log('Upgrade success:', data.component, 'to tier', data.newTier);
+      Logger.log('Upgrade success:', data.component, 'to tier', data.newTier);
       if (typeof Player !== 'undefined') {
         // Map component key to Player.ship property name
         const componentToTierKey = {
@@ -79,7 +95,18 @@ const Network = {
         if (tierKey) {
           Player.ship[tierKey] = data.newTier;
         }
+        // Update max HP values if provided (for shield/hull upgrades)
+        if (data.shieldMax !== undefined) {
+          Player.shieldMax = data.shieldMax;
+        }
+        if (data.hullMax !== undefined) {
+          Player.hullMax = data.hullMax;
+        }
         Player.credits = data.credits;
+        // Sync credit animation with new balance
+        if (typeof CreditAnimation !== 'undefined') {
+          CreditAnimation.sync();
+        }
       }
       if (typeof ShipUpgradePanel !== 'undefined') {
         ShipUpgradePanel.updateData({
@@ -144,6 +171,11 @@ const Network = {
 
     this.socket.on('inventory:update', (data) => {
       Player.updateInventory(data);
+
+      // Sync credit animation with updated balance
+      if (typeof CreditAnimation !== 'undefined') {
+        CreditAnimation.sync();
+      }
 
       // Update UIState for new panels
       if (typeof UIState !== 'undefined') {
@@ -305,7 +337,7 @@ const Network = {
 
     // Formation leader succession (Void faction)
     this.socket.on('formation:leaderChange', (data) => {
-      console.log('Formation leader changed:', data);
+      Logger.log('Formation leader changed:', data);
 
       // Trigger visual effect
       if (typeof FormationSuccessionEffect !== 'undefined') {
@@ -401,7 +433,12 @@ const Network = {
 
     this.socket.on('base:reward', (data) => {
       // Display notification for base destruction rewards
-      console.log(`Base destroyed! Earned ${data.credits} credits (${data.teamMultiplier}x team bonus)`);
+      Logger.log(`Base destroyed! Earned ${data.credits} credits (${data.teamMultiplier}x team bonus)`);
+
+      // Animate credit gain
+      if (typeof CreditAnimation !== 'undefined' && data.credits > 0) {
+        CreditAnimation.addCredits(data.credits);
+      }
     });
 
     // Combat hit visualization
@@ -447,13 +484,13 @@ const Network = {
       if (typeof StarEffects !== 'undefined') {
         // StarEffects handles zone changes internally based on player position
         // This is just a server confirmation of zone state
-        console.log('Star zone:', data.zone);
+        Logger.log('Star zone:', data.zone);
       }
     });
 
     // Player death events (including from star damage)
     this.socket.on('player:death', (data) => {
-      console.log('Player died:', data.cause, data.message);
+      Logger.log('Player died:', data.cause, data.message);
 
       // Calculate survival time before death
       const survivalTime = Player.getSurvivalTime();
@@ -504,7 +541,7 @@ const Network = {
 
     // Player respawn after death
     this.socket.on('player:respawn', (data) => {
-      console.log('Player respawn received:', data.position);
+      Logger.log('Player respawn received:', data.position);
 
       // Prepare respawn data
       const respawnData = {
@@ -581,7 +618,7 @@ const Network = {
 
     // NPC hit feedback when we hit an NPC
     this.socket.on('combat:npcHit', (data) => {
-      console.log('NPC hit:', data);
+      Logger.log('NPC hit:', data);
 
       // Get NPC position for hit effect
       const npcEntity = Entities.npcs.get(data.npcId);
@@ -608,15 +645,7 @@ const Network = {
         }
       }
 
-      // If NPC destroyed, show loot notification
-      if (data.destroyed && data.loot && data.loot.length > 0) {
-        const lootText = data.loot.map(l => `+${l.quantity} ${l.resourceType}`).join(', ');
-        console.log('NPC destroyed! Loot:', lootText);
-
-        if (typeof Toast !== 'undefined') {
-          Toast.success(`NPC destroyed! ${lootText}`);
-        }
-      }
+      // NPC destroyed notification removed - rewards are now shown when collecting scrap
     });
 
     this.socket.on('chat:message', (data) => {
@@ -659,7 +688,7 @@ const Network = {
     });
 
     this.socket.on('market:listed', (data) => {
-      console.log('Listing created:', data.listingId);
+      Logger.log('Listing created:', data.listingId);
       // Refresh market to show new listing
       if (typeof MarketPanel !== 'undefined') {
         MarketPanel.refresh();
@@ -667,7 +696,7 @@ const Network = {
     });
 
     this.socket.on('market:bought', (data) => {
-      console.log('Purchase complete:', data.cost);
+      Logger.log('Purchase complete:', data.cost);
       // Refresh market after purchase
       if (typeof MarketPanel !== 'undefined') {
         MarketPanel.refresh();
@@ -675,7 +704,7 @@ const Network = {
     });
 
     this.socket.on('market:cancelled', (data) => {
-      console.log('Listing cancelled');
+      Logger.log('Listing cancelled');
       // Refresh market after cancellation
       if (typeof MarketPanel !== 'undefined') {
         MarketPanel.refresh();
@@ -689,12 +718,11 @@ const Network = {
 
     // Seller notification when their listing is sold
     this.socket.on('market:sold', (data) => {
-      if (typeof Toast !== 'undefined') {
-        Toast.success(
-          `Sold ${data.quantity} ${data.resourceName} to ${data.buyerName} for ${data.totalCredits} credits!`
-        );
+      // Animate credit gain instead of toast
+      if (typeof CreditAnimation !== 'undefined' && data.totalCredits > 0) {
+        CreditAnimation.addCredits(data.totalCredits);
       }
-      console.log('Market sale:', data);
+      Logger.log('Market sale:', data);
     });
 
     // Emote broadcast from other players
@@ -752,6 +780,21 @@ const Network = {
       Player.onLootCollectionCancelled(data);
     });
 
+    // Team credit reward - when another player collects scrap we contributed damage to
+    this.socket.on('team:creditReward', (data) => {
+      Logger.log('[TEAM] Received credit share:', data.credits, 'from team kill');
+
+      // Show toast notification
+      if (typeof Toast !== 'undefined') {
+        Toast.success(`Team bonus! +${data.credits} credits`);
+      }
+
+      // Animate credit counter if available
+      if (typeof CreditAnimation !== 'undefined') {
+        CreditAnimation.addCredits(data.credits);
+      }
+    });
+
     this.socket.on('loot:error', (data) => {
       console.error('Loot error:', data.message);
       if (typeof Toast !== 'undefined') {
@@ -779,7 +822,7 @@ const Network = {
 
     // Relic collection events
     this.socket.on('relic:collected', (data) => {
-      console.log('Relic collected:', data.relicType);
+      Logger.log('Relic collected:', data.relicType);
 
       // Add relic to player's collection
       if (typeof Player !== 'undefined') {
@@ -835,6 +878,19 @@ const Network = {
 
     this.socket.on('wormhole:error', (data) => {
       Player.onWormholeError(data);
+    });
+
+    // Wormhole nearest position (for gem directional indicator)
+    this.socket.on('wormhole:nearestPosition', (data) => {
+      if (data) {
+        Logger.log('[Network] Received nearest wormhole at', Math.round(data.x), Math.round(data.y));
+      } else {
+        Logger.log('[Network] Received null wormhole position');
+      }
+      if (typeof RadarObjects !== 'undefined') {
+        RadarObjects.cachedNearestWormhole = data;
+        RadarObjects.lastWormholeUpdate = Date.now();
+      }
     });
   },
 
@@ -957,5 +1013,10 @@ const Network = {
   sendCancelWormhole() {
     if (!this.connected) return;
     this.socket.emit('wormhole:cancel');
+  },
+
+  requestNearestWormholePosition() {
+    if (!this.connected) return;
+    this.socket.emit('wormhole:getNearestPosition');
   }
 };

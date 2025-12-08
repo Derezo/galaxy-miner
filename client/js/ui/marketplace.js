@@ -13,7 +13,7 @@ const MarketplaceUI = {
       });
     });
 
-    console.log('Marketplace UI initialized');
+    Logger.log('Marketplace UI initialized');
   },
 
   switchTab(tab) {

@@ -3,13 +3,14 @@
 const config = require('../config');
 const world = require('../world');
 const { statements, safeUpsertInventory } = require('../database');
+const logger = require('../../shared/logger');
 
 // Track active mining sessions: playerId -> { objectId, startTime, ... }
 const activeMining = new Map();
 
 function startMining(playerId, playerPosition, objectId) {
   // Debug logging for mining issues
-  console.log('[Mining] Start request:', {
+  logger.log('[Mining] Start request:', {
     playerId,
     objectId,
     playerPosition: { x: Math.round(playerPosition.x), y: Math.round(playerPosition.y) },
@@ -22,11 +23,11 @@ function startMining(playerId, playerPosition, objectId) {
   // Check if object exists
   const object = world.getObjectById(objectId, true); // Enable debug mode
   if (!object) {
-    console.log('[Mining] FAILED - Object not found:', objectId);
+    logger.log('[Mining] FAILED - Object not found:', objectId);
     return { success: false, error: 'Object not found' };
   }
 
-  console.log('[Mining] Object found:', {
+  logger.log('[Mining] Object found:', {
     id: object.id,
     hasResources: !!object.resources,
     size: object.size,

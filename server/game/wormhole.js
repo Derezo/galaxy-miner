@@ -35,13 +35,14 @@ function hasWormholeGem(playerId) {
  */
 function getNearestWormholes(x, y, count = MAX_DESTINATIONS) {
   const wormholes = [];
+  const seenIds = new Set(); // O(1) duplicate detection instead of O(n) array.find()
   const sectorSize = config.SECTOR_SIZE;
   const baseSectorX = Math.floor(x / sectorSize);
   const baseSectorY = Math.floor(y / sectorSize);
 
   // Expand search in rings until we find enough wormholes
   let searchRadius = 0;
-  const maxSearchRadius = 20; // Don't search beyond 20 sectors in any direction
+  const maxSearchRadius = 100; // Search up to 100 sectors (100k units) to find enough wormholes
 
   while (wormholes.length < count && searchRadius <= maxSearchRadius) {
     // Search sectors at this radius
@@ -57,24 +58,27 @@ function getNearestWormholes(x, y, count = MAX_DESTINATIONS) {
         const sector = World.generateSector(sectorX, sectorY);
 
         for (const wormhole of sector.wormholes) {
+          // Skip if already added (O(1) check)
+          if (seenIds.has(wormhole.id)) {
+            continue;
+          }
+
           // Calculate distance
           const distX = wormhole.x - x;
           const distY = wormhole.y - y;
           const distance = Math.sqrt(distX * distX + distY * distY);
 
-          // Check if already added (avoid duplicates from overlapping sector searches)
-          if (!wormholes.find(w => w.id === wormhole.id)) {
-            wormholes.push({
-              id: wormhole.id,
-              x: wormhole.x,
-              y: wormhole.y,
-              size: wormhole.size,
-              sectorX,
-              sectorY,
-              destinationSector: wormhole.destinationSector,
-              distance
-            });
-          }
+          seenIds.add(wormhole.id);
+          wormholes.push({
+            id: wormhole.id,
+            x: wormhole.x,
+            y: wormhole.y,
+            size: wormhole.size,
+            sectorX,
+            sectorY,
+            destinationSector: wormhole.destinationSector,
+            distance
+          });
         }
       }
     }

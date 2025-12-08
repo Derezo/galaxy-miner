@@ -2,7 +2,7 @@
 
 const UpgradesUI = {
   init() {
-    console.log('Upgrades UI initialized');
+    Logger.log('Upgrades UI initialized');
   },
 
   refresh() {

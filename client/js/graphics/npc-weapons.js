@@ -72,7 +72,7 @@ const NPCWeaponEffects = {
   },
 
   init() {
-    console.log('NPCWeaponEffects initialized');
+    Logger.log('NPCWeaponEffects initialized');
   },
 
   /**

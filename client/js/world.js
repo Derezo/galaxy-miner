@@ -19,11 +19,11 @@ const World = {
     if (typeof StarSystem !== 'undefined') {
       StarSystem.clearCache();
       StarSystem._debugLogged = false;  // Reset debug flag
-      console.log('[World] StarSystem loaded and cache cleared (v7)');
+      Logger.log('[World] StarSystem loaded and cache cleared (v7)');
     } else {
       console.error('[World] StarSystem NOT LOADED! Check for JS errors above.');
     }
-    console.log('World initialized with seed:', seed);
+    Logger.log('World initialized with seed:', seed);
   },
 
   update(playerPosition) {
@@ -59,7 +59,7 @@ const World = {
     if (this.useStarSystemModel && typeof StarSystem !== 'undefined') {
       // Log once to confirm we're using new generation
       if (!this._confirmedStarSystem) {
-        console.log('%c[World] Using NEW StarSystem generation (v4)', 'color: green; font-weight: bold');
+        Logger.log('%c[World] Using NEW StarSystem generation (v4)', 'color: green; font-weight: bold');
         this._confirmedStarSystem = true;
       }
       return this.generateSectorFromStarSystem(sectorX, sectorY);
@@ -79,7 +79,7 @@ const World = {
     if (!this._debugLogCount) this._debugLogCount = 0;
     if (this._debugLogCount < 5) {
       const systems = StarSystem.getStarSystemsForSector(sectorX, sectorY);
-      console.log(`[World] Sector (${sectorX},${sectorY}): ${systems.length} systems from StarSystem`);
+      Logger.log(`[World] Sector (${sectorX},${sectorY}): ${systems.length} systems from StarSystem`);
       this._debugLogCount++;
     }
 
@@ -732,7 +732,7 @@ const World = {
 
     // Debug: log star count occasionally
     if (!this._lastStarLog || Date.now() - this._lastStarLog > 5000) {
-      console.log(`[World] getVisibleObjects: ${objects.stars.length} stars, ${objects.planets.length} planets`);
+      Logger.log(`[World] getVisibleObjects: ${objects.stars.length} stars, ${objects.planets.length} planets`);
       this._lastStarLog = Date.now();
     }
 

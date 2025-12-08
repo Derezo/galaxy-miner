@@ -205,6 +205,91 @@ function getStrategy(npc) {
 }
 
 /**
+ * Handle orphaned NPC in rage mode - aggressive pursuit of any player
+ * NPCs in rage mode ignore their normal faction behavior and simply
+ * chase and attack the nearest player relentlessly.
+ * @param {Object} npc - The enraged NPC
+ * @param {Array} allPlayers - All online players
+ * @param {number} deltaTime - Time since last update in ms
+ * @returns {Object|null} Fire action or null
+ */
+function handleRageMode(npc, allPlayers, deltaTime) {
+  // Find nearest player in extended aggro range
+  let target = null;
+  let nearestDist = npc.aggroRange;
+
+  for (const player of allPlayers) {
+    const dx = player.position.x - npc.position.x;
+    const dy = player.position.y - npc.position.y;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+
+    if (dist < nearestDist) {
+      nearestDist = dist;
+      target = player;
+    }
+  }
+
+  if (!target) {
+    // No target found - patrol around current position
+    npc.patrolAngle = npc.patrolAngle || 0;
+    npc.patrolAngle += 0.3 * (deltaTime / 1000);
+
+    const patrolRadius = 150;
+    const patrolX = (npc.orphanCenter?.x || npc.position.x) + Math.cos(npc.patrolAngle) * patrolRadius;
+    const patrolY = (npc.orphanCenter?.y || npc.position.y) + Math.sin(npc.patrolAngle) * patrolRadius;
+
+    const dx = patrolX - npc.position.x;
+    const dy = patrolY - npc.position.y;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+
+    if (dist > 5) {
+      const moveSpeed = npc.speed * 0.4 * (deltaTime / 1000);
+      npc.position.x += (dx / dist) * moveSpeed;
+      npc.position.y += (dy / dist) * moveSpeed;
+      npc.rotation = Math.atan2(dy, dx);
+    }
+
+    return null;
+  }
+
+  // Aggressively chase target
+  const dx = target.position.x - npc.position.x;
+  const dy = target.position.y - npc.position.y;
+  const dist = Math.sqrt(dx * dx + dy * dy);
+
+  // Update rotation to face target
+  npc.rotation = Math.atan2(dy, dx);
+
+  // Move toward target (faster than normal - enraged)
+  if (dist > npc.weaponRange * 0.7) {
+    const moveSpeed = npc.speed * 1.2 * (deltaTime / 1000);  // 20% faster when enraged
+    npc.position.x += (dx / dist) * moveSpeed;
+    npc.position.y += (dy / dist) * moveSpeed;
+  }
+
+  // Try to fire more frequently (reduced cooldown)
+  const fireCooldown = 800;  // 0.8 seconds instead of normal 1 second
+  const canFire = Date.now() - (npc.lastFireTime || 0) > fireCooldown;
+
+  if (canFire && dist <= npc.weaponRange) {
+    npc.lastFireTime = Date.now();
+
+    // Apply rage damage multiplier
+    const baseDamage = npc.weaponDamage * (npc.rageMultiplier || 1);
+
+    return {
+      action: 'fire',
+      target: target,
+      weaponType: npc.weaponType,
+      weaponTier: npc.weaponTier,
+      baseDamage: baseDamage
+    };
+  }
+
+  return null;
+}
+
+/**
  * Main AI update function - replaces simple updateNPC
  * @param {Object} npc - NPC to update
  * @param {Array} allPlayers - All online players
@@ -213,6 +298,11 @@ function getStrategy(npc) {
  * @returns {Object|null} Action result (fire, etc.)
  */
 function updateNPCAI(npc, allPlayers, allNPCs, deltaTime) {
+  // Special handling for orphaned NPCs in rage mode
+  if (npc.orphaned && npc.state === 'rage') {
+    return handleRageMode(npc, allPlayers, deltaTime);
+  }
+
   const strategy = getStrategy(npc);
 
   // Find players in aggro range

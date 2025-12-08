@@ -17,7 +17,7 @@ const Entities = {
     this.baseStates.clear();
     this.bases.clear();
     this.projectileTrails = [];
-    console.log('Entities initialized');
+    Logger.log('Entities initialized');
   },
 
   update(dt) {

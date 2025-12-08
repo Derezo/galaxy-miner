@@ -1,6 +1,8 @@
 const Database = require('better-sqlite3');
 const fs = require('fs');
 const path = require('path');
+const logger = require('../shared/logger');
+const CONSTANTS = require('../shared/constants');
 
 const DB_PATH = path.join(__dirname, '..', 'data', 'galaxy-miner.db');
 const SCHEMA_PATH = path.join(__dirname, 'schema.sql');
@@ -38,6 +40,13 @@ try {
 // Add hull_tier column if it doesn't exist
 try {
   db.exec(`ALTER TABLE ships ADD COLUMN hull_tier INTEGER DEFAULT 1`);
+} catch (e) {
+  // Column already exists, ignore error
+}
+
+// Add profile_id column if it doesn't exist
+try {
+  db.exec(`ALTER TABLE ships ADD COLUMN profile_id TEXT DEFAULT 'pilot'`);
 } catch (e) {
   // Column already exists, ignore error
 }
@@ -89,6 +98,8 @@ const statements = {
       radar_tier = COALESCE(?, radar_tier),
       energy_core_tier = COALESCE(?, energy_core_tier),
       hull_tier = COALESCE(?, hull_tier),
+      shield_max = COALESCE(?, shield_max),
+      hull_max = COALESCE(?, hull_max),
       updated_at = CURRENT_TIMESTAMP
     WHERE user_id = ?
   `),
@@ -109,6 +120,10 @@ const statements = {
   `),
   updateShipColor: db.prepare(`
     UPDATE ships SET ship_color_id = ?, updated_at = CURRENT_TIMESTAMP
+    WHERE user_id = ?
+  `),
+  updateShipProfile: db.prepare(`
+    UPDATE ships SET profile_id = ?, updated_at = CURRENT_TIMESTAMP
     WHERE user_id = ?
   `),
 
@@ -335,7 +350,7 @@ const performUpgrade = db.transaction((userId, component, requirements, maxTier 
   for (const [resourceType, quantity] of Object.entries(requirements.resources || {})) {
     const current = inventoryMap.get(resourceType);
     const newQuantity = current - quantity;
-    console.log(`[INVENTORY] User ${userId} ${resourceType}: ${current} -> ${newQuantity} (upgrade -${quantity})`);
+    logger.log(`[INVENTORY] User ${userId} ${resourceType}: ${current} -> ${newQuantity} (upgrade -${quantity})`);
     if (newQuantity <= 0) {
       // Remove entry entirely
       db.prepare('DELETE FROM inventory WHERE user_id = ? AND resource_type = ?')
@@ -346,9 +361,9 @@ const performUpgrade = db.transaction((userId, component, requirements, maxTier 
   }
 
   // 6. Apply upgrade - build params array for upgradeShipComponent
-  // Order: engine, weapon_type, weapon, shield, mining, cargo, radar, energy_core, hull, user_id
+  // Order: engine, weapon_type, weapon, shield, mining, cargo, radar, energy_core, hull, shield_max, hull_max, user_id
   const nextTier = currentTier + 1;
-  const updateParams = [null, null, null, null, null, null, null, null, null, userId];
+  const updateParams = [null, null, null, null, null, null, null, null, null, null, null, userId];
   const componentToIndex = {
     'engine': 0,
     'weapon': 2,
@@ -360,6 +375,19 @@ const performUpgrade = db.transaction((userId, component, requirements, maxTier 
     'hull': 8
   };
   updateParams[componentToIndex[component]] = nextTier;
+
+  // Recalculate max HP values for shield/hull upgrades
+  // Shield uses SHIELD_TIER_MULTIPLIER (2.0x), Hull uses TIER_MULTIPLIER (1.5x)
+  if (component === 'shield') {
+    const shieldMultiplier = CONSTANTS.SHIELD_TIER_MULTIPLIER || 2.0;
+    const newShieldMax = Math.round(CONSTANTS.DEFAULT_SHIELD_HP * Math.pow(shieldMultiplier, nextTier - 1));
+    updateParams[9] = newShieldMax;  // shield_max
+  } else if (component === 'hull') {
+    const hullMultiplier = CONSTANTS.TIER_MULTIPLIER || 1.5;
+    const newHullMax = Math.round(CONSTANTS.DEFAULT_HULL_HP * Math.pow(hullMultiplier, nextTier - 1));
+    updateParams[10] = newHullMax;  // hull_max
+  }
+
   statements.upgradeShipComponent.run(...updateParams);
 
   return { success: true, newTier: nextTier, creditsSpent: requirements.credits };
@@ -374,7 +402,7 @@ const performUpgrade = db.transaction((userId, component, requirements, maxTier 
 function safeUpdateCredits(credits, userId) {
   // Validate credits is a valid number - if invalid, don't update (preserve current value)
   if (credits === null || credits === undefined || Number.isNaN(credits) || typeof credits !== 'number') {
-    console.warn(`safeUpdateCredits: Invalid credits value (${credits}) for user ${userId}, skipping update`);
+    logger.warn(`safeUpdateCredits: Invalid credits value (${credits}) for user ${userId}, skipping update`);
     return { changes: 0 }; // Return empty result, don't update
   }
 
@@ -406,19 +434,19 @@ function getSafeCredits(ship) {
 function safeUpsertInventory(userId, resourceType, quantity) {
   // Validate userId
   if (!userId || typeof userId !== 'number') {
-    console.warn(`[INVENTORY] Invalid userId (${userId}), skipping`);
+    logger.warn(`[INVENTORY] Invalid userId (${userId}), skipping`);
     return { changes: 0 };
   }
 
   // Validate resourceType
   if (!resourceType || typeof resourceType !== 'string') {
-    console.warn(`[INVENTORY] Invalid resourceType (${resourceType}) for user ${userId}, skipping`);
+    logger.warn(`[INVENTORY] Invalid resourceType (${resourceType}) for user ${userId}, skipping`);
     return { changes: 0 };
   }
 
   // Validate quantity - MUST be positive to add resources
   if (quantity === null || quantity === undefined || Number.isNaN(quantity) || typeof quantity !== 'number' || quantity <= 0) {
-    console.warn(`[INVENTORY] Invalid quantity (${quantity}) for ${resourceType}, user ${userId}, skipping`);
+    logger.warn(`[INVENTORY] Invalid quantity (${quantity}) for ${resourceType}, user ${userId}, skipping`);
     return { changes: 0 };
   }
 
@@ -436,12 +464,12 @@ function safeUpsertInventory(userId, resourceType, quantity) {
 
   // CRITICAL: Detect if quantity unexpectedly decreased
   if (afterQty < beforeQty) {
-    console.error(`[INVENTORY CRITICAL] User ${userId} ${resourceType}: quantity DECREASED from ${beforeQty} to ${afterQty}! Adding ${safeQuantity}`);
+    logger.error(`[INVENTORY CRITICAL] User ${userId} ${resourceType}: quantity DECREASED from ${beforeQty} to ${afterQty}! Adding ${safeQuantity}`);
   }
 
   // Log significant changes for debugging
   if (beforeQty !== afterQty) {
-    console.log(`[INVENTORY] User ${userId} ${resourceType}: ${beforeQty} -> ${afterQty} (+${safeQuantity})`);
+    logger.log(`[INVENTORY] User ${userId} ${resourceType}: ${beforeQty} -> ${afterQty} (+${safeQuantity})`);
   }
 
   return result;

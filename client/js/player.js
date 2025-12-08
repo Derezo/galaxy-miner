@@ -20,7 +20,8 @@ const Player = {
     cargoTier: 1,
     radarTier: 1,
     energyCoreTier: 1,
-    hullTier: 1
+    hullTier: 1,
+    profileId: 'pilot'
   },
   lastFireTime: 0,
   miningTarget: null,
@@ -76,11 +77,21 @@ const Player = {
       cargoTier: data.cargo_tier,
       radarTier: data.radar_tier,
       energyCoreTier: data.energy_core_tier || 1,
-      hullTier: data.hull_tier || 1
+      hullTier: data.hull_tier || 1,
+      profileId: data.profile_id || 'pilot'
     };
 
     // Initialize ship color
     this.colorId = data.ship_color_id || 'green';
+
+    // Initialize profile image from profileId
+    if (typeof HUD !== 'undefined' && typeof CONSTANTS !== 'undefined') {
+      const profileOptions = CONSTANTS.PROFILE_OPTIONS || [];
+      const profile = profileOptions.find(p => p.id === this.ship.profileId);
+      if (profile) {
+        HUD.updateProfileImage(profile.emoji);
+      }
+    }
 
     // Reset boost state
     this.boostActive = false;
@@ -110,7 +121,7 @@ const Player = {
       });
     }
 
-    console.log('Player initialized:', this.username);
+    Logger.log('Player initialized:', this.username);
   },
 
   update(dt) {
@@ -277,7 +288,7 @@ const Player = {
       this.miningProgress = 0;
 
       // Debug logging for mining issues
-      console.log('[Mining Debug] Attempting to mine:', {
+      Logger.log('[Mining Debug] Attempting to mine:', {
         objectId: this.miningTarget.id,
         objectPos: { x: Math.round(this.miningTarget.x), y: Math.round(this.miningTarget.y) },
         objectSize: this.miningTarget.size,
@@ -502,7 +513,7 @@ const Player = {
 
   onLootCollectionStarted(data) {
     this.collectTotalTime = data.totalTime;
-    console.log('Started collecting wreckage:', data.wreckageId);
+    Logger.log('Started collecting wreckage:', data.wreckageId);
   },
 
   onLootCollectionProgress(data) {
@@ -510,7 +521,7 @@ const Player = {
   },
 
   onLootCollectionComplete(data) {
-    console.log('Loot collected:', data.contents);
+    Logger.log('Loot collected:', data.contents);
 
     // Show loot notification
     if (data.results) {
@@ -540,7 +551,7 @@ const Player = {
   },
 
   onLootCollectionCancelled(data) {
-    console.log('Loot collection cancelled:', data.reason);
+    Logger.log('Loot collection cancelled:', data.reason);
     this.collectingWreckage = null;
     this.collectProgress = 0;
     this.collectTotalTime = 0;
@@ -613,7 +624,7 @@ const Player = {
     this.boostEndTime = now + boostDuration;
     this.boostCooldownEnd = now + boostCooldown;
 
-    console.log(`Thrust boost activated! Duration: ${boostDuration}ms, Cooldown: ${boostCooldown}ms`);
+    Logger.log(`Thrust boost activated! Duration: ${boostDuration}ms, Cooldown: ${boostCooldown}ms`);
   },
 
   isBoostActive() {
@@ -682,7 +693,7 @@ const Player = {
       this.shield.current = data.shield;
     }
 
-    console.log('[Player] Respawned at:', this.position);
+    Logger.log('[Player] Respawned at:', this.position);
   },
 
   /**
@@ -715,7 +726,7 @@ const Player = {
 
         // Debug log (throttled)
         if (!this._lastWormholeLog || Date.now() - this._lastWormholeLog > 2000) {
-          console.log('[Wormhole] Found wormhole at', Math.round(wormhole.x), Math.round(wormhole.y),
+          Logger.log('[Wormhole] Found wormhole at', Math.round(wormhole.x), Math.round(wormhole.y),
             'dist:', Math.round(dist), 'size:', wormhole.size, 'range:', WORMHOLE_RANGE + wormhole.size);
           this._lastWormholeLog = Date.now();
         }
@@ -736,7 +747,7 @@ const Player = {
 
       // Debug log when near wormhole
       if (nearestWormhole && (!this._lastHintLog || Date.now() - this._lastHintLog > 2000)) {
-        console.log('[Wormhole] Near wormhole! hasGem:', hasGem, 'inTransit:', this.inWormholeTransit,
+        Logger.log('[Wormhole] Near wormhole! hasGem:', hasGem, 'inTransit:', this.inWormholeTransit,
           'relics:', this.relics?.map(r => r.relic_type));
         this._lastHintLog = Date.now();
       }
@@ -753,7 +764,7 @@ const Player = {
    * Attempt to enter a nearby wormhole
    */
   tryEnterWormhole() {
-    console.log('[Wormhole] tryEnterWormhole called, nearestWormhole:', this._nearestWormhole);
+    Logger.log('[Wormhole] tryEnterWormhole called, nearestWormhole:', this._nearestWormhole);
 
     if (!this._nearestWormhole) {
       Toast.error('No wormhole nearby');
@@ -770,7 +781,7 @@ const Player = {
       return;
     }
 
-    console.log('[Wormhole] Sending enter request for wormhole:', this._nearestWormhole.id);
+    Logger.log('[Wormhole] Sending enter request for wormhole:', this._nearestWormhole.id);
     Network.sendEnterWormhole(this._nearestWormhole.id);
   },
 
@@ -788,7 +799,7 @@ const Player = {
       WormholeTransitUI.show(this.wormholeDestinations);
     }
 
-    console.log('[Wormhole] Entered, selecting destination from', this.wormholeDestinations.length, 'options');
+    Logger.log('[Wormhole] Entered, selecting destination from', this.wormholeDestinations.length, 'options');
   },
 
   /**
@@ -816,7 +827,7 @@ const Player = {
       WormholeTransitUI.startTransit(data.duration, data.destination);
     }
 
-    console.log('[Wormhole] Transit started to', data.destination);
+    Logger.log('[Wormhole] Transit started to', data.destination);
   },
 
   /**
@@ -855,7 +866,7 @@ const Player = {
     }
 
     Toast.success('Wormhole transit complete!');
-    console.log('[Wormhole] Exited at', data.position);
+    Logger.log('[Wormhole] Exited at', data.position);
   },
 
   /**
@@ -888,7 +899,7 @@ const Player = {
       Toast.info('Transit cancelled: ' + data.reason);
     }
 
-    console.log('[Wormhole] Transit cancelled:', data.reason);
+    Logger.log('[Wormhole] Transit cancelled:', data.reason);
   },
 
   /**

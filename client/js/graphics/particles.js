@@ -91,7 +91,7 @@ const ParticleSystem = {
       this.pool.push(new Particle());
     }
 
-    console.log(`ParticleSystem initialized with ${poolSize} particles (${quality} quality)`);
+    Logger.log(`ParticleSystem initialized with ${poolSize} particles (${quality} quality)`);
   },
 
   /**
@@ -114,7 +114,7 @@ const ParticleSystem = {
     // If smaller, particles will naturally be removed as they expire
 
     PARTICLE_POOL_SIZE = newPoolSize;
-    console.log(`ParticleSystem quality set to ${quality} (${newPoolSize} particles)`);
+    Logger.log(`ParticleSystem quality set to ${quality} (${newPoolSize} particles)`);
   },
 
   spawn(config) {

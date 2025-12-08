@@ -61,7 +61,18 @@ const Renderer = {
       StarEffects.init();
     }
 
-    console.log('Renderer initialized with advanced graphics');
+    // Initialize new HUD visual modules
+    if (typeof ShieldVisual !== 'undefined') {
+      ShieldVisual.init();
+    }
+    if (typeof HullBarRenderer !== 'undefined') {
+      HullBarRenderer.init();
+    }
+    if (typeof BoostIndicator !== 'undefined') {
+      BoostIndicator.init();
+    }
+
+    Logger.log('Renderer initialized with advanced graphics');
   },
 
   resize() {
@@ -116,6 +127,17 @@ const Renderer = {
     // Update player death effect sequence
     if (typeof PlayerDeathEffect !== 'undefined') {
       PlayerDeathEffect.update(dt);
+    }
+
+    // Update new HUD visual modules
+    if (typeof ShieldVisual !== 'undefined') {
+      ShieldVisual.update(dt);
+    }
+    if (typeof HullBarRenderer !== 'undefined') {
+      HullBarRenderer.update(dt);
+    }
+    if (typeof BoostIndicator !== 'undefined') {
+      BoostIndicator.update(dt);
     }
   },
 
@@ -412,27 +434,140 @@ const Renderer = {
   drawWormhole(wormhole) {
     const screen = this.worldToScreen(wormhole.x, wormhole.y);
     const ctx = this.ctx;
+    const size = wormhole.size;
+    const time = Date.now() / 1000;
 
-    // Swirling effect
-    const gradient = ctx.createRadialGradient(
-      screen.x, screen.y, 0,
-      screen.x, screen.y, wormhole.size
-    );
-    gradient.addColorStop(0, '#000000');
-    gradient.addColorStop(0.5, CONSTANTS.COLORS.WORMHOLE);
-    gradient.addColorStop(1, 'transparent');
+    ctx.save();
+    ctx.translate(screen.x, screen.y);
 
-    ctx.fillStyle = gradient;
+    // Background void - dark outer edges fading to transparent (no border)
+    const voidGradient = ctx.createRadialGradient(0, 0, 0, 0, 0, size);
+    voidGradient.addColorStop(0, 'rgba(200, 230, 255, 0.15)');  // Bright center glow
+    voidGradient.addColorStop(0.15, 'rgba(100, 180, 255, 0.1)');
+    voidGradient.addColorStop(0.4, 'rgba(20, 40, 80, 0.3)');
+    voidGradient.addColorStop(0.7, 'rgba(5, 10, 30, 0.5)');
+    voidGradient.addColorStop(0.9, 'rgba(0, 0, 10, 0.3)');
+    voidGradient.addColorStop(1, 'transparent');
+    ctx.fillStyle = voidGradient;
     ctx.beginPath();
-    ctx.arc(screen.x, screen.y, wormhole.size, 0, Math.PI * 2);
+    ctx.arc(0, 0, size, 0, Math.PI * 2);
     ctx.fill();
 
-    // Inner ring
-    ctx.strokeStyle = CONSTANTS.COLORS.WORMHOLE;
-    ctx.lineWidth = 3;
+    // Main swirling spiral arms (8 arms for denser vortex effect)
+    const numArms = 8;
+    // Mixed colors: cyan, blue, and some warm orange/yellow like the reference
+    const armColors = ['#00ffff', '#4488ff', '#ff8844', '#00ccff', '#ffaa44', '#0066cc', '#88ddff', '#ff6622'];
+
+    for (let arm = 0; arm < numArms; arm++) {
+      const armAngle = (arm / numArms) * Math.PI * 2;
+      // Faster rotation - 1.5x to 2x speed, alternating for depth
+      const rotationSpeed = 1.5 + (arm % 3) * 0.4;
+      const baseRotation = time * rotationSpeed + armAngle;
+
+      ctx.save();
+      ctx.rotate(baseRotation);
+
+      // Draw spiral arm as curved path spiraling inward
+      ctx.beginPath();
+      const spiralTurns = 2.0;  // More turns for tighter spiral
+      const startRadius = size * 0.92;
+      const endRadius = size * 0.05;
+
+      for (let i = 0; i <= 80; i++) {
+        const t = i / 80;
+        const angle = t * Math.PI * 2 * spiralTurns;
+        const radius = startRadius - (startRadius - endRadius) * Math.pow(t, 0.8);  // Accelerate toward center
+        // Organic wobble
+        const wobble = Math.sin(t * 12 + time * 4) * 2;
+        const x = Math.cos(angle) * (radius + wobble);
+        const y = Math.sin(angle) * (radius + wobble);
+
+        if (i === 0) {
+          ctx.moveTo(x, y);
+        } else {
+          ctx.lineTo(x, y);
+        }
+      }
+
+      // Arm styling - brighter near center, faster opacity transitions
+      const armOpacity = 0.5 + Math.sin(time * 4 + arm * 0.8) * 0.3;
+      ctx.strokeStyle = armColors[arm];
+      // Arms get thinner toward center
+      ctx.lineWidth = 2.5 + Math.sin(time * 5 + arm) * 1;
+      ctx.globalAlpha = armOpacity;
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    ctx.globalAlpha = 1;
+
+    // Light particles being pulled in (more particles, brighter)
+    const numParticles = 36;
+    for (let i = 0; i < numParticles; i++) {
+      // Faster particle movement
+      const particleTime = (time * 0.8 + i * 0.12) % 1;
+      const particleAngle = (i / numParticles) * Math.PI * 2 + time * 2.5;
+      const particleRadius = size * (0.95 - particleTime * 0.9);
+      const spiralOffset = particleTime * Math.PI * 4;  // Tighter spiral
+
+      const px = Math.cos(particleAngle + spiralOffset) * particleRadius;
+      const py = Math.sin(particleAngle + spiralOffset) * particleRadius;
+
+      // Particles get brighter as they approach center
+      const particleSize = 1.5 + particleTime * 2.5;
+      const particleAlpha = 0.4 + particleTime * 0.5;
+
+      // Mix of colors - white, cyan, orange, yellow
+      const colors = ['#ffffff', '#00ffff', '#ffaa44', '#88ddff', '#ffcc66'];
+      ctx.fillStyle = colors[i % colors.length];
+      ctx.globalAlpha = particleAlpha;
+      ctx.beginPath();
+      ctx.arc(px, py, particleSize, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    ctx.globalAlpha = 1;
+
+    // Concentric rings pulsing inward (faster)
+    for (let ring = 0; ring < 5; ring++) {
+      const ringPhase = (time * 1.2 + ring * 0.2) % 1;
+      const ringRadius = size * (0.15 + ringPhase * 0.75);
+      const ringAlpha = 0.35 * (1 - ringPhase);
+
+      ctx.strokeStyle = ring % 2 === 0 ? '#88ddff' : '#ffffff';
+      ctx.lineWidth = 1.2;
+      ctx.globalAlpha = ringAlpha;
+      ctx.beginPath();
+      ctx.arc(0, 0, ringRadius, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+
+    ctx.globalAlpha = 1;
+
+    // Bright center core - the "light at the end of the tunnel"
+    const coreGlow = ctx.createRadialGradient(0, 0, 0, 0, 0, size * 0.25);
+    coreGlow.addColorStop(0, 'rgba(255, 255, 255, 0.95)');
+    coreGlow.addColorStop(0.2, 'rgba(200, 240, 255, 0.8)');
+    coreGlow.addColorStop(0.5, 'rgba(100, 200, 255, 0.4)');
+    coreGlow.addColorStop(0.8, 'rgba(50, 100, 200, 0.15)');
+    coreGlow.addColorStop(1, 'transparent');
+    ctx.fillStyle = coreGlow;
     ctx.beginPath();
-    ctx.arc(screen.x, screen.y, wormhole.size * 0.5, 0, Math.PI * 2);
-    ctx.stroke();
+    ctx.arc(0, 0, size * 0.25, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Inner bright core with pulsing
+    const corePulse = 0.7 + Math.sin(time * 6) * 0.3;
+    const innerCore = ctx.createRadialGradient(0, 0, 0, 0, 0, size * 0.1);
+    innerCore.addColorStop(0, `rgba(255, 255, 255, ${corePulse})`);
+    innerCore.addColorStop(0.5, `rgba(180, 220, 255, ${corePulse * 0.6})`);
+    innerCore.addColorStop(1, 'transparent');
+    ctx.fillStyle = innerCore;
+    ctx.beginPath();
+    ctx.arc(0, 0, size * 0.1, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.restore();
   },
 
   /**
@@ -679,6 +814,25 @@ const Renderer = {
         const screen = this.worldToScreen(npc.position.x, npc.position.y);
         NPCShipGeometry.draw(ctx, npc.position, npc.rotation, npc.type, npc.faction, screen);
 
+        // Draw shield visual for NPCs with shields
+        if (typeof ShieldVisual !== 'undefined' && npc.shieldMax > 0) {
+          const shieldPercent = (npc.shield / npc.shieldMax) * 100;
+          // NPCs use tier based on their variant (bosses = tier 3-4, regular = tier 1-2)
+          const shieldTier = npc.isBoss ? 4 : (npc.isElite ? 3 : 2);
+          ShieldVisual.drawShieldForEntity(
+            ctx,
+            npc.position.x,
+            npc.position.y,
+            screen.x,
+            screen.y,
+            npc.rotation,
+            shieldPercent,
+            shieldTier,
+            id,
+            NPCShipGeometry.SIZE
+          );
+        }
+
         // Draw name above NPC
         if (npc.name) {
           ctx.fillStyle = NPCShipGeometry.FACTION_COLORS[npc.faction]?.outline || '#ffffff';
@@ -688,8 +842,19 @@ const Renderer = {
           ctx.fillText(npc.name, screen.x, screen.y - NPCShipGeometry.SIZE * 1.5);
         }
 
-        // Draw health bar for damaged NPCs
-        if (npc.hull < npc.hullMax || npc.shield < npc.shieldMax) {
+        // Draw hull bar for damaged NPCs (using new renderer)
+        if (typeof HullBarRenderer !== 'undefined') {
+          const lastDamageTime = npc.lastDamageTime || 0;
+          HullBarRenderer.drawBar(
+            ctx,
+            screen.x,
+            screen.y,
+            npc.hull,
+            npc.hullMax,
+            lastDamageTime
+          );
+        } else if (npc.hull < npc.hullMax || npc.shield < npc.shieldMax) {
+          // Fallback to old health bar if new renderer not available
           this.drawNPCHealthBar(npc, screen);
         }
       } else {
@@ -749,6 +914,15 @@ const Renderer = {
     const dt = this.lastDt;
     const visualTier = ShipGeometry.getVisualTier(Player.ship);
     const screen = this.worldToScreen(Player.position.x, Player.position.y);
+    const shieldTier = Player.ship.shieldTier || 1;
+
+    // Draw boost cooldown indicator under ship (draw first, behind everything)
+    if (typeof BoostIndicator !== 'undefined') {
+      const isOnCooldown = Player.isBoostOnCooldown && Player.isBoostOnCooldown();
+      const isActive = Player.isBoostActive && Player.isBoostActive();
+      const cooldownPercent = Player.getBoostCooldownPercent ? Player.getBoostCooldownPercent() : 0;
+      BoostIndicator.draw(ctx, screen.x, screen.y, isOnCooldown, cooldownPercent, isActive);
+    }
 
     // Draw invulnerability glow if active (behind ship)
     if (typeof PlayerDeathEffect !== 'undefined' && PlayerDeathEffect.isInvulnerable()) {
@@ -775,6 +949,36 @@ const Renderer = {
     } else if (Player.isBoostActive && Player.isBoostActive()) {
       // Clear boost trail when not thrusting
       ThrustRenderer.clearBoostTrail();
+    }
+
+    // Draw shield visual around ship
+    if (typeof ShieldVisual !== 'undefined' && Player.shield.max > 0) {
+      const shieldPercent = (Player.shield.current / Player.shield.max) * 100;
+      ShieldVisual.drawShieldForEntity(
+        ctx,
+        Player.position.x,
+        Player.position.y,
+        screen.x,
+        screen.y,
+        Player.rotation,
+        shieldPercent,
+        shieldTier,
+        'player',
+        ShipGeometry.SIZE
+      );
+    }
+
+    // Draw hull HP bar above ship
+    if (typeof HullBarRenderer !== 'undefined') {
+      const lastDamageTime = Player.lastDamageTime || 0;
+      HullBarRenderer.drawBar(
+        ctx,
+        screen.x,
+        screen.y,
+        Player.hull.current,
+        Player.hull.max,
+        lastDamageTime
+      );
     }
 
     // Draw mining progress bar if mining

@@ -203,33 +203,117 @@ const RadarBaseRenderer = {
     ctx.restore();
   },
 
-  // Draw wormhole swirl icon
+  // Draw animated wormhole vortex icon (mini version - matches main renderer style)
   drawWormhole(ctx, x, y, size, color) {
-    ctx.strokeStyle = color;
-    ctx.lineWidth = 1.5;
+    const time = Date.now() / 1000;
     ctx.save();
     ctx.translate(x, y);
 
-    // Spiral pattern
+    // Background - dark outer, transparent edge (no border)
+    const voidGradient = ctx.createRadialGradient(0, 0, 0, 0, 0, size);
+    voidGradient.addColorStop(0, 'rgba(200, 230, 255, 0.2)');  // Bright center
+    voidGradient.addColorStop(0.3, 'rgba(50, 100, 150, 0.15)');
+    voidGradient.addColorStop(0.7, 'rgba(10, 20, 40, 0.2)');
+    voidGradient.addColorStop(1, 'transparent');
+    ctx.fillStyle = voidGradient;
     ctx.beginPath();
-    for (let i = 0; i < 2; i++) {
-      const startAngle = i * Math.PI;
-      for (let t = 0; t <= Math.PI; t += 0.2) {
-        const r = size * (1 - t / Math.PI) * 0.8 + size * 0.2;
-        const angle = startAngle + t * 2;
-        const px = Math.cos(angle) * r;
-        const py = Math.sin(angle) * r;
-        if (t === 0) ctx.moveTo(px, py);
+    ctx.arc(0, 0, size, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Rotating spiral arms (4 arms) - fast spin with mixed colors
+    const armColors = ['#00ffff', '#ff8844', '#88ddff', '#ffaa44'];
+    for (let arm = 0; arm < 4; arm++) {
+      const rotationSpeed = 3.5 + (arm % 2) * 0.8;
+      const baseRotation = time * rotationSpeed + (arm / 4) * Math.PI * 2;
+      ctx.save();
+      ctx.rotate(baseRotation);
+
+      ctx.beginPath();
+      for (let i = 0; i <= 25; i++) {
+        const t = i / 25;
+        const angle = t * Math.PI * 2;  // Full spiral turn
+        const radius = size * 0.85 - size * 0.75 * Math.pow(t, 0.8);
+        const px = Math.cos(angle) * radius;
+        const py = Math.sin(angle) * radius;
+        if (i === 0) ctx.moveTo(px, py);
         else ctx.lineTo(px, py);
       }
+
+      ctx.strokeStyle = armColors[arm];
+      ctx.lineWidth = 1.2;
+      ctx.globalAlpha = 0.6 + Math.sin(time * 6 + arm) * 0.3;
+      ctx.stroke();
+      ctx.restore();
     }
+
+    ctx.globalAlpha = 1;
+
+    // Pulsing ring - faster
+    const ringPhase = (time * 2.5) % 1;
+    const ringRadius = size * (0.2 + ringPhase * 0.6);
+    const ringAlpha = 0.4 * (1 - ringPhase);
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 0.8;
+    ctx.globalAlpha = ringAlpha;
+    ctx.beginPath();
+    ctx.arc(0, 0, ringRadius, 0, Math.PI * 2);
     ctx.stroke();
 
-    // Center dot
-    ctx.fillStyle = color;
+    ctx.globalAlpha = 1;
+
+    // Bright center core
+    const coreGlow = ctx.createRadialGradient(0, 0, 0, 0, 0, size * 0.3);
+    coreGlow.addColorStop(0, 'rgba(255, 255, 255, 0.9)');
+    coreGlow.addColorStop(0.4, 'rgba(180, 220, 255, 0.5)');
+    coreGlow.addColorStop(1, 'transparent');
+    ctx.fillStyle = coreGlow;
     ctx.beginPath();
-    ctx.arc(0, 0, size * 0.2, 0, Math.PI * 2);
+    ctx.arc(0, 0, size * 0.3, 0, Math.PI * 2);
     ctx.fill();
+
+    // Inner pulsing core
+    const corePulse = 0.7 + Math.sin(time * 8) * 0.3;
+    ctx.fillStyle = `rgba(255, 255, 255, ${corePulse})`;
+    ctx.beginPath();
+    ctx.arc(0, 0, size * 0.1, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.restore();
+  },
+
+  // Draw directional indicator as a colored arc on radar border
+  // Subtly highlights the direction to the target
+  drawDirectionIndicator(ctx, center, angle, color) {
+    const arcWidth = Math.PI / 3;  // 60 degree arc
+    const startAngle = angle - arcWidth / 2;
+    const endAngle = angle + arcWidth / 2;
+
+    // Pulsing glow effect
+    const time = Date.now() / 1000;
+    const pulse = 0.5 + Math.sin(time * 2) * 0.3;
+
+    ctx.save();
+
+    // Draw glowing arc on the radar border
+    ctx.shadowColor = color;
+    ctx.shadowBlur = 12 * pulse;
+
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 4;
+    ctx.globalAlpha = pulse;
+
+    ctx.beginPath();
+    ctx.arc(center, center, center - 2, startAngle, endAngle);
+    ctx.stroke();
+
+    // Draw a brighter inner line for emphasis
+    ctx.shadowBlur = 0;
+    ctx.lineWidth = 2;
+    ctx.globalAlpha = pulse + 0.2;
+
+    ctx.beginPath();
+    ctx.arc(center, center, center - 2, startAngle, endAngle);
+    ctx.stroke();
 
     ctx.restore();
   },

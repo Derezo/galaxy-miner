@@ -3,6 +3,7 @@
 const config = require('../config');
 const { statements } = require('../database');
 const world = require('../world');
+const logger = require('../../shared/logger');
 
 // Track weapon cooldowns: playerId -> lastFireTime
 const weaponCooldowns = new Map();
@@ -182,7 +183,7 @@ function handleDeath(userId) {
 
       // Remove from inventory (death cargo drop)
       const newQuantity = item.quantity - dropAmount;
-      console.log(`[INVENTORY] User ${userId} ${item.resource_type}: ${item.quantity} -> ${newQuantity} (death cargo drop -${dropAmount})`);
+      logger.log(`[INVENTORY] User ${userId} ${item.resource_type}: ${item.quantity} -> ${newQuantity} (death cargo drop -${dropAmount})`);
       if (newQuantity <= 0) {
         statements.removeInventoryItem.run(userId, item.resource_type);
       } else {

@@ -69,7 +69,7 @@ const WormholeTransitUI = {
       }
     });
 
-    console.log('WormholeTransitUI initialized');
+    Logger.log('WormholeTransitUI initialized');
   },
 
   /**
@@ -107,7 +107,7 @@ const WormholeTransitUI = {
   },
 
   /**
-   * Render destination selection buttons
+   * Render destination selection buttons in cardinal positions around wormhole
    */
   renderDestinations() {
     this.destinationsContainer.innerHTML = '';
@@ -117,23 +117,51 @@ const WormholeTransitUI = {
       return;
     }
 
-    // Position destinations in a circle
-    const radius = Math.min(200, window.innerWidth * 0.2);
+    // Cardinal positions: top, right, bottom, left (+ diagonal for 5th)
+    // Each position is defined relative to center with button dimensions considered
+    const buttonWidth = 160;
+    const buttonHeight = 70;
+    const wormholeRadius = 120; // Clear the wormhole visualization
+    const padding = 30;
+
+    const positions = [
+      { // Top
+        x: -buttonWidth / 2,
+        y: -(wormholeRadius + buttonHeight + padding)
+      },
+      { // Right
+        x: wormholeRadius + padding,
+        y: -buttonHeight / 2
+      },
+      { // Bottom
+        x: -buttonWidth / 2,
+        y: wormholeRadius + padding
+      },
+      { // Left
+        x: -(wormholeRadius + buttonWidth + padding),
+        y: -buttonHeight / 2
+      },
+      { // Top-right diagonal (for 5th destination)
+        x: wormholeRadius * 0.7 + padding,
+        y: -(wormholeRadius * 0.7 + buttonHeight + padding * 0.5)
+      }
+    ];
+
     const centerX = window.innerWidth / 2;
     const centerY = window.innerHeight / 2;
 
     this.destinations.forEach((dest, index) => {
-      const angle = (index / this.destinations.length) * Math.PI * 2 - Math.PI / 2;
-      const x = centerX + Math.cos(angle) * radius - 80; // -80 to center button
-      const y = centerY + Math.sin(angle) * radius - 40; // -40 to center button
+      if (index >= positions.length) return; // Max 5 destinations
+
+      const pos = positions[index];
+      const x = centerX + pos.x;
+      const y = centerY + pos.y;
 
       const btn = document.createElement('button');
       btn.className = 'wormhole-destination-btn';
+      btn.dataset.position = ['top', 'right', 'bottom', 'left', 'top-right'][index];
       btn.style.left = `${x}px`;
       btn.style.top = `${y}px`;
-
-      // Format distance
-      const distanceKm = Math.round(dest.distance / 10); // Approximate scale
 
       btn.innerHTML = `
         <div class="dest-sector">Sector ${dest.sectorX}, ${dest.sectorY}</div>
@@ -234,14 +262,14 @@ const WormholeTransitUI = {
   },
 
   /**
-   * Get random particle color (purples and blues)
+   * Get random particle color (cyan, blue, orange, white - matching wormhole style)
    * @returns {string}
    */
   getParticleColor() {
     const colors = [
-      '#9900ff', '#6600cc', '#cc00ff', '#aa00ff',
-      '#7700dd', '#5500bb', '#dd00ff', '#8800ee',
-      '#ffffff', '#ccccff'
+      '#00ffff', '#88ddff', '#4488ff', '#0066cc',
+      '#ff8844', '#ffaa44', '#ffcc66',
+      '#ffffff', '#aaddff', '#00ccff'
     ];
     return colors[Math.floor(Math.random() * colors.length)];
   },
@@ -288,12 +316,12 @@ const WormholeTransitUI = {
     const cx = w / 2;
     const cy = h / 2;
 
-    // Clear with fade effect
-    ctx.fillStyle = 'rgba(5, 0, 15, 0.3)';
+    // Clear with fade effect - darker background
+    ctx.fillStyle = 'rgba(0, 5, 15, 0.25)';
     ctx.fillRect(0, 0, w, h);
 
-    // Update spiral angle
-    this.spiralAngle += 0.02;
+    // Update spiral angle - faster rotation
+    this.spiralAngle += 0.035;
 
     if (this.phase === 'selecting') {
       this.renderSelectingPhase(ctx, cx, cy);
@@ -309,30 +337,39 @@ const WormholeTransitUI = {
    * Render ambient effect during destination selection
    */
   renderSelectingPhase(ctx, cx, cy) {
-    // Ambient swirl rings
+    // Ambient swirl rings - cyan/blue colors
+    const ringColors = ['#00ffff', '#4488ff', '#00ccff', '#88ddff', '#0066cc'];
     for (let i = 0; i < 5; i++) {
-      const radius = 100 + i * 40;
-      const alpha = 0.3 - i * 0.05;
+      const radius = 100 + i * 45;
+      const alpha = 0.35 - i * 0.05;
 
-      ctx.strokeStyle = `rgba(153, 0, 255, ${alpha})`;
+      ctx.strokeStyle = ringColors[i];
+      ctx.globalAlpha = alpha;
       ctx.lineWidth = 2;
       ctx.beginPath();
       ctx.arc(cx, cy, radius, this.spiralAngle + i * 0.5, this.spiralAngle + i * 0.5 + Math.PI * 1.5);
       ctx.stroke();
     }
 
-    // Floating particles
-    for (let i = 0; i < 30; i++) {
-      const angle = this.spiralAngle + (i / 30) * Math.PI * 2;
-      const r = 150 + Math.sin(angle * 3 + this.spiralAngle) * 50;
-      const x = cx + Math.cos(angle) * r;
-      const y = cy + Math.sin(angle) * r;
+    ctx.globalAlpha = 1;
+
+    // Floating particles being pulled in - mixed colors
+    const particleColors = ['#00ffff', '#ff8844', '#ffffff', '#88ddff', '#ffaa44'];
+    for (let i = 0; i < 40; i++) {
+      const angle = this.spiralAngle * 1.5 + (i / 40) * Math.PI * 2;
+      const spiralOffset = (i / 40) * Math.PI * 2;
+      const r = 180 + Math.sin(angle * 3 + this.spiralAngle * 2) * 60 - (i % 10) * 5;
+      const x = cx + Math.cos(angle + spiralOffset * 0.3) * r;
+      const y = cy + Math.sin(angle + spiralOffset * 0.3) * r;
 
       ctx.beginPath();
-      ctx.arc(x, y, 2 + Math.sin(angle * 5) * 1, 0, Math.PI * 2);
-      ctx.fillStyle = `rgba(200, 100, 255, ${0.5 + Math.sin(angle * 2) * 0.3})`;
+      ctx.arc(x, y, 2 + Math.sin(angle * 5) * 1.5, 0, Math.PI * 2);
+      ctx.fillStyle = particleColors[i % particleColors.length];
+      ctx.globalAlpha = 0.5 + Math.sin(angle * 2 + this.spiralAngle) * 0.3;
       ctx.fill();
     }
+
+    ctx.globalAlpha = 1;
   },
 
   /**
@@ -392,42 +429,81 @@ const WormholeTransitUI = {
    * Render the central wormhole portal
    */
   renderWormholeCenter(ctx, cx, cy) {
-    // Outer glow
-    const gradient = ctx.createRadialGradient(cx, cy, 20, cx, cy, 100);
-    gradient.addColorStop(0, 'rgba(153, 0, 255, 0.8)');
-    gradient.addColorStop(0.3, 'rgba(100, 0, 200, 0.5)');
-    gradient.addColorStop(0.7, 'rgba(50, 0, 100, 0.2)');
-    gradient.addColorStop(1, 'rgba(0, 0, 0, 0)');
+    const time = Date.now() / 1000;
+
+    // Outer glow - reversed gradient (bright center, dark outer, transparent edge)
+    const gradient = ctx.createRadialGradient(cx, cy, 0, cx, cy, 100);
+    gradient.addColorStop(0, 'rgba(200, 230, 255, 0.9)');   // Bright center
+    gradient.addColorStop(0.2, 'rgba(0, 200, 255, 0.6)');   // Cyan
+    gradient.addColorStop(0.5, 'rgba(0, 100, 180, 0.3)');   // Deep blue
+    gradient.addColorStop(0.8, 'rgba(10, 30, 60, 0.15)');   // Dark blue
+    gradient.addColorStop(1, 'transparent');                 // No border
 
     ctx.fillStyle = gradient;
     ctx.beginPath();
     ctx.arc(cx, cy, 100, 0, Math.PI * 2);
     ctx.fill();
 
-    // Inner spiral
-    ctx.strokeStyle = 'rgba(200, 100, 255, 0.6)';
-    ctx.lineWidth = 3;
-    ctx.beginPath();
+    // Multiple spiral arms with mixed colors
+    const armColors = ['#00ffff', '#ff8844', '#4488ff', '#88ddff', '#ffaa44', '#00ccff'];
+    for (let arm = 0; arm < 6; arm++) {
+      const rotationSpeed = 1.8 + (arm % 2) * 0.4;
+      const baseRotation = this.spiralAngle * rotationSpeed + (arm / 6) * Math.PI * 2;
 
-    for (let i = 0; i < 100; i++) {
-      const angle = this.spiralAngle + (i / 100) * Math.PI * 4;
-      const r = 10 + (i / 100) * 50;
-      const x = cx + Math.cos(angle) * r;
-      const y = cy + Math.sin(angle) * r;
+      ctx.save();
+      ctx.translate(cx, cy);
+      ctx.rotate(baseRotation);
 
-      if (i === 0) ctx.moveTo(x, y);
-      else ctx.lineTo(x, y);
+      ctx.beginPath();
+      for (let i = 0; i <= 40; i++) {
+        const t = i / 40;
+        const angle = t * Math.PI * 3;  // Spiral turns
+        const radius = 80 - 70 * Math.pow(t, 0.7);
+        const px = Math.cos(angle) * radius;
+        const py = Math.sin(angle) * radius;
+        if (i === 0) ctx.moveTo(px, py);
+        else ctx.lineTo(px, py);
+      }
+
+      ctx.strokeStyle = armColors[arm];
+      ctx.lineWidth = 2.5;
+      ctx.globalAlpha = 0.5 + Math.sin(time * 5 + arm) * 0.25;
+      ctx.stroke();
+      ctx.restore();
     }
+
+    ctx.globalAlpha = 1;
+
+    // Pulsing ring effect
+    const ringPhase = (time * 2) % 1;
+    const ringRadius = 20 + ringPhase * 60;
+    const ringAlpha = 0.5 * (1 - ringPhase);
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 1.5;
+    ctx.globalAlpha = ringAlpha;
+    ctx.beginPath();
+    ctx.arc(cx, cy, ringRadius, 0, Math.PI * 2);
     ctx.stroke();
 
-    // Dark center
-    const centerGrad = ctx.createRadialGradient(cx, cy, 0, cx, cy, 25);
-    centerGrad.addColorStop(0, 'rgba(0, 0, 20, 1)');
-    centerGrad.addColorStop(1, 'rgba(50, 0, 80, 0.5)');
+    ctx.globalAlpha = 1;
 
-    ctx.fillStyle = centerGrad;
+    // Bright center core with glow
+    const coreGlow = ctx.createRadialGradient(cx, cy, 0, cx, cy, 30);
+    coreGlow.addColorStop(0, 'rgba(255, 255, 255, 1)');
+    coreGlow.addColorStop(0.3, 'rgba(180, 230, 255, 0.8)');
+    coreGlow.addColorStop(0.7, 'rgba(0, 200, 255, 0.4)');
+    coreGlow.addColorStop(1, 'transparent');
+
+    ctx.fillStyle = coreGlow;
     ctx.beginPath();
-    ctx.arc(cx, cy, 25, 0, Math.PI * 2);
+    ctx.arc(cx, cy, 30, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Inner pulsing white core
+    const corePulse = 0.7 + Math.sin(time * 8) * 0.3;
+    ctx.fillStyle = `rgba(255, 255, 255, ${corePulse})`;
+    ctx.beginPath();
+    ctx.arc(cx, cy, 12, 0, Math.PI * 2);
     ctx.fill();
   }
 };

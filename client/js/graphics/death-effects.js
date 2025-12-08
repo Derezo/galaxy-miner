@@ -67,7 +67,7 @@ const DeathEffects = {
   },
 
   init() {
-    console.log('DeathEffects initialized');
+    Logger.log('DeathEffects initialized');
   },
 
   /**

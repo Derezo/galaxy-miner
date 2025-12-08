@@ -36,7 +36,7 @@ const FormationSuccessionEffect = {
    * @param {Object} data - Event data from server
    */
   trigger(data) {
-    console.log('[FormationSuccession] Triggered:', data);
+    Logger.log('[FormationSuccession] Triggered:', data);
 
     this.activeSuccessions.push({
       formationId: data.formationId,

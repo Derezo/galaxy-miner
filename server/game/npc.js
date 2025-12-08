@@ -4,6 +4,7 @@ const config = require('../config');
 const world = require('../world');
 const combat = require('./combat');
 const ai = require('./ai');
+const logger = require('../../shared/logger');
 
 // NPC types with faction, weapon, and tier info
 const NPC_TYPES = {
@@ -61,7 +62,7 @@ const NPC_TYPES = {
     speed: 60,
     weaponType: 'kinetic',
     weaponTier: 4,
-    weaponDamage: 35,
+    weaponDamage: 52,  // Buffed +50% (was 35)
     weaponRange: 350,
     aggroRange: 700,
     lootTable: ['DARK_MATTER', 'QUANTUM_CRYSTALS', 'EXOTIC_MATTER'],
@@ -190,7 +191,7 @@ const NPC_TYPES = {
     speed: 40,
     weaponType: 'explosive',
     weaponTier: 4,
-    weaponDamage: 25,
+    weaponDamage: 37,  // Buffed +50% (was 25)
     weaponRange: 300,
     aggroRange: 800,
     lootTable: ['EXOTIC_MATTER', 'ANTIMATTER', 'VOID_CRYSTALS'],
@@ -255,7 +256,7 @@ const NPC_TYPES = {
     speed: 50,
     weaponType: 'energy',
     weaponTier: 5,
-    weaponDamage: 40,
+    weaponDamage: 60,  // Buffed +50% (was 40)
     weaponRange: 400,
     aggroRange: 800,
     lootTable: ['ANTIMATTER', 'NEUTRONIUM', 'VOID_CRYSTALS'],
@@ -322,7 +323,7 @@ const NPC_TYPES = {
     speed: 55,
     weaponType: 'energy',
     weaponTier: 4,
-    weaponDamage: 28,
+    weaponDamage: 42,  // Buffed +50% (was 28)
     weaponRange: 320,
     aggroRange: 550,
     lootTable: ['PLATINUM', 'EXOTIC_MATTER', 'QUANTUM_CRYSTALS'],
@@ -348,6 +349,15 @@ const deadSpawnPoints = new Map();
 // Respawn delay for sector-based NPCs (5 minutes)
 const SECTOR_NPC_RESPAWN_DELAY = 300000;
 
+// Orphan NPC rage mode duration (90 seconds) - NPCs become aggressive then despawn
+const ORPHAN_RAGE_DURATION = 90000;
+
+// Damage multiplier for enraged orphaned NPCs
+const ORPHAN_RAGE_DAMAGE_MULTIPLIER = 1.25;
+
+// Aggro range multiplier for enraged orphaned NPCs
+const ORPHAN_RAGE_AGGRO_MULTIPLIER = 1.5;
+
 // Active bases: baseId -> baseData (runtime tracking)
 const activeBases = new Map();
 
@@ -358,6 +368,9 @@ const activeBases = new Map();
 // Formation registry: formationId -> { leaderId, memberIds: Set, lastLeaderId }
 const formations = new Map();
 
+// Reverse lookup for O(1) formation queries: npcId -> formationId
+const npcToFormation = new Map();
+
 // Tier scores for succession priority (higher = more likely to become leader)
 const SUCCESSION_TIER_SCORES = {
   void_phantom: 3,
@@ -366,22 +379,29 @@ const SUCCESSION_TIER_SCORES = {
 };
 
 /**
- * Get formation info for an NPC
+ * Get formation info for an NPC (O(1) lookup via reverse map)
  * @param {string} npcId - NPC ID to look up
  * @returns {Object|null} Formation info { formationId, leaderId, memberIds } or null
  */
 function getFormationForNpc(npcId) {
-  for (const [formationId, formation] of formations) {
-    if (formation.leaderId === npcId || formation.memberIds.has(npcId)) {
-      return {
-        formationId,
-        leaderId: formation.leaderId,
-        memberIds: formation.memberIds,
-        lastLeaderId: formation.lastLeaderId
-      };
-    }
+  const formationId = npcToFormation.get(npcId);
+  if (!formationId) {
+    return null;
   }
-  return null;
+
+  const formation = formations.get(formationId);
+  if (!formation) {
+    // Stale entry - clean it up
+    npcToFormation.delete(npcId);
+    return null;
+  }
+
+  return {
+    formationId,
+    leaderId: formation.leaderId,
+    memberIds: formation.memberIds,
+    lastLeaderId: formation.lastLeaderId
+  };
 }
 
 /**
@@ -396,20 +416,43 @@ function registerFormation(leaderId, memberIds) {
   if (existing) {
     // Update existing formation
     const formation = formations.get(existing.formationId);
+
+    // Clear old reverse mappings
+    npcToFormation.delete(formation.leaderId);
+    for (const oldMember of formation.memberIds) {
+      npcToFormation.delete(oldMember);
+    }
+
     formation.leaderId = leaderId;
     formation.memberIds = new Set(memberIds);
     formation.memberIds.delete(leaderId); // Leader shouldn't be in members
+
+    // Update reverse mappings
+    npcToFormation.set(leaderId, existing.formationId);
+    for (const memberId of formation.memberIds) {
+      npcToFormation.set(memberId, existing.formationId);
+    }
+
     return existing.formationId;
   }
 
   // Create new formation
   const formationId = `formation_${leaderId}_${Date.now()}`;
+  const newMemberIds = new Set(memberIds);
+  newMemberIds.delete(leaderId); // Leader shouldn't be in members
+
   formations.set(formationId, {
     leaderId,
-    memberIds: new Set(memberIds),
+    memberIds: newMemberIds,
     lastLeaderId: null,
     createdAt: Date.now()
   });
+
+  // Add reverse mappings
+  npcToFormation.set(leaderId, formationId);
+  for (const memberId of newMemberIds) {
+    npcToFormation.set(memberId, formationId);
+  }
 
   return formationId;
 }
@@ -443,12 +486,16 @@ function handleLeaderDeath(formationId) {
 
   const oldLeaderId = formation.leaderId;
 
-  // Clean up dead members
+  // Clean up dead members and their reverse mappings
   for (const memberId of formation.memberIds) {
     if (!activeNPCs.has(memberId)) {
       formation.memberIds.delete(memberId);
+      npcToFormation.delete(memberId);
     }
   }
+
+  // Remove old leader from reverse map
+  npcToFormation.delete(oldLeaderId);
 
   // No members left - dissolve formation
   if (formation.memberIds.size === 0) {
@@ -472,6 +519,10 @@ function handleLeaderDeath(formationId) {
   }
 
   if (!bestCandidate) {
+    // Clean up all reverse mappings for this formation
+    for (const memberId of formation.memberIds) {
+      npcToFormation.delete(memberId);
+    }
     formations.delete(formationId);
     return { success: false, reason: 'No viable candidates' };
   }
@@ -481,11 +532,14 @@ function handleLeaderDeath(formationId) {
   formation.leaderId = bestCandidate.id;
   formation.memberIds.delete(bestCandidate.id);
 
+  // Update reverse mapping for new leader (stays mapped to same formationId)
+  // npcToFormation.set(bestCandidate.id, formationId) - already set from before
+
   // Mark new leader in NPC data
   bestCandidate.isFormationLeader = true;
   bestCandidate.formationLeader = true;
 
-  console.log(`[FORMATION] Leader succession: ${bestCandidate.name} (${bestCandidate.id}) is now leader of formation ${formationId}`);
+  logger.log(`[FORMATION] Leader succession: ${bestCandidate.name} (${bestCandidate.id}) is now leader of formation ${formationId}`);
 
   return {
     success: true,
@@ -502,11 +556,17 @@ function handleLeaderDeath(formationId) {
 }
 
 /**
- * Remove an NPC from any formation they belong to
+ * Remove an NPC from any formation they belong to (O(1) lookup)
  * @param {string} npcId - NPC ID to remove
  */
 function removeFromFormation(npcId) {
-  for (const [formationId, formation] of formations) {
+  const formationId = npcToFormation.get(npcId);
+  if (!formationId) {
+    return; // Not in any formation
+  }
+
+  const formation = formations.get(formationId);
+  if (formation) {
     if (formation.memberIds.has(npcId)) {
       formation.memberIds.delete(npcId);
     }
@@ -515,22 +575,30 @@ function removeFromFormation(npcId) {
       formation.leaderId = null;
     }
   }
+
+  // Remove from reverse map
+  npcToFormation.delete(npcId);
 }
 
 /**
- * Clean up empty formations
+ * Clean up empty formations and stale reverse mappings
  */
 function cleanupFormations() {
   for (const [formationId, formation] of formations) {
-    // Remove dead members
+    // Remove dead members and their reverse mappings
     for (const memberId of formation.memberIds) {
       if (!activeNPCs.has(memberId)) {
         formation.memberIds.delete(memberId);
+        npcToFormation.delete(memberId);
       }
     }
 
     // Check if leader is dead
     const leaderDead = !activeNPCs.has(formation.leaderId);
+
+    if (leaderDead) {
+      npcToFormation.delete(formation.leaderId);
+    }
 
     // Remove formation if no leader and no members
     if (leaderDead && formation.memberIds.size === 0) {
@@ -607,25 +675,29 @@ function activateBase(base) {
   const spawnConfig = BASE_NPC_SPAWNS[base.type];
   if (!spawnConfig) return;
 
+  // Get current computed position for orbital/binary bases
+  // This ensures consistency with NPC spawn positions
+  const computedPos = world.getObjectPosition(base.id);
+  const activatedX = computedPos ? computedPos.x : base.x;
+  const activatedY = computedPos ? computedPos.y : base.y;
+
   activeBases.set(base.id, {
     ...base,
+    // Store computed position for consistency (will be recomputed for orbital bases)
+    activatedX,
+    activatedY,
     spawnedNPCs: [],
     pendingRespawns: [],  // Array of { respawnAt: timestamp } for killed NPCs
     lastSpawnTime: 0,
     activated: true
   });
 
-  // Get current computed position for orbital/binary bases
-  const computedPos = world.getObjectPosition(base.id);
-  const activatedX = computedPos ? computedPos.x : base.x;
-  const activatedY = computedPos ? computedPos.y : base.y;
-
   // Do initial spawn
   for (let i = 0; i < spawnConfig.initialSpawn; i++) {
     spawnNPCFromBase(base.id);
   }
 
-  console.log(`[NPC] Activated base ${base.name} (${base.type}) at (${Math.round(activatedX)}, ${Math.round(activatedY)})${computedPos ? ' (computed)' : ''}`);
+  logger.log(`[NPC] Activated base ${base.name} (${base.type}) at (${Math.round(activatedX)}, ${Math.round(activatedY)})${computedPos ? ' (computed)' : ''}`);
 }
 
 // Deactivate a base (when no players nearby for a while)
@@ -639,7 +711,7 @@ function deactivateBase(baseId) {
   }
 
   activeBases.delete(baseId);
-  console.log(`[NPC] Deactivated base ${base.name}`);
+  logger.log(`[NPC] Deactivated base ${base.name}`);
 }
 
 // Spawn a single NPC from a base
@@ -739,7 +811,7 @@ function updateBaseSpawning(nearbyPlayers) {
           respawnAt: now + respawnDelay
         });
       }
-      console.log(`[NPC] ${base.name}: ${deadCount} NPC(s) killed, respawn in ${respawnDelay / 1000}s`);
+      logger.log(`[NPC] ${base.name}: ${deadCount} NPC(s) killed, respawn in ${respawnDelay / 1000}s`);
     }
 
     // Check if we're at max capacity
@@ -765,7 +837,7 @@ function updateBaseSpawning(nearbyPlayers) {
         base.pendingRespawns.splice(readyIndex, 1);
         const newNPC = spawnNPCFromBase(baseId);
         if (newNPC) {
-          console.log(`[NPC] ${base.name} respawned ${newNPC.name}`);
+          logger.log(`[NPC] ${base.name} respawned ${newNPC.name}`);
         }
       }
     } else if (!spawnConfig.continuousSpawn) {
@@ -777,7 +849,7 @@ function updateBaseSpawning(nearbyPlayers) {
         base.pendingRespawns.splice(readyIndex, 1);
         const newNPC = spawnNPCFromBase(baseId);
         if (newNPC) {
-          console.log(`[NPC] ${base.name} respawned ${newNPC.name} (after delay)`);
+          logger.log(`[NPC] ${base.name} respawned ${newNPC.name} (after delay)`);
         }
       }
     }
@@ -831,10 +903,35 @@ function damageBase(baseId, damage, attackerId = null) {
     const totalCredits = Math.round(baseCredits * teamMultiplier);
     const creditsPerPlayer = Math.round(totalCredits / participantCount);
 
-    // Remove all NPCs from this base
+    // Orphan all NPCs from this base - enter rage mode instead of deletion
+    const orphanedNpcIds = [];
     for (const npcId of base.spawnedNPCs) {
-      activeNPCs.delete(npcId);
+      const npc = activeNPCs.get(npcId);
+      if (npc) {
+        // Handle formation leader succession before orphaning
+        const formationInfo = getFormationForNpc(npcId);
+        if (formationInfo && formationInfo.isLeader) {
+          handleLeaderDeath(formationInfo.formationId);
+        }
+
+        // Mark as orphaned and enter rage mode
+        npc.homeBaseId = null;
+        npc.homeBasePosition = null;
+        npc.orphaned = true;
+        npc.orphanedAt = Date.now();
+        npc.state = 'rage';
+
+        // Increase aggro range and damage for rage mode
+        npc.baseAggroRange = npc.baseAggroRange || npc.aggroRange;
+        npc.aggroRange = Math.round(npc.baseAggroRange * ORPHAN_RAGE_AGGRO_MULTIPLIER);
+        npc.rageMultiplier = ORPHAN_RAGE_DAMAGE_MULTIPLIER;
+
+        orphanedNpcIds.push(npcId);
+      }
     }
+
+    // Clear the base's spawned NPC list (they're now orphaned, not tracked by base)
+    base.spawnedNPCs = [];
 
     // Generate special loot for bases
     const loot = generateBaseLoot(base);
@@ -854,7 +951,8 @@ function damageBase(baseId, damage, attackerId = null) {
       faction: base.faction,
       baseType: base.type,
       baseName: base.name,
-      respawnTime: config.SPAWN_HUB_TYPES?.[base.type]?.respawnTime || 300000
+      respawnTime: config.SPAWN_HUB_TYPES?.[base.type]?.respawnTime || 300000,
+      orphanedNpcIds  // NPCs that entered rage mode
     };
   }
 
@@ -931,7 +1029,7 @@ function checkBaseRespawn(baseId) {
     base.damageContributors = new Map();
     base.lastSpawnTime = 0;
 
-    console.log(`[NPC] Base ${base.name} has respawned`);
+    logger.log(`[NPC] Base ${base.name} has respawned`);
     return true;
   }
 
@@ -1111,6 +1209,18 @@ function spawnNPCsForSector(sectorX, sectorY) {
  * @returns {Object|null} Action result (fire, warning, etc.)
  */
 function updateNPC(npc, players, deltaTime) {
+  // Check if orphaned NPC has exceeded rage duration - needs to despawn
+  if (npc.orphaned && npc.orphanedAt) {
+    const rageElapsed = Date.now() - npc.orphanedAt;
+    if (rageElapsed >= ORPHAN_RAGE_DURATION) {
+      return {
+        action: 'despawn',
+        reason: 'rage_expired',
+        npcId: npc.id
+      };
+    }
+  }
+
   // Use the new AI system for faction-specific behavior
   return ai.updateNPCAI(npc, players, activeNPCs, deltaTime);
 }
@@ -1286,6 +1396,9 @@ function generateLoot(npc) {
 function getNPCsInRange(position, range) {
   const result = [];
   for (const [id, npc] of activeNPCs) {
+    // Defensive validation: skip invalid/dead NPCs
+    if (!npc || !npc.position || npc.hull <= 0) continue;
+
     const dx = npc.position.x - position.x;
     const dy = npc.position.y - position.y;
     const dist = Math.sqrt(dx * dx + dy * dy);

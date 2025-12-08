@@ -6,6 +6,7 @@ const config = require('./config');
 const { statements } = require('./database');
 const Physics = require('../shared/physics');
 const StarSystem = require('../shared/star-system');
+const logger = require('../shared/logger');
 
 // Cache generated sectors
 const sectorCache = new Map();
@@ -561,7 +562,7 @@ function getObjectById(objectId, debug = false) {
   // Legacy format: {sectorX}_{sectorY}_{type}_{index}
   const parts = objectId.split('_');
   if (parts.length < 4) {
-    console.log('[World] Invalid objectId format:', objectId, 'parts:', parts);
+    logger.log('[World] Invalid objectId format:', objectId, 'parts:', parts);
     return null;
   }
 
@@ -570,7 +571,7 @@ function getObjectById(objectId, debug = false) {
   const type = parts[2];
 
   if (debug) {
-    console.log('[World] Looking up legacy object:', {
+    logger.log('[World] Looking up legacy object:', {
       objectId,
       parsedSector: { x: sectorX, y: sectorY },
       type,
@@ -586,20 +587,20 @@ function getObjectById(objectId, debug = false) {
       : type === 'planet'
         ? sector.planets.length
         : 0;
-    console.log(`[World] Sector ${sectorX},${sectorY} has ${count} ${type}s`);
+    logger.log(`[World] Sector ${sectorX},${sectorY} has ${count} ${type}s`);
   }
 
   // Try primary sector first
   let result = findInSector(sector, type, objectId);
 
   if (debug && result) {
-    console.log('[World] Found in primary sector');
+    logger.log('[World] Found in primary sector');
   }
 
   // For orbital objects, check neighboring sectors
   if (!result && (type === 'asteroid' || type === 'debris' || type === 'planet')) {
     if (debug) {
-      console.log('[World] Not found in primary sector, checking neighbors...');
+      logger.log('[World] Not found in primary sector, checking neighbors...');
     }
     for (let dx = -1; dx <= 1 && !result; dx++) {
       for (let dy = -1; dy <= 1 && !result; dy++) {
@@ -607,14 +608,14 @@ function getObjectById(objectId, debug = false) {
         const neighborSector = generateSector(sectorX + dx, sectorY + dy);
         result = findInSector(neighborSector, type, objectId);
         if (debug && result) {
-          console.log(`[World] Found in neighbor sector ${sectorX + dx},${sectorY + dy}`);
+          logger.log(`[World] Found in neighbor sector ${sectorX + dx},${sectorY + dy}`);
         }
       }
     }
   }
 
   if (!result && (type === 'asteroid' || type === 'debris' || type === 'planet')) {
-    console.log('[World] Object not found after checking neighbors:', objectId);
+    logger.log('[World] Object not found after checking neighbors:', objectId);
   }
 
   return result;
@@ -627,7 +628,7 @@ function getStarSystemObjectById(objectId, debug = false) {
   const parts = objectId.split('_');
   // Stars have 5 parts, other objects (planets, bases, etc.) have 6 parts
   if (parts.length < 5) {
-    console.log('[World] Invalid StarSystem objectId format:', objectId, 'parts:', parts);
+    logger.log('[World] Invalid StarSystem objectId format:', objectId, 'parts:', parts);
     return null;
   }
 
@@ -635,15 +636,17 @@ function getStarSystemObjectById(objectId, debug = false) {
   const type = parts[4];
 
   // Stars and wormholes only have 5 parts - validate these cases
+  // Exception: binary star companions have 6 parts with '_b' suffix (e.g., ss_0_0_0_star_b)
   const singletonTypes = ['star', 'wormhole'];
-  if (singletonTypes.includes(type) && parts.length !== 5) {
-    console.log(`[World] Invalid ${type} objectId format:`, objectId, 'expected 5 parts');
+  const isBinaryStar = type === 'star' && parts.length === 6 && parts[5] === 'b';
+  if (singletonTypes.includes(type) && parts.length !== 5 && !isBinaryStar) {
+    logger.log(`[World] Invalid ${type} objectId format:`, objectId, 'expected 5 parts');
     return null;
   }
 
   // Other objects (planets, bases, asteroids) should have 6 parts (with object index/subtype)
   if (!singletonTypes.includes(type) && parts.length < 6) {
-    console.log('[World] Invalid StarSystem objectId format:', objectId, 'expected 6 parts for type:', type);
+    logger.log('[World] Invalid StarSystem objectId format:', objectId, 'expected 6 parts for type:', type);
     return null;
   }
 
@@ -654,7 +657,7 @@ function getStarSystemObjectById(objectId, debug = false) {
   const systemId = `ss_${superX}_${superY}_${systemIndex}`;
 
   if (debug) {
-    console.log('[World] Looking up StarSystem object:', {
+    logger.log('[World] Looking up StarSystem object:', {
       objectId,
       systemId,
       superSector: { x: superX, y: superY },
@@ -668,7 +671,7 @@ function getStarSystemObjectById(objectId, debug = false) {
 
   if (!system) {
     if (debug) {
-      console.log('[World] StarSystem not found:', systemId);
+      logger.log('[World] StarSystem not found:', systemId);
     }
     // Fallback: search through sectors near the super-sector
     return findStarSystemObjectInSectors(objectId, type, superX, superY, debug);
@@ -694,7 +697,7 @@ function getStarSystemObjectById(objectId, debug = false) {
   }
 
   if (debug) {
-    console.log('[World] StarSystem lookup result:', result ? 'Found' : 'Not found');
+    logger.log('[World] StarSystem lookup result:', result ? 'Found' : 'Not found');
   }
 
   return result;
@@ -709,7 +712,7 @@ function findStarSystemObjectInSectors(objectId, type, superX, superY, debug = f
   const baseSectorY = superY * superSectorSize;
 
   if (debug) {
-    console.log('[World] Searching sectors around:', { baseSectorX, baseSectorY });
+    logger.log('[World] Searching sectors around:', { baseSectorX, baseSectorY });
   }
 
   // Search a grid of sectors that could contain objects from this super-sector
@@ -719,7 +722,7 @@ function findStarSystemObjectInSectors(objectId, type, superX, superY, debug = f
       const result = findInSector(sector, type, objectId);
       if (result) {
         if (debug) {
-          console.log(`[World] Found in sector ${baseSectorX + dx},${baseSectorY + dy}`);
+          logger.log(`[World] Found in sector ${baseSectorX + dx},${baseSectorY + dy}`);
         }
         return result;
       }
@@ -727,7 +730,7 @@ function findStarSystemObjectInSectors(objectId, type, superX, superY, debug = f
   }
 
   if (debug) {
-    console.log('[World] StarSystem object not found in any searched sector');
+    logger.log('[World] StarSystem object not found in any searched sector');
   }
   return null;
 }
@@ -995,6 +998,59 @@ function isLocationSafe(x, y, minDistFromStar) {
   return true;
 }
 
+// Find the nearest wormhole to a given position
+// Searches sectors in expanding rings up to maxSectorRadius
+function findNearestWormhole(playerX, playerY, maxSectorRadius = 100) {
+  const playerSectorX = Math.floor(playerX / config.SECTOR_SIZE);
+  const playerSectorY = Math.floor(playerY / config.SECTOR_SIZE);
+
+  let nearestWormhole = null;
+  let nearestDistance = Infinity;
+
+  // Search in expanding rings of sectors
+  for (let radius = 0; radius <= maxSectorRadius; radius++) {
+    // If we found a wormhole in a previous ring, and we've completed a full ring
+    // beyond it, we can stop (no closer wormhole can exist)
+    if (nearestWormhole && radius > 0) {
+      const minPossibleDistance = (radius - 1) * config.SECTOR_SIZE;
+      if (minPossibleDistance > nearestDistance) {
+        break;
+      }
+    }
+
+    // Check all sectors at this ring distance
+    for (let dx = -radius; dx <= radius; dx++) {
+      for (let dy = -radius; dy <= radius; dy++) {
+        // Only check sectors on the edge of the ring (skip interior, already checked)
+        if (Math.abs(dx) !== radius && Math.abs(dy) !== radius) continue;
+
+        const sectorX = playerSectorX + dx;
+        const sectorY = playerSectorY + dy;
+        const sector = generateSector(sectorX, sectorY);
+
+        for (const wormhole of sector.wormholes) {
+          const distance = Math.sqrt(
+            (wormhole.x - playerX) ** 2 +
+            (wormhole.y - playerY) ** 2
+          );
+
+          if (distance < nearestDistance) {
+            nearestDistance = distance;
+            nearestWormhole = {
+              x: wormhole.x,
+              y: wormhole.y,
+              id: wormhole.id,
+              distance: distance
+            };
+          }
+        }
+      }
+    }
+  }
+
+  return nearestWormhole;
+}
+
 module.exports = {
   generateSector,
   getObjectById,
@@ -1002,5 +1058,6 @@ module.exports = {
   isObjectDepleted,
   depleteObject,
   findSafeSpawnLocation,
-  isLocationSafe
+  isLocationSafe,
+  findNearestWormhole
 };

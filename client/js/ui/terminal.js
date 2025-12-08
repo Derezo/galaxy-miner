@@ -47,7 +47,7 @@ const TerminalUI = {
       RelicsPanel.init();
     }
 
-    console.log('Terminal UI initialized');
+    Logger.log('Terminal UI initialized');
   },
 
   toggle() {

@@ -12,7 +12,7 @@ const Input = {
     document.addEventListener('mousedown', (e) => this.onMouseDown(e));
     document.addEventListener('mouseup', (e) => this.onMouseUp(e));
 
-    console.log('Input system initialized');
+    Logger.log('Input system initialized');
   },
 
   onKeyDown(e) {
@@ -47,7 +47,7 @@ const Input = {
         break;
       case 'KeyM':
         // Priority: Wormhole > Mining > Loot collection
-        console.log('[Input] M pressed - wormhole:', Player._nearestWormhole, 'hasGem:', Player.hasRelic('WORMHOLE_GEM'),
+        Logger.log('[Input] M pressed - wormhole:', Player._nearestWormhole, 'hasGem:', Player.hasRelic('WORMHOLE_GEM'),
           'mineable:', Player._nearestMineable, 'miningTarget:', Player.miningTarget);
         if (Player._nearestWormhole && Player.hasRelic('WORMHOLE_GEM') && !Player.inWormholeTransit) {
           Player.tryEnterWormhole();

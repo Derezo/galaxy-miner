@@ -2,6 +2,7 @@
 
 const config = require('../config');
 const { statements, purchaseListing, safeUpsertInventory } = require('../database');
+const logger = require('../../shared/logger');
 
 function listItem(sellerId, resourceType, quantity, pricePerUnit) {
   // Validate inputs
@@ -22,7 +23,7 @@ function listItem(sellerId, resourceType, quantity, pricePerUnit) {
 
   // Remove from inventory (for marketplace listing)
   const newQuantity = inventoryItem.quantity - quantity;
-  console.log(`[INVENTORY] User ${sellerId} ${resourceType}: ${inventoryItem.quantity} -> ${newQuantity} (marketplace listing -${quantity})`);
+  logger.log(`[INVENTORY] User ${sellerId} ${resourceType}: ${inventoryItem.quantity} -> ${newQuantity} (marketplace listing -${quantity})`);
   if (newQuantity <= 0) {
     statements.removeInventoryItem.run(sellerId, resourceType);
   } else {

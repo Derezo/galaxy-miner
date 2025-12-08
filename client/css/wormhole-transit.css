@@ -24,7 +24,7 @@
   left: 0;
   width: 100%;
   height: 100%;
-  background: radial-gradient(ellipse at center, #0a0015 0%, #050008 50%, #000000 100%);
+  background: radial-gradient(ellipse at center, #001520 0%, #000a10 50%, #000005 100%);
 }
 
 /* Content layer above canvas */
@@ -36,39 +36,50 @@
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
+  justify-content: flex-start;
+  padding-top: 5vh;
   pointer-events: none;
 }
 
-/* Title */
+/* Title - fixed at top */
 .wormhole-title {
+  position: absolute;
+  top: 5vh;
+  left: 50%;
+  transform: translateX(-50%);
   font-size: 2rem;
   font-weight: bold;
-  color: #cc88ff;
-  text-shadow: 0 0 20px #9900ff, 0 0 40px #6600cc;
+  color: #88ddff;
+  text-shadow: 0 0 20px #00ccff, 0 0 40px #0088cc;
   letter-spacing: 0.3em;
-  margin-bottom: 2rem;
   animation: title-pulse 2s ease-in-out infinite;
 }
 
 @keyframes title-pulse {
-  0%, 100% { opacity: 0.8; text-shadow: 0 0 20px #9900ff, 0 0 40px #6600cc; }
-  50% { opacity: 1; text-shadow: 0 0 30px #cc00ff, 0 0 60px #9900ff; }
+  0%, 100% { opacity: 0.8; text-shadow: 0 0 20px #00ccff, 0 0 40px #0088cc; }
+  50% { opacity: 1; text-shadow: 0 0 30px #00ffff, 0 0 60px #00ccff; }
 }
 
-/* Destinations container */
+/* Destinations container - full screen for absolute positioning */
 .wormhole-destinations {
-  position: relative;
+  position: absolute;
+  top: 0;
+  left: 0;
   width: 100%;
-  height: 400px;
-  pointer-events: auto;
+  height: 100%;
+  pointer-events: none;
 }
 
 .no-destinations {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
   text-align: center;
-  color: #aa88cc;
+  color: #88ccdd;
   font-size: 1.2rem;
   padding: 2rem;
+  pointer-events: auto;
 }
 
 /* Destination buttons */
@@ -76,10 +87,10 @@
   position: absolute;
   width: 160px;
   padding: 1rem;
-  background: rgba(80, 0, 120, 0.6);
-  border: 2px solid #9900ff;
+  background: rgba(0, 60, 80, 0.6);
+  border: 2px solid #00ccff;
   border-radius: 10px;
-  color: #eeddff;
+  color: #ddeeff;
   cursor: pointer;
   transition: all 0.3s ease;
   text-align: center;
@@ -87,10 +98,10 @@
 }
 
 .wormhole-destination-btn:hover {
-  background: rgba(120, 0, 180, 0.8);
-  border-color: #cc00ff;
+  background: rgba(0, 100, 140, 0.8);
+  border-color: #00ffff;
   transform: scale(1.1);
-  box-shadow: 0 0 30px rgba(153, 0, 255, 0.6);
+  box-shadow: 0 0 30px rgba(0, 200, 255, 0.6);
 }
 
 .wormhole-destination-btn:active {
@@ -110,11 +121,15 @@
 
 .dest-distance {
   font-size: 0.85rem;
-  color: #aa88cc;
+  color: #88ccdd;
 }
 
-/* Progress bar */
+/* Progress bar - centered below wormhole */
 .wormhole-progress {
+  position: absolute;
+  bottom: 25vh;
+  left: 50%;
+  transform: translateX(-50%);
   width: 300px;
   text-align: center;
   pointer-events: auto;
@@ -126,7 +141,7 @@
 
 .progress-label {
   font-size: 1.1rem;
-  color: #cc88ff;
+  color: #88ddff;
   margin-bottom: 0.5rem;
   animation: transit-text-pulse 1s ease-in-out infinite;
 }
@@ -139,8 +154,8 @@
 .progress-bar-container {
   width: 100%;
   height: 12px;
-  background: rgba(50, 0, 80, 0.5);
-  border: 1px solid #6600cc;
+  background: rgba(0, 40, 60, 0.5);
+  border: 1px solid #0088cc;
   border-radius: 6px;
   overflow: hidden;
 }
@@ -148,20 +163,23 @@
 .progress-bar-fill {
   height: 100%;
   width: 0%;
-  background: linear-gradient(90deg, #6600cc 0%, #9900ff 50%, #cc00ff 100%);
+  background: linear-gradient(90deg, #0066aa 0%, #00ccff 50%, #00ffff 100%);
   border-radius: 6px;
   transition: width 0.1s linear;
-  box-shadow: 0 0 10px #9900ff;
+  box-shadow: 0 0 10px #00ccff;
 }
 
-/* Cancel button */
+/* Cancel button - fixed at bottom */
 .wormhole-cancel-btn {
-  margin-top: 2rem;
+  position: absolute;
+  bottom: 8vh;
+  left: 50%;
+  transform: translateX(-50%);
   padding: 0.8rem 2rem;
-  background: rgba(80, 0, 60, 0.6);
-  border: 1px solid #cc00aa;
+  background: rgba(80, 40, 0, 0.6);
+  border: 1px solid #ff8844;
   border-radius: 5px;
-  color: #ffaaee;
+  color: #ffcc88;
   font-size: 0.9rem;
   cursor: pointer;
   transition: all 0.2s ease;
@@ -169,8 +187,8 @@
 }
 
 .wormhole-cancel-btn:hover {
-  background: rgba(120, 0, 90, 0.8);
-  border-color: #ff00cc;
+  background: rgba(120, 60, 0, 0.8);
+  border-color: #ffaa44;
 }
 
 .wormhole-cancel-btn.hidden {
@@ -179,12 +197,12 @@
 
 /* Wormhole hint in HUD */
 #wormhole-hint {
-  color: #cc88ff;
-  text-shadow: 0 0 10px #9900ff;
+  color: #88ddff;
+  text-shadow: 0 0 10px #00ccff;
   animation: wormhole-hint-pulse 1.5s ease-in-out infinite;
 }
 
 @keyframes wormhole-hint-pulse {
   0%, 100% { opacity: 0.7; }
-  50% { opacity: 1; text-shadow: 0 0 15px #cc00ff; }
+  50% { opacity: 1; text-shadow: 0 0 15px #00ffff; }
 }

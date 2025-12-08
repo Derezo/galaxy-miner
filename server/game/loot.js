@@ -128,10 +128,18 @@ function generateLootContents(npc) {
   return contents;
 }
 
-function spawnWreckage(npc, position, providedContents = null) {
+function spawnWreckage(npc, position, providedContents = null, damageContributors = null) {
   const wreckageId = `wreckage_${++wreckageIdCounter}`;
   // Use provided contents (e.g., from base destruction) or generate from NPC
   const contents = providedContents || generateLootContents(npc);
+
+  // Convert Map to plain object for storage (if provided)
+  let contributors = null;
+  if (damageContributors instanceof Map) {
+    contributors = Object.fromEntries(damageContributors);
+  } else if (damageContributors && typeof damageContributors === 'object') {
+    contributors = damageContributors;
+  }
 
   const wreckage = {
     id: wreckageId,
@@ -140,7 +148,9 @@ function spawnWreckage(npc, position, providedContents = null) {
     faction: npc.faction,
     npcType: npc.type,
     npcName: npc.name,
+    creditReward: npc.creditReward || 0, // Store credit reward for team distribution
     contents,
+    damageContributors: contributors, // Track who contributed damage for team rewards
     spawnTime: Date.now(),
     despawnTime: Date.now() + config.WRECKAGE_DESPAWN_TIME,
     beingCollectedBy: null,
@@ -207,10 +217,15 @@ function updateCollection(wreckageId, playerId, deltaTime) {
   wreckage.collectionProgress += deltaTime;
 
   if (wreckage.collectionProgress >= wreckage.totalCollectionTime) {
-    // Collection complete
-    const contents = wreckage.contents;
+    // Collection complete - include wreckage metadata for team distribution
+    const result = {
+      complete: true,
+      contents: wreckage.contents,
+      creditReward: wreckage.creditReward || 0,
+      damageContributors: wreckage.damageContributors || null
+    };
     removeWreckage(wreckageId);
-    return { complete: true, contents };
+    return result;
   }
 
   return {

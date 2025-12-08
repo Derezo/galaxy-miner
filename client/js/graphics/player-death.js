@@ -81,7 +81,7 @@ const PlayerDeathEffect = {
     // Clear any previous text particles
     this.textParticles = [];
 
-    console.log('[PlayerDeathEffect] Triggered:', data);
+    Logger.log('[PlayerDeathEffect] Triggered:', data);
   },
 
   /**
@@ -243,7 +243,7 @@ const PlayerDeathEffect = {
       this.respawnData = null;
     }
 
-    console.log('[PlayerDeathEffect] Sequence complete, invulnerable until:', this.invulnerableUntil);
+    Logger.log('[PlayerDeathEffect] Sequence complete, invulnerable until:', this.invulnerableUntil);
   },
 
   /**
@@ -252,7 +252,7 @@ const PlayerDeathEffect = {
    */
   queueRespawn(data) {
     this.respawnData = data;
-    console.log('[PlayerDeathEffect] Respawn queued:', data);
+    Logger.log('[PlayerDeathEffect] Respawn queued:', data);
   },
 
   /**

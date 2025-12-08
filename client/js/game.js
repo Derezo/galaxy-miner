@@ -10,12 +10,12 @@ const Game = {
     this.running = true;
     this.lastTime = performance.now();
     this.loop();
-    console.log('Game loop started');
+    Logger.log('Game loop started');
   },
 
   stop() {
     this.running = false;
-    console.log('Game loop stopped');
+    Logger.log('Game loop stopped');
   },
 
   loop() {

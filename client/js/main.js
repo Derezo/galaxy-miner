@@ -8,7 +8,7 @@ const GalaxyMiner = {
     if (this.initialized) return;
     this.initialized = true;
 
-    console.log('Galaxy Miner initializing...');
+    Logger.log('Galaxy Miner initializing...');
 
     // Initialize modules
     Network.init();
@@ -24,19 +24,24 @@ const GalaxyMiner = {
     Toast.init();
     EmoteWheel.init();
 
-    console.log('Galaxy Miner ready');
+    Logger.log('Galaxy Miner ready');
   },
 
   startGame(playerData) {
     if (this.gameStarted) return;
     this.gameStarted = true;
 
-    console.log('Starting game for player:', playerData.username);
+    Logger.log('Starting game for player:', playerData.username);
 
     // Initialize player and world
     Player.init(playerData);
     World.init(CONSTANTS.GALAXY_SEED);
     Entities.init();
+
+    // Sync credit animation with loaded player credits
+    if (typeof CreditAnimation !== 'undefined') {
+      CreditAnimation.setCredits(Player.credits);
+    }
 
     // Hide auth, show HUD
     document.getElementById('auth-screen').classList.add('hidden');

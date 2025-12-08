@@ -133,7 +133,7 @@ const ShipGeometry = {
       }
     }
 
-    console.log('ShipGeometry initialized with Path2D caching');
+    Logger.log('ShipGeometry initialized with Path2D caching');
   },
 
   /**

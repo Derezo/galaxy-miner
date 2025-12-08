@@ -109,7 +109,7 @@ const BaseDestructionSequence = {
   },
 
   init() {
-    console.log('BaseDestructionSequence initialized');
+    Logger.log('BaseDestructionSequence initialized');
   },
 
   /**

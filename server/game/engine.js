@@ -7,6 +7,7 @@ const mining = require('./mining');
 const loot = require('./loot');
 const world = require('../world');
 const starDamage = require('./star-damage');
+const logger = require('../../shared/logger');
 
 let io = null;
 let connectedPlayers = null;
@@ -16,9 +17,34 @@ let lastTickTime = Date.now();
 // Track which bases are currently active
 const lastBaseCheck = new Map(); // baseId -> lastCheckTime
 
+// NPC Accuracy System Configuration
+// Makes NPC weapons dodgeable by adding miss chance based on distance and target movement
+const NPC_ACCURACY = {
+  // Base accuracy per faction (0-1, 1 = perfect aim)
+  FACTION_BASE: {
+    pirate: 0.65,      // Pirates are decent shots
+    scavenger: 0.45,   // Scavengers have jury-rigged weapons
+    swarm: 0.55,       // Swarm fires rapidly but less accurate
+    void: 0.75,        // Void entities are precise
+    rogue_miner: 0.50  // Miners aren't combat-focused
+  },
+  // Distance penalty: accuracy drops at longer range
+  // At max range, accuracy is reduced by this multiplier
+  RANGE_PENALTY_MAX: 0.4,  // Lose up to 40% accuracy at max range
+  // Moving target penalty: fast targets are harder to hit
+  // Velocity in units/sec that causes max penalty
+  VELOCITY_THRESHOLD: 150,
+  VELOCITY_PENALTY_MAX: 0.35  // Lose up to 35% accuracy vs fast targets
+};
+
 // Throttle base radar broadcasts (every 500ms)
 let lastBaseBroadcastTime = 0;
 const BASE_BROADCAST_INTERVAL = 500;
+
+// Base activation and broadcast ranges (should match for consistency)
+// Using sector-based range for smooth transitions across sector boundaries
+const BASE_ACTIVATION_RANGE = config.SECTOR_SIZE * 3;  // 3000 units
+const BASE_BROADCAST_RANGE = BASE_ACTIVATION_RANGE;    // Match activation range
 
 function init(socketIo, players) {
   io = socketIo;
@@ -30,12 +56,12 @@ function start() {
   running = true;
   lastTickTime = Date.now();
   tick();
-  console.log('Game engine started');
+  logger.log('Game engine started');
 }
 
 function stop() {
   running = false;
-  console.log('Game engine stopped');
+  logger.log('Game engine stopped');
 }
 
 function tick() {
@@ -83,36 +109,46 @@ function updateBases(deltaTime) {
 
   const players = [...connectedPlayers.values()];
   const now = Date.now();
-  const BASE_ACTIVATION_RANGE = config.SECTOR_SIZE * 3; // 3 sectors range
   const BASE_DEACTIVATION_TIME = 60000; // 1 minute without nearby players
 
   // Find all sectors with players and get bases from those sectors
-  const activeSectors = new Set();
+  // Use Map to store sector coordinates directly, avoiding string parsing in loop
+  const activeSectors = new Map();
   for (const player of players) {
     const sectorX = Math.floor(player.position.x / config.SECTOR_SIZE);
     const sectorY = Math.floor(player.position.y / config.SECTOR_SIZE);
 
-    // Include adjacent sectors (3x3 grid)
-    for (let dx = -1; dx <= 1; dx++) {
-      for (let dy = -1; dy <= 1; dy++) {
-        activeSectors.add(`${sectorX + dx}_${sectorY + dy}`);
+    // Include adjacent sectors (5x5 grid to match client rendering range)
+    const ACTIVE_SECTOR_RADIUS = 2;
+    for (let dx = -ACTIVE_SECTOR_RADIUS; dx <= ACTIVE_SECTOR_RADIUS; dx++) {
+      for (let dy = -ACTIVE_SECTOR_RADIUS; dy <= ACTIVE_SECTOR_RADIUS; dy++) {
+        const sx = sectorX + dx;
+        const sy = sectorY + dy;
+        const key = `${sx}_${sy}`;
+        if (!activeSectors.has(key)) {
+          activeSectors.set(key, { x: sx, y: sy });
+        }
       }
     }
   }
 
   // Check each active sector for bases
-  for (const sectorKey of activeSectors) {
-    const [sectorX, sectorY] = sectorKey.split('_').map(Number);
-    const sector = world.generateSector(sectorX, sectorY);
+  for (const [sectorKey, coords] of activeSectors) {
+    const sector = world.generateSector(coords.x, coords.y);
 
     if (!sector.bases || sector.bases.length === 0) continue;
 
     for (const base of sector.bases) {
+      // Get computed position for orbital bases (critical for sync with NPC spawning)
+      const computedPos = world.getObjectPosition(base.id);
+      const baseX = computedPos ? computedPos.x : base.x;
+      const baseY = computedPos ? computedPos.y : base.y;
+
       // Check if any player is within activation range
       let hasNearbyPlayer = false;
       for (const player of players) {
-        const dx = player.position.x - base.x;
-        const dy = player.position.y - base.y;
+        const dx = player.position.x - baseX;
+        const dy = player.position.y - baseY;
         const dist = Math.sqrt(dx * dx + dy * dy);
         if (dist < BASE_ACTIVATION_RANGE) {
           hasNearbyPlayer = true;
@@ -219,7 +255,8 @@ function updateNPCs(deltaTime) {
   const players = [...connectedPlayers.values()];
 
   // Find active sectors (where players are)
-  const activeSectors = new Set();
+  // Use Map to store sector coordinates directly, avoiding string parsing in loop
+  const activeSectors = new Map();
   for (const player of players) {
     const sectorX = Math.floor(player.position.x / config.SECTOR_SIZE);
     const sectorY = Math.floor(player.position.y / config.SECTOR_SIZE);
@@ -227,15 +264,19 @@ function updateNPCs(deltaTime) {
     // Include adjacent sectors
     for (let dx = -1; dx <= 1; dx++) {
       for (let dy = -1; dy <= 1; dy++) {
-        activeSectors.add(`${sectorX + dx}_${sectorY + dy}`);
+        const sx = sectorX + dx;
+        const sy = sectorY + dy;
+        const key = `${sx}_${sy}`;
+        if (!activeSectors.has(key)) {
+          activeSectors.set(key, { x: sx, y: sy });
+        }
       }
     }
   }
 
   // Spawn NPCs in active sectors
-  for (const sectorKey of activeSectors) {
-    const [sectorX, sectorY] = sectorKey.split('_').map(Number);
-    const spawned = npc.spawnNPCsForSector(sectorX, sectorY);
+  for (const [sectorKey, coords] of activeSectors) {
+    const spawned = npc.spawnNPCsForSector(coords.x, coords.y);
 
     // Notify nearby players of new NPCs
     for (const newNpc of spawned) {
@@ -256,6 +297,7 @@ function updateNPCs(deltaTime) {
   }
 
   // Update all NPCs
+  const npcsToRemove = [];  // Track NPCs to remove after iteration (for despawning)
   for (const [npcId, npcEntity] of npc.activeNPCs) {
     // Check if NPC is in an active sector
     const npcSectorX = Math.floor(npcEntity.position.x / config.SECTOR_SIZE);
@@ -335,6 +377,66 @@ function updateNPCs(deltaTime) {
     if (action && action.action === 'fire') {
       // NPC fired at player - use proper damage calculation
       const targetPlayer = action.target;
+
+      // VALIDATION: Re-verify distance before applying damage
+      // This prevents hits when player has moved out of range since AI check
+      const actualDx = targetPlayer.position.x - npcEntity.position.x;
+      const actualDy = targetPlayer.position.y - npcEntity.position.y;
+      const actualDist = Math.sqrt(actualDx * actualDx + actualDy * actualDy);
+
+      // Allow slight tolerance (10%) to account for position updates during tick
+      const maxRange = npcEntity.weaponRange * 1.1;
+      if (actualDist > maxRange) {
+        // Target moved out of range - skip damage but still show visual (miss)
+        broadcastNearNpc(npcEntity, 'combat:npcFire', {
+          npcId: npcId,
+          faction: npcEntity.faction,
+          weaponType: action.weaponType || 'kinetic',
+          sourceX: npcEntity.position.x,
+          sourceY: npcEntity.position.y,
+          targetX: targetPlayer.position.x,
+          targetY: targetPlayer.position.y,
+          rotation: npcEntity.rotation,
+          hitInfo: null // No hit - shot missed
+        });
+        continue; // Skip to next NPC
+      }
+
+      // ACCURACY CHECK: Calculate hit chance based on faction, distance, and target velocity
+      const baseAccuracy = NPC_ACCURACY.FACTION_BASE[npcEntity.faction] || 0.6;
+
+      // Distance penalty: accuracy drops at longer range (linear interpolation)
+      const rangeRatio = actualDist / npcEntity.weaponRange;
+      const rangePenalty = rangeRatio * NPC_ACCURACY.RANGE_PENALTY_MAX;
+
+      // Velocity penalty: moving targets are harder to hit
+      const targetVelocity = Math.sqrt(
+        targetPlayer.velocity.x * targetPlayer.velocity.x +
+        targetPlayer.velocity.y * targetPlayer.velocity.y
+      );
+      const velocityRatio = Math.min(1, targetVelocity / NPC_ACCURACY.VELOCITY_THRESHOLD);
+      const velocityPenalty = velocityRatio * NPC_ACCURACY.VELOCITY_PENALTY_MAX;
+
+      // Final accuracy (clamped to 15-95% to prevent guaranteed hits/misses)
+      const finalAccuracy = Math.max(0.15, Math.min(0.95, baseAccuracy - rangePenalty - velocityPenalty));
+
+      // Roll for hit
+      if (Math.random() > finalAccuracy) {
+        // MISS - show visual but no damage
+        broadcastNearNpc(npcEntity, 'combat:npcFire', {
+          npcId: npcId,
+          faction: npcEntity.faction,
+          weaponType: action.weaponType || 'kinetic',
+          sourceX: npcEntity.position.x,
+          sourceY: npcEntity.position.y,
+          targetX: targetPlayer.position.x,
+          targetY: targetPlayer.position.y,
+          rotation: npcEntity.rotation,
+          hitInfo: null // No hit - shot missed
+        });
+        continue; // Skip to next NPC
+      }
+
       const damage = combat.calculateDamage(
         action.weaponType || 'kinetic',
         action.weaponTier || 1,
@@ -418,7 +520,26 @@ function updateNPCs(deltaTime) {
           }
         }
       }
+    } else if (action && action.action === 'despawn') {
+      // Handle orphaned NPC despawn (rage timer expired)
+      // Broadcast death effect first
+      broadcastNearNpc(npcEntity, 'npc:death', {
+        npcId: npcId,
+        x: npcEntity.position.x,
+        y: npcEntity.position.y,
+        faction: npcEntity.faction,
+        deathType: 'despawn',
+        reason: action.reason || 'rage_expired'
+      });
+
+      // Remove from activeNPCs (will be handled after loop to avoid modification during iteration)
+      npcsToRemove.push(npcId);
     }
+  }
+
+  // Remove any NPCs that need to despawn (outside the iteration loop)
+  for (const npcId of npcsToRemove) {
+    npc.activeNPCs.delete(npcId);
   }
 }
 
@@ -453,11 +574,13 @@ function broadcastNearbyBasesToPlayers(now) {
   lastBaseBroadcastTime = now;
 
   for (const [socketId, player] of connectedPlayers) {
-    // Calculate player's radar range based on their radar tier
+    // Use the larger of radar range or broadcast range for consistent sync
+    // This ensures players see bases even at sector edges
     const radarRange = config.BASE_RADAR_RANGE * Math.pow(config.TIER_MULTIPLIER, (player.radarTier || 1) - 1);
+    const syncRange = Math.max(radarRange, BASE_BROADCAST_RANGE);
 
-    // Get bases within player's radar range (using existing npc.getBasesInRange)
-    const nearbyBases = npc.getBasesInRange(player.position, radarRange);
+    // Get bases within sync range (using existing npc.getBasesInRange)
+    const nearbyBases = npc.getBasesInRange(player.position, syncRange);
 
     // Only send if there are bases to report
     if (nearbyBases.length > 0) {
@@ -485,7 +608,7 @@ function broadcastWreckageNear(wreckage, event, data) {
 function broadcastNearNpc(npcEntity, event, data) {
   if (!connectedPlayers) return;
 
-  const broadcastRange = config.BASE_RADAR_RANGE * 3; // Wider range for NPC updates
+  const broadcastRange = BASE_BROADCAST_RANGE;  // Use consistent module-level constant
 
   for (const [socketId, player] of connectedPlayers) {
     const dx = player.position.x - npcEntity.position.x;
@@ -511,8 +634,8 @@ function playerAttackNPC(attackerId, npcId, weaponType, weaponTier) {
   const result = npc.damageNPC(npcId, totalDamage, attackerId);
 
   if (result && result.destroyed) {
-    // Spawn wreckage at NPC position with loot
-    const wreckage = loot.spawnWreckage(npcEntity, npcEntity.position);
+    // Spawn wreckage at NPC position with loot, passing damage contributors for team rewards
+    const wreckage = loot.spawnWreckage(npcEntity, npcEntity.position, null, npcEntity.damageContributors);
 
     // Broadcast NPC death with team info
     broadcastNearNpc(npcEntity, 'npc:destroyed', {
@@ -603,8 +726,8 @@ function playerAttackNPC(attackerId, npcId, weaponType, weaponTier) {
           if (linked.destroyed) {
             const linkedNpc = npc.getNPC(linked.id);
             if (linkedNpc) {
-              // Spawn wreckage for linked death
-              const wreckage = loot.spawnWreckage(linkedNpc, linkedNpc.position);
+              // Spawn wreckage for linked death (inherit parent NPC's damage contributors for team credit)
+              const wreckage = loot.spawnWreckage(linkedNpc, linkedNpc.position, null, npcEntity.damageContributors);
 
               broadcastNearNpc(linkedNpc, 'npc:destroyed', {
                 id: linked.id,
@@ -644,6 +767,17 @@ function playerAttackBase(attackerId, baseId, weaponType, weaponTier) {
   const baseObj = world.getObjectById(baseId);
   if (!baseObj) return null;
 
+  // Defensive validation: verify base is active and not destroyed
+  const activeBase = npc.getActiveBase(baseId);
+  if (!activeBase) {
+    logger.debug(`playerAttackBase: Base ${baseId} is not active`);
+    return null;
+  }
+  if (activeBase.destroyed) {
+    logger.debug(`playerAttackBase: Base ${baseId} is already destroyed`);
+    return null;
+  }
+
   // Calculate damage using proper damage calculation
   const damage = combat.calculateDamage(weaponType, weaponTier, 1);
   const totalDamage = damage.shieldDamage + damage.hullDamage;
@@ -656,12 +790,15 @@ function playerAttackBase(attackerId, baseId, weaponType, weaponTier) {
     const baseLoot = result.loot;
 
     // Create wreckage-like object for the base
+    // Note: creditReward is 0 because credits are already awarded at destruction time
+    // (see socket.js combat:fire handler for bases). Wreckage only contains resource loot.
     const wreckage = loot.spawnWreckage({
       id: baseId,
       name: baseObj.name,
       faction: baseObj.faction,
-      type: 'base'
-    }, { x: baseObj.x, y: baseObj.y }, baseLoot);
+      type: 'base',
+      creditReward: 0
+    }, { x: baseObj.x, y: baseObj.y }, baseLoot, null);
 
     // Broadcast base destruction with team info and visual data
     broadcastNearBase(baseObj, 'base:destroyed', {
@@ -719,7 +856,7 @@ function playerAttackBase(attackerId, baseId, weaponType, weaponTier) {
 function broadcastNearBase(base, event, data) {
   if (!connectedPlayers) return;
 
-  const broadcastRange = config.BASE_RADAR_RANGE * 3;
+  const broadcastRange = BASE_BROADCAST_RANGE;  // Use consistent module-level constant
 
   for (const [socketId, player] of connectedPlayers) {
     const dx = player.position.x - base.x;

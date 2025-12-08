@@ -31,7 +31,7 @@ const RadarAdvanced = {
 
   toggleSectorMap() {
     this.sectorMapMode = !this.sectorMapMode;
-    console.log('Sector map mode:', this.sectorMapMode ? 'ON' : 'OFF');
+    Logger.log('Sector map mode:', this.sectorMapMode ? 'ON' : 'OFF');
   },
 
   // Main draw function for all Tier 5 features

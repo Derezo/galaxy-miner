@@ -2,7 +2,7 @@
 
 const InventoryUI = {
   init() {
-    console.log('Inventory UI initialized');
+    Logger.log('Inventory UI initialized');
   },
 
   refresh() {

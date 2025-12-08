@@ -552,8 +552,11 @@ Object.assign(StarSystem, {
     const config = getConfig();
     const wormholes = [];
 
-    // 5% chance per system
-    if (rng() > (config.WORMHOLE_CHANCE || 0.05)) return wormholes;
+    // Guarantee wormhole in spawn area (super-sector 0,0)
+    const isSpawnArea = systemId.startsWith('ss_0_0_');
+
+    // Check wormhole chance (5% default), but always spawn in spawn area
+    if (!isSpawnArea && rng() > (config.WORMHOLE_CHANCE || 0.05)) return wormholes;
 
     let x, y;
 

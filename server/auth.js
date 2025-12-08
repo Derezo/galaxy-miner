@@ -1,8 +1,9 @@
 const bcrypt = require('bcrypt');
 const { v4: uuidv4 } = require('uuid');
-const { statements, createUserWithShip } = require('./database');
+const { db, statements, createUserWithShip } = require('./database');
 const config = require('./config');
 const world = require('./world');
+const logger = require('../shared/logger');
 
 // In-memory session store (for MVP - could use Redis later)
 const sessions = new Map();
@@ -62,7 +63,7 @@ async function register(username, password) {
       player: playerData
     };
   } catch (error) {
-    console.error('Registration error:', error);
+    logger.error('Registration error:', error);
     return { success: false, error: 'Registration failed' };
   }
 }
@@ -107,7 +108,7 @@ async function login(username, password) {
       player: playerData
     };
   } catch (error) {
-    console.error('Login error:', error);
+    logger.error('Login error:', error);
     return { success: false, error: 'Login failed' };
   }
 }
@@ -150,6 +151,27 @@ function getPlayerData(userId) {
   const inventory = statements.getInventory.all(userId);
   const relics = statements.getRelics.all(userId);
 
+  // Recalculate shield_max and hull_max based on tier (self-healing for older accounts)
+  const shieldTier = ship.shield_tier || 1;
+  const hullTier = ship.hull_tier || 1;
+  const shieldMultiplier = config.SHIELD_TIER_MULTIPLIER || 2.0;
+  const hullMultiplier = config.TIER_MULTIPLIER || 1.5;
+
+  const expectedShieldMax = Math.round(config.DEFAULT_SHIELD_HP * Math.pow(shieldMultiplier, shieldTier - 1));
+  const expectedHullMax = Math.round(config.DEFAULT_HULL_HP * Math.pow(hullMultiplier, hullTier - 1));
+
+  let shieldMax = ship.shield_max;
+  let hullMax = ship.hull_max;
+
+  // Update database if max values are incorrect
+  if (shieldMax !== expectedShieldMax || hullMax !== expectedHullMax) {
+    shieldMax = expectedShieldMax;
+    hullMax = expectedHullMax;
+    // Update the database with corrected values
+    db.prepare('UPDATE ships SET shield_max = ?, hull_max = ? WHERE user_id = ?')
+      .run(shieldMax, hullMax, userId);
+  }
+
   return {
     id: user.id,
     username: user.username,
@@ -159,19 +181,19 @@ function getPlayerData(userId) {
     velocity_x: ship.velocity_x,
     velocity_y: ship.velocity_y,
     hull_hp: ship.hull_hp,
-    hull_max: ship.hull_max,
+    hull_max: hullMax,
     shield_hp: ship.shield_hp,
-    shield_max: ship.shield_max,
+    shield_max: shieldMax,
     credits: ship.credits,
     engine_tier: ship.engine_tier,
     weapon_type: ship.weapon_type,
     weapon_tier: ship.weapon_tier,
-    shield_tier: ship.shield_tier,
+    shield_tier: shieldTier,
     mining_tier: ship.mining_tier,
     cargo_tier: ship.cargo_tier,
     radar_tier: ship.radar_tier,
     energy_core_tier: ship.energy_core_tier || 1,
-    hull_tier: ship.hull_tier || 1,
+    hull_tier: hullTier,
     ship_color_id: ship.ship_color_id || 'green',
     inventory,
     relics

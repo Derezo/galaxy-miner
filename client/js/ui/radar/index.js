@@ -6,6 +6,7 @@ const Radar = {
   ctx: null,
   size: 150,
   center: 75,
+  radarRadius: 63,  // Radar circle radius (smaller than center to leave margin for indicators)
   initialized: false,
 
   init(canvas) {
@@ -13,6 +14,7 @@ const Radar = {
     this.ctx = canvas.getContext('2d');
     this.size = canvas.width;
     this.center = this.size / 2;
+    this.radarRadius = this.center - 12;  // 12px margin for external indicators
 
     // Initialize tooltips system
     if (typeof RadarTooltips !== 'undefined') {
@@ -25,7 +27,7 @@ const Radar = {
     }
 
     this.initialized = true;
-    console.log('Radar system initialized');
+    Logger.log('Radar system initialized');
   },
 
   // Main draw function called by HUD

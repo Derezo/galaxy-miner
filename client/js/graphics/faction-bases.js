@@ -62,7 +62,7 @@ const FactionBases = {
   },
 
   init() {
-    console.log('FactionBases initialized');
+    Logger.log('FactionBases initialized');
   },
 
   update(dt) {

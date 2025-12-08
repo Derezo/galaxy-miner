@@ -4,6 +4,9 @@ const HUD = {
   latency: 0,
   radarCanvas: null,
   radarCtx: null,
+  radialMenuOpen: false,
+  radialMenuTimeout: null,
+  longPressDelay: 500, // ms for long press detection
 
   init() {
     this.radarCanvas = document.getElementById('radar-canvas');
@@ -18,38 +21,332 @@ const HUD = {
       Radar.init(this.radarCanvas);
     }
 
-    // Button handlers
-    document.getElementById('btn-terminal').addEventListener('click', () => TerminalUI.toggle());
+    // Terminal icon handlers
+    this.initTerminalIcon();
+
+    // Profile image handler
+    this.initProfileHandlers();
+
+    // Chat icon handler
+    this.initChatIcon();
 
     // Start latency ping
     setInterval(() => Network.ping(), 5000);
 
-    console.log('HUD initialized');
+    Logger.log('HUD initialized');
+  },
+
+  /**
+   * Initialize terminal icon with click and long-press handlers
+   */
+  initTerminalIcon() {
+    const terminalIcon = document.getElementById('terminal-icon');
+    const radialMenu = document.getElementById('terminal-radial-menu');
+
+    console.log('[HUD] initTerminalIcon: terminalIcon=', terminalIcon, 'radialMenu=', radialMenu);
+
+    if (!terminalIcon || !radialMenu) {
+      console.warn('[HUD] Terminal icon or radial menu not found!');
+      return;
+    }
+
+    let pressTimer = null;
+    let isLongPress = false;
+
+    // Mouse/touch down - start long press detection
+    const handlePressStart = (e) => {
+      e.preventDefault();
+      isLongPress = false;
+      pressTimer = setTimeout(() => {
+        isLongPress = true;
+        this.showRadialMenu();
+      }, this.longPressDelay);
+    };
+
+    // Mouse/touch up - handle click or long press end
+    const handlePressEnd = (e) => {
+      e.preventDefault();
+      if (pressTimer) {
+        clearTimeout(pressTimer);
+        pressTimer = null;
+      }
+
+      if (!isLongPress) {
+        // Short click - open terminal to cargo tab
+        TerminalUI.show();
+        TerminalUI.switchTab('cargo');
+      }
+      // Long press menu stays open until item clicked or clicked outside
+    };
+
+    // Cancel on mouse/touch leave
+    const handlePressCancel = () => {
+      if (pressTimer) {
+        clearTimeout(pressTimer);
+        pressTimer = null;
+      }
+    };
+
+    // Mouse events
+    terminalIcon.addEventListener('mousedown', handlePressStart);
+    terminalIcon.addEventListener('mouseup', handlePressEnd);
+    terminalIcon.addEventListener('mouseleave', handlePressCancel);
+
+    // Touch events
+    terminalIcon.addEventListener('touchstart', handlePressStart, { passive: false });
+    terminalIcon.addEventListener('touchend', handlePressEnd, { passive: false });
+    terminalIcon.addEventListener('touchcancel', handlePressCancel);
+
+    // Radial menu item handlers - use mouseup/touchend since mousedown happens on terminal icon
+    const radialItems = radialMenu.querySelectorAll('.radial-item');
+    console.log('[HUD] Found', radialItems.length, 'radial menu items');
+
+    const handleRadialSelect = (item, e) => {
+      // Only handle if radial menu is open (prevents accidental triggers)
+      if (!this.radialMenuOpen) return;
+
+      console.log('[HUD] Radial item selected! Tab:', item.dataset.tab);
+      e.stopPropagation();
+      e.preventDefault();
+
+      const tab = item.dataset.tab;
+      this.hideRadialMenu();
+
+      if (typeof TerminalUI !== 'undefined') {
+        TerminalUI.show();
+        TerminalUI.switchTab(tab);
+      } else {
+        console.error('[HUD] TerminalUI is not defined!');
+      }
+    };
+
+    radialItems.forEach(item => {
+      console.log('[HUD] Adding mouseup/touchend handler for tab:', item.dataset.tab);
+      // Mouse release selects the item
+      item.addEventListener('mouseup', (e) => handleRadialSelect(item, e));
+      // Touch release selects the item
+      item.addEventListener('touchend', (e) => handleRadialSelect(item, e), { passive: false });
+      // Also support regular click for users who click after menu is open
+      item.addEventListener('click', (e) => handleRadialSelect(item, e));
+    });
+
+    // Click outside to close radial menu
+    document.addEventListener('mouseup', (e) => {
+      if (this.radialMenuOpen && !radialMenu.contains(e.target) && e.target !== terminalIcon) {
+        this.hideRadialMenu();
+      }
+    });
+  },
+
+  /**
+   * Show the radial menu
+   */
+  showRadialMenu() {
+    const radialMenu = document.getElementById('terminal-radial-menu');
+    if (radialMenu) {
+      radialMenu.classList.remove('hidden');
+      radialMenu.classList.add('visible');
+      this.radialMenuOpen = true;
+    }
+  },
+
+  /**
+   * Hide the radial menu
+   */
+  hideRadialMenu() {
+    const radialMenu = document.getElementById('terminal-radial-menu');
+    if (radialMenu) {
+      radialMenu.classList.remove('visible');
+      radialMenu.classList.add('hidden');
+      this.radialMenuOpen = false;
+    }
+  },
+
+  /**
+   * Initialize profile image click handler
+   */
+  initProfileHandlers() {
+    const profileContainer = document.getElementById('profile-image-container');
+    if (profileContainer) {
+      profileContainer.addEventListener('click', () => {
+        // Open profile modal if available
+        if (typeof ProfileModal !== 'undefined') {
+          ProfileModal.show();
+        } else {
+          Logger.log('Profile modal not yet implemented');
+        }
+      });
+    }
+  },
+
+  /**
+   * Initialize chat icon handler
+   * Note: ChatUI.init() handles the click event - this method is kept
+   * for any HUD-specific chat icon setup (badge updates, etc.)
+   */
+  initChatIcon() {
+    // Click handler is in ChatUI.init() to avoid double-toggle
+    // This method can be used for HUD-specific badge/state management
   },
 
   update() {
     if (!GalaxyMiner.gameStarted) return;
 
-    // Update player info
-    document.getElementById('player-name').textContent = Player.username;
-    document.getElementById('player-credits').textContent = `Credits: ${Player.credits}`;
+    // Update profile username
+    const usernameEl = document.getElementById('profile-username');
+    if (usernameEl) {
+      usernameEl.textContent = Player.username;
+    }
 
-    // Update sector coords
+    // Update credits display (animated value is handled by CreditAnimation if available)
+    const creditValue = document.getElementById('credit-value');
+    if (creditValue && typeof CreditAnimation === 'undefined') {
+      // Direct update if no animation module
+      creditValue.textContent = Player.credits.toLocaleString();
+    }
+
+    // Update sector coords (now in radar)
     const sectorX = Math.floor(Player.position.x / CONSTANTS.SECTOR_SIZE);
     const sectorY = Math.floor(Player.position.y / CONSTANTS.SECTOR_SIZE);
-    document.getElementById('sector-coords').textContent = `${sectorX}, ${sectorY}`;
-
-    // Update health bars
-    const hullPercent = (Player.hull.current / Player.hull.max) * 100;
-    const shieldPercent = (Player.shield.current / Player.shield.max) * 100;
-    document.getElementById('hull-bar').style.width = `${hullPercent}%`;
-    document.getElementById('shield-bar').style.width = `${shieldPercent}%`;
-
-    // Update boost bar
-    this.updateBoostBar();
+    const sectorEl = document.getElementById('sector-coords');
+    if (sectorEl) {
+      sectorEl.textContent = `${sectorX}, ${sectorY}`;
+    }
 
     // Update radar
     this.drawRadar();
+
+    // Update upgrade availability indicator
+    this.updateUpgradeIndicator();
+  },
+
+  /**
+   * Check if player can afford any upgrade and update UI indicators
+   */
+  updateUpgradeIndicator() {
+    const terminalIcon = document.getElementById('terminal-icon');
+    const upgradesRadialItem = document.querySelector('.radial-item[data-tab="upgrades"]');
+
+    if (!terminalIcon || !Player.ship) return;
+
+    const hasUpgradesAvailable = this.checkUpgradesAvailable();
+
+    if (hasUpgradesAvailable) {
+      terminalIcon.classList.add('upgrades-available');
+      if (upgradesRadialItem) {
+        upgradesRadialItem.classList.add('upgrades-available');
+      }
+    } else {
+      terminalIcon.classList.remove('upgrades-available');
+      if (upgradesRadialItem) {
+        upgradesRadialItem.classList.remove('upgrades-available');
+      }
+    }
+  },
+
+  /**
+   * Check if player can afford at least one upgrade (credits + resources)
+   * Uses ShipUpgradePanel.checkAffordability when available for consistency
+   * @returns {boolean}
+   */
+  checkUpgradesAvailable() {
+    if (!Player.ship || typeof CONSTANTS === 'undefined') return false;
+    if (!CONSTANTS.UPGRADE_REQUIREMENTS) return false;
+
+    const components = ['engine', 'weapon', 'shield', 'mining', 'cargo', 'radar', 'hull', 'energy_core'];
+    const tierKeys = {
+      engine: 'engineTier',
+      weapon: 'weaponTier',
+      shield: 'shieldTier',
+      mining: 'miningTier',
+      cargo: 'cargoTier',
+      radar: 'radarTier',
+      hull: 'hullTier',
+      energy_core: 'energyCoreTier'
+    };
+
+    // Use ShipUpgradePanel if available and has data (preferred - shared logic)
+    if (typeof ShipUpgradePanel !== 'undefined' && ShipUpgradePanel.shipData) {
+      for (const comp of components) {
+        const affordability = ShipUpgradePanel.checkAffordability(comp);
+        if (affordability.canAfford) {
+          return true;
+        }
+      }
+      return false;
+    }
+
+    // Fallback: manual check when ShipUpgradePanel not ready
+    const maxTier = 5;
+    const credits = Player.credits || 0;
+
+    // Convert inventory array to object for easy lookup
+    // Player.inventory is array of { resource_type, quantity }
+    const inventoryMap = {};
+    if (Array.isArray(Player.inventory)) {
+      for (const item of Player.inventory) {
+        inventoryMap[item.resource_type] = item.quantity;
+      }
+    } else if (Player.inventory && typeof Player.inventory === 'object') {
+      // Already an object (shouldn't happen but handle it)
+      Object.assign(inventoryMap, Player.inventory);
+    }
+
+    for (const comp of components) {
+      const currentTier = Player.ship[tierKeys[comp]] || 1;
+      if (currentTier >= maxTier) continue;
+
+      const nextTier = currentTier + 1;
+      const requirements = CONSTANTS.UPGRADE_REQUIREMENTS[comp]?.[nextTier];
+
+      if (!requirements) continue;
+
+      // Check credits
+      if (credits < requirements.credits) continue;
+
+      // Check resources
+      let hasAllResources = true;
+      for (const [resource, needed] of Object.entries(requirements.resources || {})) {
+        const have = inventoryMap[resource] || 0;
+        if (have < needed) {
+          hasAllResources = false;
+          break;
+        }
+      }
+
+      if (hasAllResources) {
+        return true;
+      }
+    }
+
+    return false;
+  },
+
+  /**
+   * Update credits with optional animation
+   * @param {number} newCredits - New credit value
+   * @param {number} delta - Change amount (positive = gain)
+   */
+  updateCredits(newCredits, delta = 0) {
+    if (typeof CreditAnimation !== 'undefined' && delta > 0) {
+      CreditAnimation.addCredits(delta);
+    } else {
+      const creditValue = document.getElementById('credit-value');
+      if (creditValue) {
+        creditValue.textContent = newCredits.toLocaleString();
+      }
+    }
+  },
+
+  /**
+   * Update profile image
+   * @param {string} emoji - The emoji to display
+   */
+  updateProfileImage(emoji) {
+    const profileImage = document.getElementById('profile-image');
+    if (profileImage) {
+      profileImage.textContent = emoji;
+    }
   },
 
   drawRadar() {
@@ -182,49 +479,5 @@ const HUD = {
 
   updateLatency(latency) {
     this.latency = latency;
-  },
-
-  updateBoostBar() {
-    const boostBar = document.getElementById('boost-bar');
-    const boostStatus = document.getElementById('boost-status');
-    const boostContainer = document.querySelector('.boost-bar-container');
-
-    if (!boostBar || !Player.isBoostActive) {
-      // Player module not fully loaded or no boost methods
-      if (boostContainer) boostContainer.style.display = 'none';
-      return;
-    }
-
-    boostContainer.style.display = 'block';
-
-    if (Player.isBoostActive()) {
-      // Boost is active - show remaining duration
-      const remaining = Player.boostEndTime - Date.now();
-      const duration = CONSTANTS.ENERGY_CORE?.BOOST?.DURATION?.[Player.ship.energyCoreTier || 1] || 1000;
-      const percent = Math.max(0, (remaining / duration) * 100);
-
-      boostBar.style.width = `${percent}%`;
-      boostBar.classList.add('active');
-      boostBar.classList.remove('cooldown');
-      boostStatus.textContent = 'ACTIVE';
-      boostStatus.className = 'boost-status active';
-    } else if (Player.isBoostOnCooldown()) {
-      // Boost is on cooldown
-      const percent = Player.getBoostCooldownPercent();
-
-      boostBar.style.width = `${percent}%`;
-      boostBar.classList.add('cooldown');
-      boostBar.classList.remove('active');
-
-      const remainingSec = Math.ceil(Player.getBoostCooldownRemaining() / 1000);
-      boostStatus.textContent = `${remainingSec}s`;
-      boostStatus.className = 'boost-status cooldown';
-    } else {
-      // Boost is ready
-      boostBar.style.width = '100%';
-      boostBar.classList.remove('active', 'cooldown');
-      boostStatus.textContent = 'READY';
-      boostStatus.className = 'boost-status ready';
-    }
   }
 };

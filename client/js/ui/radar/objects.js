@@ -2,6 +2,11 @@
 // Renders stars, planets, asteroids, and wormholes on radar
 
 const RadarObjects = {
+  // Cached nearest wormhole from server (set by network.js)
+  cachedNearestWormhole: null,
+  lastWormholeUpdate: 0,
+  WORMHOLE_UPDATE_INTERVAL: 5000,  // Request update every 5 seconds
+
   // Draw all world objects within radar range
   draw(ctx, center, scale, radarRange, radarTier, playerPos, objects) {
     if (!objects) return;
@@ -26,11 +31,56 @@ const RadarObjects = {
       this.drawBases(ctx, center, scale, radarRange, radarTier, playerPos, objects.bases);
     }
 
-    // Wormholes - Tier 3+ only
+    // Wormholes - Tier 3+ only (or if player has wormhole gem for direction indicator)
+    let wormholeOnRadar = false;
     if (RadarBaseRenderer.hasFeature(radarTier, 'wormholes') &&
         objects.wormholes && objects.wormholes.length > 0) {
-      this.drawWormholes(ctx, center, scale, radarRange, playerPos, objects.wormholes);
+      wormholeOnRadar = this.drawWormholes(ctx, center, scale, radarRange, playerPos, objects.wormholes);
     }
+
+    // Wormhole directional indicator - show if player has wormhole gem and no wormhole on radar
+    if (typeof Player !== 'undefined' && Player.hasRelic && Player.hasRelic('WORMHOLE_GEM')) {
+      if (!wormholeOnRadar) {
+        // Request server update if needed
+        this.maybeRequestWormholeUpdate();
+        // Use server-provided nearest wormhole position
+        this.drawWormholeIndicatorFromCache(ctx, center, playerPos);
+      }
+    }
+  },
+
+  // Request wormhole position update from server if cache is stale
+  maybeRequestWormholeUpdate() {
+    const now = Date.now();
+    if (now - this.lastWormholeUpdate > this.WORMHOLE_UPDATE_INTERVAL) {
+      if (typeof Network !== 'undefined' && Network.requestNearestWormholePosition) {
+        Logger.log('[Radar] Requesting nearest wormhole position from server');
+        Network.requestNearestWormholePosition();
+        this.lastWormholeUpdate = now;
+      } else {
+        Logger.log('[Radar] Network.requestNearestWormholePosition not available');
+      }
+    }
+  },
+
+  // Draw wormhole indicator using server-cached position
+  drawWormholeIndicatorFromCache(ctx, center, playerPos) {
+    if (!this.cachedNearestWormhole) {
+      // Only log once per second to avoid spam
+      if (!this._lastCacheLog || Date.now() - this._lastCacheLog > 1000) {
+        Logger.log('[Radar] No cached wormhole position yet');
+        this._lastCacheLog = Date.now();
+      }
+      return;
+    }
+
+    // Calculate angle from player to wormhole
+    const dx = this.cachedNearestWormhole.x - playerPos.x;
+    const dy = this.cachedNearestWormhole.y - playerPos.y;
+    const angle = Math.atan2(dy, dx);
+
+    // Draw the directional indicator on the radar edge
+    RadarBaseRenderer.drawDirectionIndicator(ctx, center, angle, CONSTANTS.COLORS.WORMHOLE);
   },
 
   // Draw stars as yellow/orange dots
@@ -110,9 +160,12 @@ const RadarObjects = {
     }
   },
 
-  // Draw wormholes as purple swirl icons (Tier 3+)
+  // Draw wormholes as animated swirl icons (Tier 3+)
+  // Returns true if any wormhole was drawn on the radar
   drawWormholes(ctx, center, scale, radarRange, playerPos, wormholes) {
-    const iconSize = CONSTANTS.RADAR_ICON_SIZES.wormhole;
+    const iconSize = 12; // Larger size for animated mini vortex
+
+    let anyVisible = false;
 
     for (const wormhole of wormholes) {
       const distance = RadarBaseRenderer.getDistance(
@@ -122,6 +175,8 @@ const RadarObjects = {
 
       if (!RadarBaseRenderer.isInRange(distance, radarRange)) continue;
 
+      anyVisible = true;
+
       const pos = RadarBaseRenderer.worldToRadar(
         wormhole.x, wormhole.y,
         playerPos.x, playerPos.y,
@@ -130,6 +185,8 @@ const RadarObjects = {
 
       RadarBaseRenderer.drawWormhole(ctx, pos.x, pos.y, iconSize, CONSTANTS.COLORS.WORMHOLE);
     }
+
+    return anyVisible;
   },
 
   // Draw bases from world generation data (tier-aware visuals)

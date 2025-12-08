@@ -31,7 +31,7 @@ const AuthUI = {
       if (e.key === 'Enter') this.handleRegister();
     });
 
-    console.log('Auth UI initialized');
+    Logger.log('Auth UI initialized');
   },
 
   showLogin() {
