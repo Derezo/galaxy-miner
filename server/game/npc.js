@@ -5,6 +5,8 @@ const world = require('../world');
 const combat = require('./combat');
 const ai = require('./ai');
 const logger = require('../../shared/logger');
+const LootPools = require('./loot-pools');
+const CONSTANTS = require('../../shared/constants');
 
 // NPC types with faction, weapon, and tier info
 const NPC_TYPES = {
@@ -20,8 +22,7 @@ const NPC_TYPES = {
     weaponDamage: 5,
     weaponRange: 200,
     aggroRange: 400,
-    lootTable: ['IRON', 'CARBON', 'COPPER'],
-    creditReward: 25,
+    creditReward: 30,  // Tier: low (was 25) - loot via loot-pools.js
     deathEffect: 'explosion'
   },
   pirate_fighter: {
@@ -35,8 +36,7 @@ const NPC_TYPES = {
     weaponDamage: 10,
     weaponRange: 250,
     aggroRange: 500,
-    lootTable: ['COPPER', 'TITANIUM', 'HELIUM3'],
-    creditReward: 75,
+    creditReward: 80,  // Tier: mid (was 75)
     deathEffect: 'explosion'
   },
   pirate_captain: {
@@ -50,8 +50,7 @@ const NPC_TYPES = {
     weaponDamage: 20,
     weaponRange: 300,
     aggroRange: 600,
-    lootTable: ['PLATINUM', 'DARK_MATTER', 'QUANTUM_CRYSTALS'],
-    creditReward: 200,
+    creditReward: 220,  // Tier: high (was 200)
     deathEffect: 'explosion'
   },
   pirate_dreadnought: {
@@ -65,8 +64,7 @@ const NPC_TYPES = {
     weaponDamage: 52,  // Buffed +50% (was 35)
     weaponRange: 350,
     aggroRange: 700,
-    lootTable: ['DARK_MATTER', 'QUANTUM_CRYSTALS', 'EXOTIC_MATTER'],
-    creditReward: 500,
+    creditReward: 550,  // Tier: boss (was 500)
     deathEffect: 'explosion',
     isBoss: true
   },
@@ -83,8 +81,7 @@ const NPC_TYPES = {
     weaponDamage: 4,
     weaponRange: 180,
     aggroRange: 300,
-    lootTable: ['IRON', 'NICKEL', 'SILICON'],
-    creditReward: 15,
+    creditReward: 20,  // Tier: low (was 15)
     deathEffect: 'break_apart'
   },
   scavenger_salvager: {
@@ -98,8 +95,7 @@ const NPC_TYPES = {
     weaponDamage: 6,
     weaponRange: 200,
     aggroRange: 350,
-    lootTable: ['COPPER', 'SILVER', 'COBALT'],
-    creditReward: 40,
+    creditReward: 45,  // Tier: low (was 40)
     deathEffect: 'break_apart'
   },
   scavenger_collector: {
@@ -113,8 +109,7 @@ const NPC_TYPES = {
     weaponDamage: 8,
     weaponRange: 220,
     aggroRange: 400,
-    lootTable: ['TITANIUM', 'LITHIUM', 'NEON'],
-    creditReward: 80,
+    creditReward: 90,  // Tier: mid (was 80)
     deathEffect: 'break_apart'
   },
   scavenger_hauler: {
@@ -128,17 +123,16 @@ const NPC_TYPES = {
     weaponDamage: 12,
     weaponRange: 250,
     aggroRange: 450,
-    lootTable: ['GOLD', 'PLATINUM', 'IRIDIUM'],
-    creditReward: 150,
-    deathEffect: 'break_apart',
-    isBoss: true
+    creditReward: 180,  // Tier: high (was 150) - NOT boss, they flee
+    deathEffect: 'break_apart'
   },
 
   // === THE SWARM (Swarm AI, Never Retreat, Linked Health) ===
+  // All swarm units have +162.5% hull/shield (75% + 50% = 162.5% from baseline)
   swarm_drone: {
     name: 'Swarm Drone',
     faction: 'swarm',
-    hull: 20,
+    hull: 53,      // +50% (was 35, baseline 20)
     shield: 0,
     speed: 150,
     weaponType: 'explosive',
@@ -146,15 +140,14 @@ const NPC_TYPES = {
     weaponDamage: 3,
     weaponRange: 150,
     aggroRange: 500,
-    lootTable: ['CARBON', 'PHOSPHORUS', 'NITROGEN'],
-    creditReward: 10,
+    creditReward: 12,
     deathEffect: 'dissolve',
     linkedHealth: true
   },
   swarm_worker: {
     name: 'Swarm Worker',
     faction: 'swarm',
-    hull: 35,
+    hull: 92,      // +50% (was 61, baseline 35)
     shield: 0,
     speed: 130,
     weaponType: 'explosive',
@@ -162,40 +155,37 @@ const NPC_TYPES = {
     weaponDamage: 5,
     weaponRange: 180,
     aggroRange: 550,
-    lootTable: ['HELIUM3', 'SULFUR', 'ICE_CRYSTALS'],
-    creditReward: 25,
+    creditReward: 28,
     deathEffect: 'dissolve',
     linkedHealth: true
   },
   swarm_warrior: {
     name: 'Swarm Warrior',
     faction: 'swarm',
-    hull: 60,
-    shield: 15,
+    hull: 158,     // +50% (was 105, baseline 60)
+    shield: 39,    // +50% (was 26, baseline 15)
     speed: 110,
     weaponType: 'explosive',
     weaponTier: 2,
     weaponDamage: 10,
     weaponRange: 220,
     aggroRange: 600,
-    lootTable: ['DARK_MATTER', 'QUANTUM_CRYSTALS'],
-    creditReward: 60,
+    creditReward: 70,
     deathEffect: 'dissolve',
     linkedHealth: true
   },
   swarm_queen: {
     name: 'Swarm Queen',
     faction: 'swarm',
-    hull: 300,
-    shield: 100,
-    speed: 40,
+    hull: 788,     // +50% (was 525, baseline 300) - BOSS TIER
+    shield: 263,   // +50% (was 175, baseline 100)
+    speed: 40,     // Base speed (phase modifiers apply)
     weaponType: 'explosive',
     weaponTier: 4,
-    weaponDamage: 37,  // Buffed +50% (was 25)
+    weaponDamage: 37,
     weaponRange: 300,
     aggroRange: 800,
-    lootTable: ['EXOTIC_MATTER', 'ANTIMATTER', 'VOID_CRYSTALS'],
-    creditReward: 750,
+    creditReward: 800,
     deathEffect: 'dissolve',
     isBoss: true,
     spawnsUnits: true,
@@ -214,8 +204,7 @@ const NPC_TYPES = {
     weaponDamage: 7,
     weaponRange: 250,
     aggroRange: 450,
-    lootTable: ['XENON', 'DARK_MATTER'],
-    creditReward: 35,
+    creditReward: 40,  // Tier: low (was 35)
     deathEffect: 'implode'
   },
   void_shadow: {
@@ -229,8 +218,7 @@ const NPC_TYPES = {
     weaponDamage: 12,
     weaponRange: 280,
     aggroRange: 500,
-    lootTable: ['DARK_MATTER', 'QUANTUM_CRYSTALS'],
-    creditReward: 90,
+    creditReward: 100,  // Tier: mid (was 90)
     deathEffect: 'implode'
   },
   void_phantom: {
@@ -244,8 +232,7 @@ const NPC_TYPES = {
     weaponDamage: 18,
     weaponRange: 320,
     aggroRange: 550,
-    lootTable: ['QUANTUM_CRYSTALS', 'EXOTIC_MATTER', 'VOID_CRYSTALS'],
-    creditReward: 180,
+    creditReward: 200,  // Tier: high (was 180)
     deathEffect: 'implode'
   },
   void_leviathan: {
@@ -259,8 +246,7 @@ const NPC_TYPES = {
     weaponDamage: 60,  // Buffed +50% (was 40)
     weaponRange: 400,
     aggroRange: 800,
-    lootTable: ['ANTIMATTER', 'NEUTRONIUM', 'VOID_CRYSTALS'],
-    creditReward: 1000,
+    creditReward: 1200,  // Tier: boss (was 1000)
     deathEffect: 'implode',
     isBoss: true,
     formationLeader: true
@@ -278,8 +264,7 @@ const NPC_TYPES = {
     weaponDamage: 6,
     weaponRange: 200,
     aggroRange: 350,
-    lootTable: ['IRON', 'COPPER', 'SILICON'],
-    creditReward: 30,
+    creditReward: 35,  // Tier: low
     deathEffect: 'industrial_explosion',
     territorial: true
   },
@@ -294,8 +279,7 @@ const NPC_TYPES = {
     weaponDamage: 10,
     weaponRange: 230,
     aggroRange: 400,
-    lootTable: ['TITANIUM', 'COBALT', 'LITHIUM'],
-    creditReward: 65,
+    creditReward: 75,  // Tier: mid
     deathEffect: 'industrial_explosion',
     territorial: true
   },
@@ -310,8 +294,7 @@ const NPC_TYPES = {
     weaponDamage: 16,
     weaponRange: 270,
     aggroRange: 450,
-    lootTable: ['GOLD', 'URANIUM', 'IRIDIUM'],
-    creditReward: 130,
+    creditReward: 160,  // Tier: high
     deathEffect: 'industrial_explosion',
     territorial: true
   },
@@ -326,8 +309,7 @@ const NPC_TYPES = {
     weaponDamage: 42,  // Buffed +50% (was 28)
     weaponRange: 320,
     aggroRange: 550,
-    lootTable: ['PLATINUM', 'EXOTIC_MATTER', 'QUANTUM_CRYSTALS'],
-    creditReward: 350,
+    creditReward: 450,  // Tier: boss
     deathEffect: 'industrial_explosion',
     isBoss: true,
     territorial: true,
@@ -377,6 +359,545 @@ const SUCCESSION_TIER_SCORES = {
   void_shadow: 2,
   void_whisper: 1
 };
+
+// ============================================
+// SWARM ASSIMILATION SYSTEM
+// ============================================
+
+// Assimilation progress tracking: baseId -> { progress, attachedDrones: Set }
+const assimilationProgress = new Map();
+
+// Assimilated bases: baseId -> { originalType, originalFaction, sectorKey, assimilatedAt }
+const assimilatedBases = new Map();
+
+// Sector assimilation count: "sectorX_sectorY" -> count
+const sectorAssimilationCount = new Map();
+
+// Active swarm queen reference (server-wide singleton)
+let activeQueen = null;
+let lastQueenSpawnTime = 0;
+let lastQueenAuraBroadcast = 0;
+
+/**
+ * Get sector key for a position
+ * @param {number} x - World X position
+ * @param {number} y - World Y position
+ * @returns {string} Sector key like "5_-3"
+ */
+function getSectorKey(x, y) {
+  const sectorX = Math.floor(x / CONSTANTS.SECTOR_SIZE);
+  const sectorY = Math.floor(y / CONSTANTS.SECTOR_SIZE);
+  return `${sectorX}_${sectorY}`;
+}
+
+/**
+ * Find nearest non-swarm base for drone targeting
+ * @param {Object} drone - Drone NPC object
+ * @param {number} searchRange - Search radius
+ * @returns {Object|null} Target base or null
+ */
+function findAssimilationTarget(drone, searchRange = CONSTANTS.SWARM_ASSIMILATION.SEARCH_RANGE) {
+  let nearestBase = null;
+  let nearestDist = Infinity;
+
+  // Get drone position (support both position.x and x formats)
+  const droneX = drone.position ? drone.position.x : drone.x;
+  const droneY = drone.position ? drone.position.y : drone.y;
+
+  for (const [baseId, base] of activeBases) {
+    // Skip swarm bases and already assimilated bases
+    if (base.faction === 'swarm' || assimilatedBases.has(baseId)) continue;
+
+    const dx = base.x - droneX;
+    const dy = base.y - droneY;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+
+    if (dist < searchRange && dist < nearestDist) {
+      nearestDist = dist;
+      nearestBase = { ...base, id: baseId, distance: dist };
+    }
+  }
+
+  return nearestBase;
+}
+
+/**
+ * Attach a drone to a base for assimilation (drone becomes a "worm" parasite)
+ * Drones remain as targetable NPCs until killed or assimilation completes
+ * @param {string} droneId - ID of drone attaching
+ * @param {string} baseId - ID of target base
+ * @returns {Object} Result with attachment info
+ */
+function attachDroneToBase(droneId, baseId) {
+  const drone = activeNPCs.get(droneId);
+  const base = activeBases.get(baseId);
+
+  if (!drone || !base) {
+    return { success: false, reason: 'invalid_target' };
+  }
+
+  // Check if drone is already attached somewhere
+  if (drone.attachedToBase) {
+    return { success: false, reason: 'already_attached' };
+  }
+
+  // Initialize progress tracking if needed
+  if (!assimilationProgress.has(baseId)) {
+    assimilationProgress.set(baseId, {
+      attachedDrones: new Set()
+    });
+  }
+
+  const progress = assimilationProgress.get(baseId);
+
+  // Attach the drone - it becomes a "worm" burrowing into the base
+  drone.attachedToBase = baseId;
+  drone.state = 'attached';
+  drone.attachedAt = Date.now();
+  // Position drone at base with small offset for visual variety
+  const angle = progress.attachedDrones.size * (Math.PI * 2 / 3); // Spread around base
+  const attachRadius = 30; // Distance from base center
+  drone.position = {
+    x: base.x + Math.cos(angle) * attachRadius,
+    y: base.y + Math.sin(angle) * attachRadius
+  };
+  drone.x = drone.position.x;
+  drone.y = drone.position.y;
+
+  progress.attachedDrones.add(droneId);
+
+  const threshold = CONSTANTS.SWARM_ASSIMILATION.ASSIMILATION_THRESHOLD;
+  const attachedCount = progress.attachedDrones.size;
+
+  const result = {
+    success: true,
+    droneId,
+    baseId,
+    attachedCount,
+    threshold,
+    isComplete: attachedCount >= threshold,
+    attachPosition: { x: drone.x, y: drone.y }
+  };
+
+  // Check if assimilation is complete (3+ drones attached simultaneously)
+  if (result.isComplete) {
+    const conversionResult = convertBaseToSwarm(baseId, base);
+    result.conversion = conversionResult;
+
+    // Remove all attached drones - they're consumed in the conversion
+    for (const attachedDroneId of progress.attachedDrones) {
+      activeNPCs.delete(attachedDroneId);
+    }
+  }
+
+  return result;
+}
+
+/**
+ * Handle an attached drone being killed - reduces attachment count
+ * @param {string} droneId - ID of killed drone
+ * @returns {Object|null} Update info or null if drone wasn't attached
+ */
+function detachDroneFromBase(droneId) {
+  const drone = activeNPCs.get(droneId);
+  if (!drone || !drone.attachedToBase) {
+    return null;
+  }
+
+  const baseId = drone.attachedToBase;
+  const progress = assimilationProgress.get(baseId);
+
+  if (progress) {
+    progress.attachedDrones.delete(droneId);
+
+    // If no drones remain, clear progress entirely
+    if (progress.attachedDrones.size === 0) {
+      assimilationProgress.delete(baseId);
+    }
+
+    return {
+      baseId,
+      remainingDrones: progress ? progress.attachedDrones.size : 0,
+      threshold: CONSTANTS.SWARM_ASSIMILATION.ASSIMILATION_THRESHOLD
+    };
+  }
+
+  return null;
+}
+
+/**
+ * Get the attached drones for a specific base
+ * @param {string} baseId - Base ID
+ * @returns {Array} Array of attached drone IDs
+ */
+function getAttachedDrones(baseId) {
+  const progress = assimilationProgress.get(baseId);
+  if (!progress) return [];
+  return Array.from(progress.attachedDrones);
+}
+
+/**
+ * Check if an NPC is an attached assimilation drone
+ * @param {string} npcId - NPC ID
+ * @returns {boolean} True if attached
+ */
+function isAttachedDrone(npcId) {
+  const npc = activeNPCs.get(npcId);
+  return npc && npc.attachedToBase;
+}
+
+/**
+ * Legacy function - now just calls attachDroneToBase
+ * @deprecated Use attachDroneToBase instead
+ */
+function processDroneAssimilation(droneId, baseId) {
+  return attachDroneToBase(droneId, baseId);
+}
+
+/**
+ * Convert a base to swarm faction
+ * @param {string} baseId - Base ID
+ * @param {Object} base - Base data
+ * @returns {Object} Conversion result with converted NPCs
+ */
+function convertBaseToSwarm(baseId, base) {
+  const sectorKey = getSectorKey(base.x, base.y);
+
+  // Store original info
+  assimilatedBases.set(baseId, {
+    originalType: base.type,
+    originalFaction: base.faction,
+    sectorKey,
+    assimilatedAt: Date.now()
+  });
+
+  // Update sector count
+  const currentCount = sectorAssimilationCount.get(sectorKey) || 0;
+  sectorAssimilationCount.set(sectorKey, currentCount + 1);
+
+  // Convert the base
+  const assimilatedType = `assimilated_${base.type}`;
+  base.faction = 'swarm';
+  base.originalType = base.type;
+  base.type = assimilatedType;
+  base.isAssimilated = true;
+
+  // Convert nearby NPCs from this base to swarm
+  const convertedNpcs = [];
+  for (const [npcId, npc] of activeNPCs) {
+    if (npc.homeBaseId === baseId && npc.faction !== 'swarm') {
+      const newType = CONSTANTS.SWARM_CONVERSION_MAP[npc.type];
+      if (newType) {
+        const converted = convertNpcToSwarm(npc, newType);
+        convertedNpcs.push({ npcId, oldType: npc.type, newType });
+      }
+    }
+  }
+
+  // Clear assimilation progress
+  assimilationProgress.delete(baseId);
+
+  // Update base spawn config to swarm
+  base.spawnConfig = BASE_NPC_SPAWNS.swarm_hive;
+
+  // Check if queen should spawn (range-based: 3+ bases within 10,000 units)
+  const queenCheck = checkQueenSpawnConditions({ x: base.x, y: base.y });
+
+  logger.info(`Base ${baseId} assimilated to swarm. Total assimilated bases: ${assimilatedBases.size}. Queen spawn: ${queenCheck?.shouldSpawn || false}`);
+
+  // SPAWN QUEEN DIRECTLY HERE instead of relying on engine.js to do it
+  // This ensures the queen spawns atomically with the base conversion
+  let spawnedQueen = null;
+  if (queenCheck?.shouldSpawn) {
+    const spawnPos = queenCheck.spawnPosition || { x: base.x, y: base.y };
+    logger.info(`[NPC] Spawning queen directly from convertBaseToSwarm at (${Math.round(spawnPos.x)}, ${Math.round(spawnPos.y)})`);
+    spawnedQueen = spawnSwarmQueen(spawnPos);
+    if (spawnedQueen) {
+      logger.info(`[NPC] Queen EGG successfully created: ${spawnedQueen.id}`);
+    } else {
+      logger.error(`[NPC] Queen spawn FAILED - spawnSwarmQueen returned null`);
+    }
+  }
+
+  return {
+    baseId,
+    newType: assimilatedType,
+    originalFaction: assimilatedBases.get(baseId).originalFaction,
+    sectorKey,
+    assimilatedCount: assimilatedBases.size,
+    convertedNpcs,
+    // Queen spawn info (for engine.js to broadcast)
+    shouldSpawnQueen: queenCheck?.shouldSpawn || false,
+    queenSpawnPosition: queenCheck?.spawnPosition || null,
+    spawnedQueen: spawnedQueen // The actual queen object if spawned
+  };
+}
+
+/**
+ * Convert an NPC to swarm faction
+ * @param {Object} npc - NPC to convert
+ * @param {string} newType - New swarm NPC type
+ * @returns {Object} Converted NPC data
+ */
+function convertNpcToSwarm(npc, newType) {
+  const template = NPC_TYPES[newType];
+  if (!template) return null;
+
+  // Preserve position and some state
+  const oldX = npc.x;
+  const oldY = npc.y;
+  const oldVx = npc.vx;
+  const oldVy = npc.vy;
+
+  // Update to new type
+  npc.type = newType;
+  npc.faction = 'swarm';
+  npc.hull = template.hull;
+  npc.maxHull = template.hull;
+  npc.shield = template.shield;
+  npc.maxShield = template.shield;
+  npc.speed = template.speed;
+  npc.weaponType = template.weaponType;
+  npc.weaponTier = template.weaponTier;
+  npc.weaponDamage = template.weaponDamage;
+  npc.weaponRange = template.weaponRange;
+  npc.aggroRange = template.aggroRange;
+
+  // Keep position
+  npc.x = oldX;
+  npc.y = oldY;
+  npc.vx = oldVx;
+  npc.vy = oldVy;
+
+  return npc;
+}
+
+/**
+ * Check if queen spawn conditions are met
+ * Uses range-based check (10,000 units) instead of sector-based
+ * @param {Object} newBasePosition - Position of newly assimilated base { x, y }
+ * @returns {Object|null} { shouldSpawn: true, spawnPosition, primaryHive } or null
+ */
+function checkQueenSpawnConditions(newBasePosition) {
+  // Only one queen allowed server-wide
+  if (activeQueen) return null;
+
+  // Check cooldown (1 hour between spawns)
+  const cooldown = CONSTANTS.SWARM_QUEEN_SPAWN?.QUEEN_SPAWN_COOLDOWN || 3600000;
+  if (Date.now() - lastQueenSpawnTime < cooldown) return null;
+
+  // Find primary swarm hive (original swarm_hive type base)
+  let primaryHive = null;
+  for (const [baseId, base] of activeBases) {
+    if (base.type === 'swarm_hive' && !base.destroyed) {
+      primaryHive = base;
+      break;
+    }
+  }
+
+  // If no primary hive, use the new base position
+  const referencePoint = primaryHive
+    ? { x: primaryHive.x, y: primaryHive.y }
+    : newBasePosition;
+
+  // Count assimilated bases within 10,000 units of reference point
+  const QUEEN_TRIGGER_RANGE = 10000;
+  let assimilatedCount = 0;
+
+  for (const [baseId, info] of assimilatedBases) {
+    const base = activeBases.get(baseId);
+    if (!base) continue;
+
+    const dx = base.x - referencePoint.x;
+    const dy = base.y - referencePoint.y;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+
+    if (dist <= QUEEN_TRIGGER_RANGE) {
+      assimilatedCount++;
+    }
+  }
+
+  const required = CONSTANTS.SWARM_QUEEN_SPAWN?.ASSIMILATED_BASES_REQUIRED || 3;
+
+  if (assimilatedCount >= required) {
+    logger.info(`Queen spawn triggered: ${assimilatedCount} assimilated bases within ${QUEEN_TRIGGER_RANGE} units`);
+    return {
+      shouldSpawn: true,
+      spawnPosition: referencePoint,
+      primaryHive: primaryHive
+    };
+  }
+
+  return null;
+}
+
+/**
+ * Spawn the swarm queen as an EGG near assimilated bases
+ * Queen starts in 'hatching' state and emerges after hatch duration
+ * @param {Object} position - Spawn position { x, y }
+ * @returns {Object} Queen NPC data (in egg/hatching state)
+ */
+function spawnSwarmQueen(position) {
+  const queenType = NPC_TYPES.swarm_queen;
+  const queenId = `swarm_queen_${Date.now()}`;
+
+  // Spawn queen as egg with longer hatch time (4 seconds)
+  const hatchDuration = CONSTANTS.SWARM_HATCHING?.QUEEN_HATCH_DURATION || 4000;
+
+  const queen = {
+    id: queenId,
+    type: 'swarm_queen',
+    name: queenType.name,
+    faction: 'swarm',
+    position: { x: position.x, y: position.y },
+    x: position.x,
+    y: position.y,
+    vx: 0,
+    vy: 0,
+    rotation: 0,
+    hull: queenType.hull,
+    hullMax: queenType.hull,
+    maxHull: queenType.hull,
+    shield: queenType.shield,
+    shieldMax: queenType.shield,
+    maxShield: queenType.shield,
+    speed: queenType.speed,
+    weaponType: queenType.weaponType,
+    weaponTier: queenType.weaponTier,
+    weaponDamage: queenType.weaponDamage,
+    weaponRange: queenType.weaponRange,
+    aggroRange: queenType.aggroRange,
+    lastFireTime: 0,
+    // Start as hatching egg
+    state: 'hatching',
+    hatchTime: Date.now(),
+    hatchDuration: hatchDuration,
+    targetId: null,
+    spawnedMinions: [],
+    isBoss: true,
+    isQueen: true,
+    damageContributors: new Map()
+  };
+
+  activeNPCs.set(queenId, queen);
+  activeQueen = queen;
+  lastQueenSpawnTime = Date.now();
+
+  logger.info(`Swarm Queen EGG spawned at (${Math.round(position.x)}, ${Math.round(position.y)}) - hatching in ${hatchDuration}ms`);
+
+  return queen;
+}
+
+/**
+ * Handle queen death - clear singleton and start cooldown
+ * @param {string} queenId - Queen NPC ID
+ */
+function handleQueenDeath(queenId) {
+  if (activeQueen && activeQueen.id === queenId) {
+    logger.info('Swarm Queen destroyed. Cooldown started.');
+    activeQueen = null;
+    lastQueenSpawnTime = Date.now(); // Start cooldown from death
+  }
+}
+
+/**
+ * Apply queen aura health regeneration to swarm/assimilated bases
+ * @param {number} deltaTime - Time since last update in ms
+ * @returns {Array} Affected bases with health changes
+ */
+function applyQueenAura(deltaTime) {
+  if (!activeQueen) return [];
+
+  const affectedBases = [];
+  const auraRange = CONSTANTS.SWARM_QUEEN_SPAWN.QUEEN_AURA_RANGE;
+  const regenPercent = CONSTANTS.SWARM_QUEEN_SPAWN.BASE_REGEN_PERCENT;
+  const regenPerSecond = regenPercent * (deltaTime / 1000);
+
+  for (const [baseId, base] of activeBases) {
+    // Only affect swarm and assimilated bases
+    if (base.faction !== 'swarm' && !assimilatedBases.has(baseId)) continue;
+
+    const dx = base.x - activeQueen.x;
+    const dy = base.y - activeQueen.y;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+
+    if (dist <= auraRange) {
+      const maxHealth = base.maxHull || base.hull;
+      const healAmount = maxHealth * regenPerSecond;
+      const oldHealth = base.currentHull || base.hull;
+      base.currentHull = Math.min(maxHealth, oldHealth + healAmount);
+
+      if (base.currentHull > oldHealth) {
+        affectedBases.push({
+          baseId,
+          health: base.currentHull,
+          maxHealth,
+          healed: base.currentHull - oldHealth
+        });
+      }
+    }
+  }
+
+  return affectedBases;
+}
+
+/**
+ * Get all drones currently targeting bases for assimilation
+ * @returns {Map} Map of droneId -> targetBaseId
+ */
+function getDronesAssimilating() {
+  const drones = new Map();
+  for (const [baseId, progress] of assimilationProgress) {
+    for (const droneId of progress.attachedDrones) {
+      drones.set(droneId, baseId);
+    }
+  }
+  return drones;
+}
+
+/**
+ * Clear assimilation progress for a destroyed base
+ * @param {string} baseId - Destroyed base ID
+ */
+function clearAssimilationProgress(baseId) {
+  assimilationProgress.delete(baseId);
+}
+
+/**
+ * Get assimilation state for broadcasting
+ * @returns {Object} Current assimilation state
+ */
+function getAssimilationState() {
+  return {
+    assimilatedBases: Array.from(assimilatedBases.entries()).map(([id, data]) => ({
+      id,
+      ...data
+    })),
+    inProgress: Array.from(assimilationProgress.entries()).map(([baseId, data]) => ({
+      baseId,
+      progress: data.progress,
+      threshold: CONSTANTS.SWARM_ASSIMILATION.ASSIMILATION_THRESHOLD
+    })),
+    activeQueen: activeQueen ? {
+      id: activeQueen.id,
+      x: activeQueen.x,
+      y: activeQueen.y,
+      hull: activeQueen.hull,
+      maxHull: activeQueen.maxHull,
+      shield: activeQueen.shield,
+      maxShield: activeQueen.maxShield
+    } : null,
+    sectorCounts: Object.fromEntries(sectorAssimilationCount)
+  };
+}
+
+/**
+ * Get the active queen reference
+ * @returns {Object|null} Active queen or null
+ */
+function getActiveQueen() {
+  return activeQueen;
+}
 
 /**
  * Get formation info for an NPC (O(1) lookup via reverse map)
@@ -627,11 +1148,11 @@ const BASE_NPC_SPAWNS = {
   },
   swarm_hive: {
     npcs: ['swarm_drone', 'swarm_worker', 'swarm_warrior'],
-    weights: [0.6, 0.3, 0.1],
-    maxNPCs: 8,                  // Can have many drones
-    spawnCooldown: 10000,        // Fast spawning (continuous)
-    respawnDelay: 60000,         // 1 minute for swarm (they respawn faster)
-    initialSpawn: 4,
+    weights: [0.7, 0.2, 0.1],    // More drones (70%) for assimilation
+    maxNPCs: 20,                 // Large swarm capacity for assimilation waves
+    spawnCooldown: 3000,         // Fast spawning (3s between spawns)
+    respawnDelay: 15000,         // Quick respawn (15s)
+    initialSpawn: 10,            // Start with swarm ready
     continuousSpawn: true        // Keeps spawning when players nearby
   },
   void_rift: {
@@ -653,19 +1174,22 @@ const BASE_NPC_SPAWNS = {
 };
 
 // Select NPC type from weighted pool
-function selectNPCFromPool(baseType) {
-  const config = BASE_NPC_SPAWNS[baseType];
-  if (!config) return null;
+// Can accept either a base type string OR a spawn config object directly (DRY)
+function selectNPCFromPool(baseTypeOrConfig) {
+  const spawnConfig = typeof baseTypeOrConfig === 'string'
+    ? BASE_NPC_SPAWNS[baseTypeOrConfig]
+    : baseTypeOrConfig;
+  if (!spawnConfig) return null;
 
   const roll = Math.random();
   let cumulative = 0;
-  for (let i = 0; i < config.npcs.length; i++) {
-    cumulative += config.weights[i];
+  for (let i = 0; i < spawnConfig.npcs.length; i++) {
+    cumulative += spawnConfig.weights[i];
     if (roll < cumulative) {
-      return config.npcs[i];
+      return spawnConfig.npcs[i];
     }
   }
-  return config.npcs[config.npcs.length - 1];
+  return spawnConfig.npcs[spawnConfig.npcs.length - 1];
 }
 
 // Activate a base for NPC spawning
@@ -719,13 +1243,19 @@ function spawnNPCFromBase(baseId) {
   const base = activeBases.get(baseId);
   if (!base) return null;
 
-  const spawnConfig = BASE_NPC_SPAWNS[base.type];
+  // Skip destroyed bases
+  if (base.destroyed) return null;
+
+  // DRY: Use base.spawnConfig if set (e.g., for assimilated bases),
+  // otherwise fall back to BASE_NPC_SPAWNS lookup by type
+  const spawnConfig = base.spawnConfig || BASE_NPC_SPAWNS[base.type];
   if (!spawnConfig) return null;
 
   // Check if at max NPCs
   if (base.spawnedNPCs.length >= spawnConfig.maxNPCs) return null;
 
-  const npcType = selectNPCFromPool(base.type);
+  // Pass spawnConfig directly to use the correct pool (DRY)
+  const npcType = selectNPCFromPool(spawnConfig);
   if (!npcType) return null;
 
   const npcTypeData = NPC_TYPES[npcType];
@@ -738,10 +1268,15 @@ function spawnNPCFromBase(baseId) {
   const baseX = currentPos ? currentPos.x : base.x;
   const baseY = currentPos ? currentPos.y : base.y;
 
-  // Spawn position - random around base within patrol radius
+  // Spawn position - swarm spawns close to base (eggs), others within patrol radius
+  const isSwarmFaction = npcTypeData.faction === 'swarm';
   const patrolRadius = (base.patrolRadius || 3) * config.SECTOR_SIZE;
   const spawnAngle = Math.random() * Math.PI * 2;
-  const spawnDist = Math.random() * patrolRadius * 0.5; // Spawn within 50% of patrol radius
+  // Swarm spawns within SPAWN_RADIUS (100 units) for egg hatching, others within 50% of patrol radius
+  const spawnRadius = isSwarmFaction
+    ? (config.SWARM_HATCHING?.SPAWN_RADIUS || 100)
+    : patrolRadius * 0.5;
+  const spawnDist = Math.random() * spawnRadius;
   const spawnX = baseX + Math.cos(spawnAngle) * spawnDist;
   const spawnY = baseY + Math.sin(spawnAngle) * spawnDist;
 
@@ -763,19 +1298,25 @@ function spawnNPCFromBase(baseId) {
     weaponDamage: npcTypeData.weaponDamage,
     weaponRange: npcTypeData.weaponRange,
     aggroRange: npcTypeData.aggroRange,
-    lootTable: npcTypeData.lootTable,
     creditReward: npcTypeData.creditReward,
     // Link to home base (use computed position for orbital/binary bases)
     homeBaseId: baseId,
     homeBasePosition: { x: baseX, y: baseY },
     patrolRadius: patrolRadius,
     spawnPoint: { x: spawnX, y: spawnY },
-    state: 'patrol',
     targetPlayer: null,
     lastFireTime: 0,
     lastDamageTime: 0,
     patrolAngle: Math.random() * Math.PI * 2,
-    damageContributors: new Map()
+    damageContributors: new Map(),
+    // Swarm egg hatching - track spawn time and hatch duration
+    hatchTime: isSwarmFaction ? Date.now() : null,
+    hatchDuration: isSwarmFaction
+      ? (npcType === 'swarm_queen'
+        ? (config.SWARM_HATCHING?.QUEEN_HATCH_DURATION || 4000)
+        : (config.SWARM_HATCHING?.HATCH_DURATION || 2500))
+      : 0,
+    state: isSwarmFaction ? 'hatching' : 'patrol'
   };
 
   activeNPCs.set(npcId, npc);
@@ -790,7 +1331,12 @@ function updateBaseSpawning(nearbyPlayers) {
   const now = Date.now();
 
   for (const [baseId, base] of activeBases) {
-    const spawnConfig = BASE_NPC_SPAWNS[base.type];
+    // Skip destroyed bases - they cannot spawn NPCs
+    if (base.destroyed) continue;
+
+    // DRY: Use base.spawnConfig if set (e.g., for assimilated bases),
+    // otherwise fall back to BASE_NPC_SPAWNS lookup by type
+    const spawnConfig = base.spawnConfig || BASE_NPC_SPAWNS[base.type];
     if (!spawnConfig) continue;
 
     // Initialize pendingRespawns if missing (for bases activated before this update)
@@ -903,6 +1449,17 @@ function damageBase(baseId, damage, attackerId = null) {
     const totalCredits = Math.round(baseCredits * teamMultiplier);
     const creditsPerPlayer = Math.round(totalCredits / participantCount);
 
+    // Destroy any attached assimilation drones - they die with the base
+    const progress = assimilationProgress.get(baseId);
+    const destroyedDrones = [];
+    if (progress && progress.attachedDrones) {
+      for (const droneId of progress.attachedDrones) {
+        activeNPCs.delete(droneId);
+        destroyedDrones.push(droneId);
+      }
+      assimilationProgress.delete(baseId);
+    }
+
     // Orphan all NPCs from this base - enter rage mode instead of deletion
     const orphanedNpcIds = [];
     for (const npcId of base.spawnedNPCs) {
@@ -952,7 +1509,8 @@ function damageBase(baseId, damage, attackerId = null) {
       baseType: base.type,
       baseName: base.name,
       respawnTime: config.SPAWN_HUB_TYPES?.[base.type]?.respawnTime || 300000,
-      orphanedNpcIds  // NPCs that entered rage mode
+      orphanedNpcIds,  // NPCs that entered rage mode
+      destroyedDrones // Assimilation drones killed with the base
     };
   }
 
@@ -963,40 +1521,10 @@ function damageBase(baseId, damage, attackerId = null) {
   };
 }
 
-// Generate loot specific to bases (better rewards)
+// Generate loot specific to bases (better rewards) - uses centralized loot pool system
 function generateBaseLoot(base) {
-  const loot = [];
-  const faction = base.faction;
-
-  // More loot from bases than individual NPCs
-  const numDrops = Math.floor(Math.random() * 4) + 3; // 3-6 drops
-
-  // Faction-specific high-tier resources
-  const factionResources = {
-    pirate: ['GOLD', 'PLATINUM', 'DARK_MATTER'],
-    scavenger: ['TITANIUM', 'IRIDIUM', 'URANIUM'],
-    swarm: ['EXOTIC_MATTER', 'ANTIMATTER', 'VOID_CRYSTALS'],
-    void: ['DARK_MATTER', 'QUANTUM_CRYSTALS', 'NEUTRONIUM'],
-    rogue_miner: ['PLATINUM', 'URANIUM', 'EXOTIC_MATTER']
-  };
-
-  const resources = factionResources[faction] || ['PLATINUM', 'DARK_MATTER'];
-
-  for (let i = 0; i < numDrops; i++) {
-    const resourceType = resources[Math.floor(Math.random() * resources.length)];
-    const quantity = Math.floor(Math.random() * 10) + 5; // 5-14 per drop
-    loot.push({ type: 'resource', resourceType, quantity });
-  }
-
-  // Chance for component or relic
-  if (Math.random() < 0.5) { // 50% chance for component
-    loot.push({ type: 'component', componentType: `${faction}_core` });
-  }
-  if (Math.random() < 0.2) { // 20% chance for relic
-    loot.push({ type: 'relic', relicType: `${faction}_artifact` });
-  }
-
-  return loot;
+  // Use the loot pool system with base type mapping
+  return LootPools.generateLoot(base.type);
 }
 
 // Mark base as destroyed and schedule respawn
@@ -1143,7 +1671,9 @@ function spawnNPCsForSector(sectorX, sectorY) {
 
   for (const point of spawnPoints) {
     // Check if NPC already exists at this spawn point
+    // Note: Some NPCs (queen, base-spawned) don't have spawnPoint, so check for it
     const existing = [...activeNPCs.values()].find(npc =>
+      npc.spawnPoint &&
       Math.abs(npc.spawnPoint.x - point.x) < 10 &&
       Math.abs(npc.spawnPoint.y - point.y) < 10
     );
@@ -1183,7 +1713,6 @@ function spawnNPCsForSector(sectorX, sectorY) {
       weaponDamage: npcTypeData.weaponDamage,
       weaponRange: npcTypeData.weaponRange,
       aggroRange: npcTypeData.aggroRange,
-      lootTable: npcTypeData.lootTable,
       creditReward: npcTypeData.creditReward,
       spawnPoint: { ...point },
       state: 'patrol',
@@ -1340,8 +1869,8 @@ function damageNPC(npcId, damage, attackerId = null) {
   npc.hull -= damage;
 
   if (npc.hull <= 0) {
-    // NPC died - generate loot and calculate team rewards
-    const loot = generateLoot(npc);
+    // NPC died - generate loot using pool system and calculate team rewards
+    const loot = LootPools.generateLoot(npc.type);
     const participants = Array.from(npc.damageContributors.keys());
     const participantCount = Math.max(1, participants.length);
     const teamMultiplier = TEAM_MULTIPLIERS[Math.min(participantCount, 4)] || 2.5;
@@ -1380,18 +1909,7 @@ function damageNPC(npcId, damage, attackerId = null) {
   };
 }
 
-function generateLoot(npc) {
-  const loot = [];
-  const numDrops = Math.floor(Math.random() * 3) + 1;
-
-  for (let i = 0; i < numDrops; i++) {
-    const resourceType = npc.lootTable[Math.floor(Math.random() * npc.lootTable.length)];
-    const quantity = Math.floor(Math.random() * 5) + 1;
-    loot.push({ resourceType, quantity });
-  }
-
-  return loot;
-}
+// Note: generateLoot removed - now using LootPools.generateLoot() for centralized loot generation
 
 function getNPCsInRange(position, range) {
   const result = [];
@@ -1595,7 +2113,6 @@ function spawnQueenMinions(queen, count) {
       weaponTier: typeData.weaponTier,
       weaponDamage: typeData.weaponDamage,
       weaponRange: typeData.weaponRange,
-      lootTable: typeData.lootTable,
       creditReward: typeData.creditReward,
       deathEffect: typeData.deathEffect || 'dissolve',
       linkedHealth: typeData.linkedHealth || false,
@@ -1712,6 +2229,21 @@ function getQueenMinions(queenId) {
     .map(id => activeNPCs.get(id));
 }
 
+/**
+ * Check if a swarm NPC is still hatching (egg phase)
+ * Hatching eggs should not move, have AI, or drop wreckage when destroyed
+ * @param {Object} npcEntity - The NPC to check
+ * @returns {boolean} True if the NPC is still in hatching state
+ */
+function isHatching(npcEntity) {
+  if (!npcEntity) return false;
+  if (npcEntity.faction !== 'swarm') return false;
+  if (!npcEntity.hatchTime) return false;
+
+  const elapsed = Date.now() - npcEntity.hatchTime;
+  return elapsed < (npcEntity.hatchDuration || config.SWARM_HATCHING?.HATCH_DURATION || 2500);
+}
+
 module.exports = {
   NPC_TYPES,
   TEAM_MULTIPLIERS,
@@ -1745,6 +2277,8 @@ module.exports = {
   spawnQueenMinions,
   getQueenMinions,
   QUEEN_SPAWN_CONFIG,
+  // Swarm egg hatching
+  isHatching,
   // Formation tracking (Void faction succession)
   formations,
   getFormationForNpc,
@@ -1753,5 +2287,27 @@ module.exports = {
   scoreNpcForLeadership,
   removeFromFormation,
   cleanupFormations,
-  SUCCESSION_TIER_SCORES
+  SUCCESSION_TIER_SCORES,
+  // Swarm Assimilation System
+  assimilationProgress,
+  assimilatedBases,
+  sectorAssimilationCount,
+  getSectorKey,
+  findAssimilationTarget,
+  processDroneAssimilation,
+  convertBaseToSwarm,
+  convertNpcToSwarm,
+  checkQueenSpawnConditions,
+  spawnSwarmQueen,
+  handleQueenDeath,
+  applyQueenAura,
+  getDronesAssimilating,
+  clearAssimilationProgress,
+  getAssimilationState,
+  getActiveQueen,
+  // Attached drone management (new persistent attachment system)
+  attachDroneToBase,
+  detachDroneFromBase,
+  getAttachedDrones,
+  isAttachedDrone
 };

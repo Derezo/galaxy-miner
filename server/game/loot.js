@@ -1,127 +1,28 @@
 // Galaxy Miner - Loot System (Server-side)
 
 const config = require('../config');
+const LootPools = require('./loot-pools.js');
 
 // Active wreckage in the world: wreckageId -> wreckageData
 const activeWreckage = new Map();
 let wreckageIdCounter = 0;
 
-// Loot drop rates by NPC tier (based on creditReward ranges)
-const DROP_RATES = {
-  // Low tier (credits < 50)
-  low: {
-    credits: 1.0,      // Always drop credits
-    resource: 0.8,     // 80% chance
-    buff: 0.05,        // 5% chance
-    component: 0.01,   // 1% chance
-    relic: 0.005       // 0.5% chance
-  },
-  // Mid tier (credits 50-150)
-  mid: {
-    credits: 1.0,
-    resource: 0.9,
-    buff: 0.15,
-    component: 0.05,
-    relic: 0.02
-  },
-  // High tier (credits 150-400)
-  high: {
-    credits: 1.0,
-    resource: 1.0,
-    buff: 0.25,
-    component: 0.10,
-    relic: 0.05
-  },
-  // Boss tier (credits > 400)
-  boss: {
-    credits: 1.0,
-    resource: 1.0,
-    buff: 0.5,
-    component: 0.30,
-    relic: 0.15
-  }
-};
-
-// Buff pool for random selection
-const BUFF_POOL = ['SHIELD_BOOST', 'SPEED_BURST', 'DAMAGE_AMP', 'RADAR_PULSE'];
-
-// Component pool for random selection
-const COMPONENT_POOL = ['ENGINE_CORE', 'WEAPON_MATRIX', 'SHIELD_CELL', 'MINING_CAPACITOR'];
-
-// Relic pool by faction
-const RELIC_POOLS = {
-  pirate: ['PIRATE_TREASURE'],
-  scavenger: ['PIRATE_TREASURE', 'ANCIENT_STAR_MAP'],
-  swarm: ['SWARM_HIVE_CORE'],
-  void: ['VOID_CRYSTAL', 'ANCIENT_STAR_MAP', 'WORMHOLE_GEM'],
-  rogue_miner: ['ANCIENT_STAR_MAP', 'PIRATE_TREASURE']
-};
-
-function getTierFromCredits(creditReward) {
-  if (creditReward > 400) return 'boss';
-  if (creditReward > 150) return 'high';
-  if (creditReward > 50) return 'mid';
-  return 'low';
-}
-
+/**
+ * Generate loot contents for an NPC using the centralized loot pool system.
+ * Uses Map-based deduplication to prevent duplicate resource entries.
+ * @param {Object} npc - The NPC object with type, faction, and creditReward
+ * @returns {Array} Array of loot items (resources, buffs, components, relics)
+ */
 function generateLootContents(npc) {
-  const tier = getTierFromCredits(npc.creditReward);
-  const rates = DROP_RATES[tier];
-  const contents = [];
+  // Use centralized loot pool system for resource/buff/component/relic generation
+  const contents = LootPools.generateLoot(npc.type);
 
-  // Credits (always, but only if creditReward is valid)
+  // Add credits if valid (loot pools handle resources, this handles credits)
   const creditReward = npc.creditReward;
   if (typeof creditReward === 'number' && creditReward > 0 && !Number.isNaN(creditReward)) {
-    if (Math.random() < rates.credits) {
-      contents.push({
-        type: 'credits',
-        amount: creditReward
-      });
-    }
-  }
-
-  // Resources from NPC's loot table
-  if (Math.random() < rates.resource && npc.lootTable && npc.lootTable.length > 0) {
-    const numDrops = Math.floor(Math.random() * 3) + 1; // 1-3 resource types
-    for (let i = 0; i < numDrops; i++) {
-      const resourceType = npc.lootTable[Math.floor(Math.random() * npc.lootTable.length)];
-      // Only add resource if resourceType is valid
-      if (resourceType && typeof resourceType === 'string') {
-        const quantity = Math.floor(Math.random() * 5) + 1; // 1-5 of each
-        contents.push({
-          type: 'resource',
-          resourceType,
-          quantity
-        });
-      }
-    }
-  }
-
-  // Buff (temporary power-up)
-  if (Math.random() < rates.buff) {
-    const buffType = BUFF_POOL[Math.floor(Math.random() * BUFF_POOL.length)];
-    contents.push({
-      type: 'buff',
-      buffType
-    });
-  }
-
-  // Component (for advanced upgrades)
-  if (Math.random() < rates.component) {
-    const componentType = COMPONENT_POOL[Math.floor(Math.random() * COMPONENT_POOL.length)];
-    contents.push({
-      type: 'component',
-      componentType
-    });
-  }
-
-  // Relic (collectible)
-  if (Math.random() < rates.relic) {
-    const factionRelics = RELIC_POOLS[npc.faction] || ['ANCIENT_STAR_MAP'];
-    const relicType = factionRelics[Math.floor(Math.random() * factionRelics.length)];
-    contents.push({
-      type: 'relic',
-      relicType
+    contents.unshift({
+      type: 'credits',
+      amount: creditReward
     });
   }
 

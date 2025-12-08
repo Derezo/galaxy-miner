@@ -14,8 +14,115 @@ let connectedPlayers = null;
 let running = false;
 let lastTickTime = Date.now();
 
+// Socket module reference for broadcasts (set by server.js)
+let socketModule = null;
+
+// Swarm assimilation throttling
+let lastQueenAuraBroadcast = 0;
+const QUEEN_AURA_BROADCAST_INTERVAL = 1000; // 1 second
+
 // Track which bases are currently active
 const lastBaseCheck = new Map(); // baseId -> lastCheckTime
+
+// ============================================
+// PLAYER DEBUFF SYSTEM
+// Tracks active debuffs (slows, DoTs) on players
+// ============================================
+const activeDebuffs = new Map(); // playerId -> { slow: {}, dot: [] }
+
+/**
+ * Apply a debuff to a player
+ */
+function applyDebuff(playerId, debuffType, data) {
+  if (!activeDebuffs.has(playerId)) {
+    activeDebuffs.set(playerId, { slow: null, dots: [] });
+  }
+  const debuffs = activeDebuffs.get(playerId);
+
+  if (debuffType === 'slow') {
+    debuffs.slow = {
+      percent: data.slowPercent,
+      expiresAt: Date.now() + data.duration,
+      sourceId: data.sourceId
+    };
+  } else if (debuffType === 'dot') {
+    debuffs.dots.push({
+      damage: data.damage,
+      interval: data.interval,
+      expiresAt: Date.now() + data.duration,
+      nextTick: Date.now() + data.interval,
+      sourceId: data.sourceId,
+      type: data.type || 'acid'
+    });
+  }
+}
+
+/**
+ * Check if player has a specific debuff
+ */
+function hasDebuff(playerId, debuffType) {
+  const debuffs = activeDebuffs.get(playerId);
+  if (!debuffs) return false;
+
+  if (debuffType === 'slow') {
+    return debuffs.slow && debuffs.slow.expiresAt > Date.now();
+  }
+  return false;
+}
+
+/**
+ * Get slow modifier for a player (1.0 = no slow, 0.4 = 60% slow)
+ */
+function getSlowModifier(playerId) {
+  const debuffs = activeDebuffs.get(playerId);
+  if (!debuffs || !debuffs.slow || debuffs.slow.expiresAt <= Date.now()) {
+    return 1.0;
+  }
+  return 1.0 - debuffs.slow.percent;
+}
+
+/**
+ * Process DoT ticks for a player, returns total damage dealt
+ */
+function processPlayerDoTs(playerId) {
+  const debuffs = activeDebuffs.get(playerId);
+  if (!debuffs || debuffs.dots.length === 0) return 0;
+
+  const now = Date.now();
+  let totalDamage = 0;
+
+  // Process active DoTs
+  debuffs.dots = debuffs.dots.filter(dot => {
+    if (now >= dot.expiresAt) return false; // Expired
+
+    if (now >= dot.nextTick) {
+      totalDamage += dot.damage;
+      dot.nextTick = now + dot.interval;
+    }
+    return true;
+  });
+
+  return totalDamage;
+}
+
+/**
+ * Clean up expired debuffs for all players
+ */
+function cleanupExpiredDebuffs() {
+  const now = Date.now();
+  for (const [playerId, debuffs] of activeDebuffs) {
+    // Clean up expired slow
+    if (debuffs.slow && debuffs.slow.expiresAt <= now) {
+      debuffs.slow = null;
+    }
+    // Clean up expired DoTs
+    debuffs.dots = debuffs.dots.filter(dot => dot.expiresAt > now);
+    // Remove entry if no active debuffs
+    if (!debuffs.slow && debuffs.dots.length === 0) {
+      activeDebuffs.delete(playerId);
+    }
+  }
+}
 
 // NPC Accuracy System Configuration
 // Makes NPC weapons dodgeable by adding miss chance based on distance and target movement
@@ -46,9 +153,10 @@ const BASE_BROADCAST_INTERVAL = 500;
 const BASE_ACTIVATION_RANGE = config.SECTOR_SIZE * 3;  // 3000 units
 const BASE_BROADCAST_RANGE = BASE_ACTIVATION_RANGE;    // Match activation range
 
-function init(socketIo, players) {
+function init(socketIo, players, sockModule) {
   io = socketIo;
   connectedPlayers = players;
+  socketModule = sockModule;
 }
 
 function start() {
@@ -101,6 +209,45 @@ function updatePlayers(deltaTime) {
         shield: player.shield
       });
     }
+
+    // Process DoT damage from debuffs (queen acid, etc.)
+    const dotDamage = processPlayerDoTs(player.id);
+    if (dotDamage > 0) {
+      // Apply DoT damage (splits between shield/hull)
+      const damageObj = { shieldDamage: dotDamage * 0.3, hullDamage: dotDamage * 0.7 };
+      const result = combat.applyDamage(player.id, damageObj);
+
+      if (result) {
+        player.hull = result.hull;
+        player.shield = result.shield;
+
+        // Notify player of DoT tick
+        io.to(socketId).emit('player:dot', {
+          damage: dotDamage,
+          hull: result.hull,
+          shield: result.shield,
+          type: 'acid'
+        });
+
+        // Handle death from DoT
+        if (result.isDead) {
+          const deathResult = combat.handleDeath(player.id);
+          io.to(socketId).emit('player:death', {
+            killedBy: 'Acid damage',
+            respawnPosition: deathResult.respawnPosition,
+            droppedCargo: deathResult.droppedCargo
+          });
+          player.position = deathResult.respawnPosition;
+          player.hull = player.hullMax;
+          player.shield = player.shieldMax;
+        }
+      }
+    }
+  }
+
+  // Periodic cleanup of expired debuffs (every ~5 seconds)
+  if (Math.random() < 0.01) {
+    cleanupExpiredDebuffs();
   }
 }
 
@@ -309,6 +456,35 @@ function updateNPCs(deltaTime) {
       continue;
     }
 
+    // ============================================
+    // SWARM EGG HATCHING - Skip AI for eggs, only broadcast position
+    // ============================================
+    if (npc.isHatching(npcEntity)) {
+      // Eggs are stationary - no AI, no movement, just update state if hatch completes
+      const elapsed = Date.now() - npcEntity.hatchTime;
+      if (elapsed >= npcEntity.hatchDuration) {
+        // Hatching complete - transition to patrol state
+        npcEntity.state = 'patrol';
+        npcEntity.hatchTime = null; // Clear hatch time so isHatching returns false
+      }
+      // Broadcast the NPC update (state will be 'hatching' until complete)
+      broadcastNearNpc(npcEntity, 'npc:update', {
+        id: npcId,
+        type: npcEntity.type,
+        name: npcEntity.name,
+        faction: npcEntity.faction,
+        x: npcEntity.position.x,
+        y: npcEntity.position.y,
+        rotation: npcEntity.rotation,
+        state: npcEntity.state,
+        hull: npcEntity.hull,
+        hullMax: npcEntity.hullMax,
+        shield: npcEntity.shield,
+        shieldMax: npcEntity.shieldMax
+      });
+      continue; // Skip all AI processing for hatching eggs
+    }
+
     // Get players in NPC's aggro range for AI
     const nearbyPlayers = players.filter(p => {
       const dx = p.position.x - npcEntity.position.x;
@@ -316,11 +492,138 @@ function updateNPCs(deltaTime) {
       return Math.sqrt(dx * dx + dy * dy) <= npcEntity.aggroRange;
     });
 
-    // Update NPC AI
-    const action = npc.updateNPC(npcEntity, nearbyPlayers, deltaTime);
+    // ============================================
+    // SWARM DRONE ASSIMILATION - CHECK FIRST (priority over combat)
+    // ============================================
+    // Drones prioritize base assimilation over player combat when a base is nearby
+    let useAssimilationBehavior = false;
+    if (npcEntity.faction === 'swarm' && npcEntity.type === 'swarm_drone') {
+      // Check for nearby enemy bases (uses SEARCH_RANGE from constants, default 2000)
+      const targetBase = npc.findAssimilationTarget(npcEntity, config.SWARM_ASSIMILATION?.SEARCH_RANGE || 2000);
+
+      if (targetBase) {
+        // Calculate distance to base
+        const dx = targetBase.x - npcEntity.position.x;
+        const dy = targetBase.y - npcEntity.position.y;
+        const distToBase = Math.sqrt(dx * dx + dy * dy);
+
+        // Priority range: if base is within 800 units, prioritize assimilation over combat
+        const ASSIMILATION_PRIORITY_RANGE = 800;
+
+        if (distToBase <= ASSIMILATION_PRIORITY_RANGE || nearbyPlayers.length === 0) {
+          // Use assimilation behavior - ignore players, focus on base
+          useAssimilationBehavior = true;
+
+          const SwarmStrategy = require('./ai/swarm');
+          const swarmAI = new SwarmStrategy();
+          const assimAction = swarmAI.updateAssimilateBehavior(npcEntity, targetBase, deltaTime);
+
+          if (assimAction && assimAction.action === 'assimilate') {
+            // Process the drone sacrifice
+            logger.info(`[ASSIMILATE] Drone ${assimAction.droneId} attempting to assimilate base ${assimAction.baseId}`);
+            const result = npc.processDroneAssimilation(assimAction.droneId, assimAction.baseId);
+            logger.info(`[ASSIMILATE] Result: success=${result?.success}, isComplete=${result?.isComplete}, hasConversion=${!!result?.conversion}`);
+
+            if (result && socketModule) {
+              // Broadcast sacrifice visual
+              socketModule.broadcastDroneSacrifice({
+                droneId: assimAction.droneId,
+                baseId: assimAction.baseId,
+                position: assimAction.position
+              });
+
+              // Broadcast progress update
+              socketModule.broadcastAssimilationProgress({
+                baseId: assimAction.baseId,
+                progress: result.progress,
+                threshold: result.threshold,
+                position: assimAction.position // For client visual effects
+              });
+
+              // If base was converted (check isComplete flag)
+              logger.info(`[ASSIMILATE] Checking conversion: isComplete=${result.isComplete}, hasConversion=${!!result.conversion}`);
+              if (result.isComplete && result.conversion) {
+                logger.info(`[ASSIMILATE] Base converted! Broadcasting and checking queen spawn...`);
+                socketModule.broadcastBaseAssimilated({
+                  baseId: assimAction.baseId,
+                  newType: result.conversion.newType,
+                  originalFaction: result.conversion.originalFaction,
+                  convertedNpcs: result.conversion.convertedNpcs,
+                  position: assimAction.position // For client visual effects
+                });
+
+                // Check for queen spawn - queen is now spawned directly in convertBaseToSwarm
+                // We just need to broadcast if a queen was spawned
+                if (result.conversion.spawnedQueen) {
+                  const queen = result.conversion.spawnedQueen;
+                  logger.info(`[ASSIMILATE] Broadcasting queen spawn: ${queen.id} at (${Math.round(queen.x)}, ${Math.round(queen.y)})`);
+                  socketModule.broadcastQueenSpawn(queen);
+                } else if (result.conversion.shouldSpawnQueen) {
+                  // Fallback: if shouldSpawnQueen was true but no queen object, something went wrong
+                  logger.error(`[ASSIMILATE] shouldSpawnQueen was true but no queen was spawned!`);
+                }
+              }
+
+              // Drone was sacrificed - mark for removal
+              if (result.droneSacrificed) {
+                npcsToRemove.push(npcId);
+                continue; // Skip rest of update for this NPC
+              }
+            }
+          }
+        }
+      }
+    }
+
+    // Update NPC AI (skip for drones in assimilation mode)
+    let action = null;
+    if (!useAssimilationBehavior) {
+      action = npc.updateNPC(npcEntity, nearbyPlayers, deltaTime);
+    }
 
     // Update NPC shield recharge
     npc.updateNPCShieldRecharge(npcEntity, deltaTime);
+
+    // Check for queen guard mode for swarm NPCs
+    const activeQueen = npc.getActiveQueen();
+    if (activeQueen && npcEntity.faction === 'swarm' && npcEntity.type !== 'swarm_queen') {
+      const SwarmStrategy = require('./ai/swarm');
+      const swarmAI = new SwarmStrategy();
+
+      if (swarmAI.shouldGuardQueen(npcEntity, activeQueen)) {
+        // Normalize queen position (handle both queen.position.x and queen.x formats)
+        const queenX = activeQueen.position?.x ?? activeQueen.x;
+        const queenY = activeQueen.position?.y ?? activeQueen.y;
+        const guardRange = config.SWARM_QUEEN_SPAWN?.QUEEN_GUARD_RANGE ?? 500;
+
+        // Get nearby guards for formation spacing
+        const nearbyGuards = [];
+        for (const [otherId, otherNpc] of npc.activeNPCs) {
+          if (otherId !== npcId && otherNpc.faction === 'swarm' && otherNpc.type !== 'swarm_queen') {
+            const dx = otherNpc.position.x - queenX;
+            const dy = otherNpc.position.y - queenY;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+            if (dist <= guardRange) {
+              nearbyGuards.push(otherNpc);
+            }
+          }
+        }
+
+        // Use queen guard AI instead of normal combat
+        const guardAction = swarmAI.updateQueenGuard(
+          npcEntity,
+          activeQueen,
+          nearbyPlayers,
+          nearbyGuards,
+          deltaTime
+        );
+
+        // Override normal action with guard action
+        if (guardAction) {
+          action = guardAction;
+        }
+      }
+    }
 
     // Check for Swarm Queen spawning
     if (npcEntity.spawnsUnits && npcEntity.type === 'swarm_queen') {
@@ -353,6 +656,19 @@ function updateNPCs(deltaTime) {
             shieldMax: minion.shieldMax
           });
         }
+      }
+
+      // Check for phase transition and broadcast
+      if (npcEntity.phaseTransitionPending) {
+        broadcastNearNpc(npcEntity, 'queen:phaseChange', {
+          queenId: npcEntity.id,
+          x: npcEntity.position.x,
+          y: npcEntity.position.y,
+          phase: npcEntity.phaseManager?.currentPhase || npcEntity.phaseTransitionPending.to,
+          fromPhase: npcEntity.phaseTransitionPending.from
+        });
+        // Clear the pending flag
+        npcEntity.phaseTransitionPending = null;
       }
     }
 
@@ -520,6 +836,121 @@ function updateNPCs(deltaTime) {
           }
         }
       }
+    } else if (action && action.action === 'web_snare') {
+      // ============================================
+      // QUEEN SPECIAL ATTACK: Web Snare
+      // Slows players in area for duration
+      // ============================================
+      broadcastNearNpc(npcEntity, 'queen:webSnare', {
+        npcId: npcId,
+        sourceX: action.sourceX,
+        sourceY: action.sourceY,
+        targetX: action.targetX,
+        targetY: action.targetY,
+        radius: action.radius,
+        duration: action.duration,
+        chargeTime: action.chargeTime,
+        projectileSpeed: action.projectileSpeed
+      });
+
+      // Apply slow debuff to all players in radius after projectile travel time
+      const travelTime = Math.sqrt(
+        Math.pow(action.targetX - action.sourceX, 2) +
+        Math.pow(action.targetY - action.sourceY, 2)
+      ) / (action.projectileSpeed || 200) * 1000;
+
+      setTimeout(() => {
+        for (const [socketId, player] of connectedPlayers) {
+          const dx = player.position.x - action.targetX;
+          const dy = player.position.y - action.targetY;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+
+          if (dist <= action.radius) {
+            applyDebuff(player.id, 'slow', {
+              slowPercent: action.slowPercent,
+              duration: action.duration,
+              sourceId: npcId
+            });
+
+            // Notify player of debuff
+            io.to(socketId).emit('player:debuff', {
+              type: 'slow',
+              slowPercent: action.slowPercent,
+              duration: action.duration,
+              source: 'swarm_queen'
+            });
+          }
+        }
+      }, travelTime);
+
+    } else if (action && action.action === 'acid_burst') {
+      // ============================================
+      // QUEEN SPECIAL ATTACK: Acid Burst
+      // AoE damage with DoT effect
+      // ============================================
+      broadcastNearNpc(npcEntity, 'queen:acidBurst', {
+        npcId: npcId,
+        sourceX: action.sourceX,
+        sourceY: action.sourceY,
+        targetX: action.targetX,
+        targetY: action.targetY,
+        radius: action.radius,
+        projectileSpeed: action.projectileSpeed,
+        dotDuration: action.dotDuration
+      });
+
+      // Apply damage and DoT after projectile travel time
+      const travelTime = Math.sqrt(
+        Math.pow(action.targetX - action.sourceX, 2) +
+        Math.pow(action.targetY - action.sourceY, 2)
+      ) / (action.projectileSpeed || 200) * 1000;
+
+      setTimeout(() => {
+        for (const [socketId, player] of connectedPlayers) {
+          const dx = player.position.x - action.targetX;
+          const dy = player.position.y - action.targetY;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+
+          if (dist <= action.radius) {
+            // Apply initial damage
+            const initialDamage = { shieldDamage: action.damage * 0.5, hullDamage: action.damage * 0.5 };
+            const result = combat.applyDamage(player.id, initialDamage);
+
+            if (result) {
+              player.hull = result.hull;
+              player.shield = result.shield;
+
+              io.to(socketId).emit('player:damaged', {
+                attackerId: npcId,
+                attackerType: 'npc',
+                damage: action.damage,
+                hull: result.hull,
+                shield: result.shield,
+                damageType: 'acid'
+              });
+            }
+
+            // Apply DoT debuff
+            applyDebuff(player.id, 'dot', {
+              damage: action.dotDamage,
+              interval: action.dotInterval || 1000,
+              duration: action.dotDuration,
+              sourceId: npcId,
+              type: 'acid'
+            });
+
+            // Notify player of DoT
+            io.to(socketId).emit('player:debuff', {
+              type: 'dot',
+              dotType: 'acid',
+              damage: action.dotDamage,
+              duration: action.dotDuration,
+              source: 'swarm_queen'
+            });
+          }
+        }
+      }, travelTime);
+
     } else if (action && action.action === 'despawn') {
       // Handle orphaned NPC despawn (rage timer expired)
       // Broadcast death effect first
@@ -540,6 +971,22 @@ function updateNPCs(deltaTime) {
   // Remove any NPCs that need to despawn (outside the iteration loop)
   for (const npcId of npcsToRemove) {
     npc.activeNPCs.delete(npcId);
+  }
+
+  // ============================================
+  // SWARM QUEEN AURA - Apply regeneration to nearby bases
+  // ============================================
+  const now = Date.now();
+  const queenForAura = npc.getActiveQueen();
+  if (queenForAura && socketModule) {
+    // Apply aura effect (runs every tick)
+    const auraResult = npc.applyQueenAura(deltaTime);
+
+    // Throttle broadcasts to once per second
+    if (auraResult && auraResult.length > 0 && now - lastQueenAuraBroadcast >= QUEEN_AURA_BROADCAST_INTERVAL) {
+      lastQueenAuraBroadcast = now;
+      socketModule.broadcastQueenAura(auraResult);
+    }
   }
 }
 
@@ -634,10 +1081,46 @@ function playerAttackNPC(attackerId, npcId, weaponType, weaponTier) {
   const result = npc.damageNPC(npcId, totalDamage, attackerId);
 
   if (result && result.destroyed) {
-    // Spawn wreckage at NPC position with loot, passing damage contributors for team rewards
-    const wreckage = loot.spawnWreckage(npcEntity, npcEntity.position, null, npcEntity.damageContributors);
+    // Check if this was an attached assimilation drone
+    if (npcEntity.attachedToBase) {
+      const detachResult = npc.detachDroneFromBase(npcId);
+      if (detachResult && socketModule) {
+        // Broadcast the detachment so clients know the assimilation progress changed
+        socketModule.broadcastAssimilationProgress({
+          baseId: detachResult.baseId,
+          attachedCount: detachResult.remainingDrones,
+          threshold: detachResult.threshold,
+          droneKilled: npcId,
+          killedBy: attackerId
+        });
+      }
+    }
 
-    // Broadcast NPC death with team info
+    // Check if this was a hatching swarm egg - no wreckage drops from eggs
+    const wasHatchingEgg = npcEntity.faction === 'swarm' && npcEntity.hatchTime &&
+      (Date.now() - npcEntity.hatchTime) < (npcEntity.hatchDuration || 2500);
+
+    let wreckage = null;
+    if (!wasHatchingEgg) {
+      // Spawn wreckage at NPC position with loot, passing damage contributors for team rewards
+      wreckage = loot.spawnWreckage(npcEntity, npcEntity.position, null, npcEntity.damageContributors);
+
+      // Broadcast wreckage spawn
+      broadcastWreckageNear(wreckage, 'wreckage:spawn', {
+        id: wreckage.id,
+        x: wreckage.position.x,
+        y: wreckage.position.y,
+        faction: wreckage.faction,
+        npcName: wreckage.npcName,
+        contentCount: wreckage.contents.length,
+        despawnTime: wreckage.despawnTime
+      });
+
+      // Add wreckage to result for socket handler
+      result.wreckage = wreckage;
+    }
+
+    // Broadcast NPC death with team info (use 'egg_pop' effect for hatching eggs)
     broadcastNearNpc(npcEntity, 'npc:destroyed', {
       id: npcId,
       destroyedBy: attackerId,
@@ -646,23 +1129,9 @@ function playerAttackNPC(attackerId, npcId, weaponType, weaponTier) {
       teamMultiplier: result.teamMultiplier,
       creditsPerPlayer: result.creditsPerPlayer,
       faction: result.faction,
-      deathEffect: npcEntity.deathEffect || 'explosion',
-      wreckageId: wreckage.id
+      deathEffect: wasHatchingEgg ? 'egg_pop' : (npcEntity.deathEffect || 'explosion'),
+      wreckageId: wreckage ? wreckage.id : null
     });
-
-    // Broadcast wreckage spawn
-    broadcastWreckageNear(wreckage, 'wreckage:spawn', {
-      id: wreckage.id,
-      x: wreckage.position.x,
-      y: wreckage.position.y,
-      faction: wreckage.faction,
-      npcName: wreckage.npcName,
-      contentCount: wreckage.contents.length,
-      despawnTime: wreckage.despawnTime
-    });
-
-    // Add wreckage to result for socket handler
-    result.wreckage = wreckage;
 
     // Check for formation leader death (Void faction succession)
     if (npcEntity.formationLeader || (npcEntity.isBoss && npcEntity.faction === 'void')) {
@@ -815,7 +1284,9 @@ function playerAttackBase(attackerId, baseId, weaponType, weaponTier) {
       x: baseObj.x,
       y: baseObj.y,
       baseType: baseObj.type,
-      size: baseObj.size || 80
+      size: baseObj.size || 80,
+      // Assimilation drones that died with the base (client should remove worm visuals)
+      destroyedDrones: result.destroyedDrones || []
     });
 
     // Broadcast wreckage spawn

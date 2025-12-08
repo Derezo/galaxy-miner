@@ -272,8 +272,8 @@ const ShipUpgradePanel = {
       console.error('[UPGRADE] Network.socket is undefined!');
       this.isUpgrading = false;
       this.render();
-      if (typeof Toast !== 'undefined') {
-        Toast.error('Connection error. Please refresh the page.');
+      if (typeof NotificationManager !== 'undefined') {
+        NotificationManager.error('Connection error. Please refresh the page.');
       }
       return;
     }
@@ -283,9 +283,9 @@ const ShipUpgradePanel = {
       if (this.isUpgrading) {
         this.isUpgrading = false;
         this.render();
-        // Show error toast if no response was received
-        if (typeof Toast !== 'undefined') {
-          Toast.error('Upgrade request timed out. Please try again.');
+        // Show error notification if no response was received
+        if (typeof NotificationManager !== 'undefined') {
+          NotificationManager.error('Upgrade request timed out. Please try again.');
         }
       }
     }, 5000);

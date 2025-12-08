@@ -68,8 +68,35 @@ const NPCWeaponEffects = {
       duration: 300,
       particles: true,
       particleRate: 5
+    },
+    web_snare: {
+      type: 'projectile',
+      color: { primary: '#4a0000', secondary: '#8b0000', glow: '#ff000030', web: '#660033' },
+      size: 12,
+      speed: 300,
+      duration: 1500,
+      trail: true,
+      trailColor: '#4a0000',
+      trailLength: 50,
+      webStrands: 6,
+      areaRadius: 150
+    },
+    acid_burst: {
+      type: 'projectile',
+      color: { primary: '#33cc00', secondary: '#66ff33', glow: '#00ff0040', toxic: '#009900' },
+      size: 10,
+      speed: 250,
+      duration: 1600,
+      trail: true,
+      trailColor: '#33cc00',
+      trailLength: 35,
+      bubbling: true,
+      areaRadius: 100
     }
   },
+
+  // Active area effects (web snare zones, acid puddles)
+  areaEffects: [],
 
   init() {
     Logger.log('NPCWeaponEffects initialized');
@@ -203,6 +230,9 @@ const NPCWeaponEffects = {
       const elapsed = now - beam.startTime;
       return elapsed < beam.duration;
     });
+
+    // Update area effects
+    this.updateAreaEffects(dt);
   },
 
   createVoidTearEffect(proj) {
@@ -271,7 +301,10 @@ const NPCWeaponEffects = {
    * Draw all active effects
    */
   draw(ctx, camera) {
-    // Draw beams first (behind projectiles)
+    // Draw area effects first (ground level)
+    this.drawAreaEffects(ctx, camera);
+
+    // Draw beams (behind projectiles)
     for (const beam of this.beams) {
       this.drawBeam(ctx, beam, camera);
     }
@@ -324,6 +357,12 @@ const NPCWeaponEffects = {
         break;
       case 'dark_energy':
         this.drawDarkEnergyBolt(ctx, config, proj);
+        break;
+      case 'web_snare':
+        this.drawWebSnareProjectile(ctx, config, proj);
+        break;
+      case 'acid_burst':
+        this.drawAcidBurstProjectile(ctx, config, proj);
         break;
       default:
         this.drawGenericProjectile(ctx, config);
@@ -451,6 +490,204 @@ const NPCWeaponEffects = {
     ctx.fillStyle = config.color.secondary;
     ctx.beginPath();
     ctx.arc(0, 0, eyeSize, 0, Math.PI * 2);
+    ctx.fill();
+  },
+
+  drawWebSnareProjectile(ctx, config, proj) {
+    // Web snare - dark spinning core with trailing web strands
+    const size = config.size;
+    const time = Date.now();
+    const spinAngle = time * 0.005; // Spinning rotation
+
+    // Outer crimson halo glow
+    const haloGradient = ctx.createRadialGradient(0, 0, 0, 0, 0, size * 3);
+    haloGradient.addColorStop(0, config.color.glow);
+    haloGradient.addColorStop(0.5, 'rgba(139, 0, 0, 0.2)');
+    haloGradient.addColorStop(1, 'transparent');
+
+    ctx.fillStyle = haloGradient;
+    ctx.beginPath();
+    ctx.arc(0, 0, size * 3, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Trailing web strands (6 strands spiraling outward)
+    ctx.strokeStyle = config.color.web;
+    ctx.lineWidth = 2;
+    ctx.lineCap = 'round';
+
+    for (let i = 0; i < config.webStrands; i++) {
+      const baseAngle = (Math.PI * 2 * i) / config.webStrands + spinAngle;
+      const strandLength = size * (1.5 + Math.sin(time * 0.003 + i) * 0.3);
+
+      ctx.globalAlpha = 0.6 + Math.sin(time * 0.004 + i) * 0.3;
+      ctx.beginPath();
+      ctx.moveTo(
+        Math.cos(baseAngle) * size * 0.4,
+        Math.sin(baseAngle) * size * 0.4
+      );
+
+      // Curved web strand with wobble
+      const wobble = Math.sin(time * 0.006 + i * 2) * 0.4;
+      const midX = Math.cos(baseAngle + wobble) * strandLength * 0.6;
+      const midY = Math.sin(baseAngle + wobble) * strandLength * 0.6;
+      const endX = Math.cos(baseAngle - wobble * 0.5) * strandLength;
+      const endY = Math.sin(baseAngle - wobble * 0.5) * strandLength;
+
+      ctx.quadraticCurveTo(midX, midY, endX, endY);
+      ctx.stroke();
+
+      // Thin connecting threads between strands
+      if (i < config.webStrands - 1) {
+        const nextAngle = (Math.PI * 2 * (i + 1)) / config.webStrands + spinAngle;
+        ctx.globalAlpha = 0.3;
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(endX * 0.7, endY * 0.7);
+        ctx.lineTo(
+          Math.cos(nextAngle) * strandLength * 0.7,
+          Math.sin(nextAngle) * strandLength * 0.7
+        );
+        ctx.stroke();
+        ctx.lineWidth = 2;
+      }
+    }
+    ctx.globalAlpha = 1;
+
+    // Dark spinning core
+    const coreGradient = ctx.createRadialGradient(0, 0, 0, 0, 0, size);
+    coreGradient.addColorStop(0, '#1a0000');
+    coreGradient.addColorStop(0.5, config.color.primary);
+    coreGradient.addColorStop(1, config.color.secondary);
+
+    ctx.fillStyle = coreGradient;
+    ctx.beginPath();
+    ctx.arc(0, 0, size * 0.7, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Core ring
+    ctx.strokeStyle = config.color.secondary;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(0, 0, size * 0.5, 0, Math.PI * 2);
+    ctx.stroke();
+
+    // Inner pulsing eye
+    const pulsePhase = (Math.sin(time * 0.008) + 1) / 2;
+    const eyeSize = size * 0.2 * (0.8 + pulsePhase * 0.4);
+    ctx.fillStyle = '#ff3333';
+    ctx.beginPath();
+    ctx.arc(0, 0, eyeSize, 0, Math.PI * 2);
+    ctx.fill();
+  },
+
+  drawAcidBurstProjectile(ctx, config, proj) {
+    // Acid burst - irregular green blob with bubbling surface
+    const size = config.size;
+    const time = Date.now();
+
+    // Toxic glow aura
+    const glowGradient = ctx.createRadialGradient(0, 0, 0, 0, 0, size * 2.5);
+    glowGradient.addColorStop(0, config.color.glow);
+    glowGradient.addColorStop(0.6, 'rgba(0, 255, 0, 0.15)');
+    glowGradient.addColorStop(1, 'transparent');
+
+    ctx.fillStyle = glowGradient;
+    ctx.beginPath();
+    ctx.arc(0, 0, size * 2.5, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Dripping particles during flight
+    if (config.bubbling && typeof ParticleSystem !== 'undefined' && Math.random() < 0.15) {
+      const angle = Math.random() * Math.PI * 2;
+      const speed = 20 + Math.random() * 40;
+      ParticleSystem.spawn({
+        x: proj.x + (Math.random() - 0.5) * size,
+        y: proj.y + (Math.random() - 0.5) * size,
+        vx: Math.cos(angle) * speed,
+        vy: Math.sin(angle) * speed + 30, // Drip downward
+        life: 300 + Math.random() * 200,
+        color: config.color.primary,
+        size: 2 + Math.random() * 2,
+        type: 'glow',
+        drag: 0.95,
+        decay: 1
+      });
+    }
+
+    // Irregular blob shape with bubbling surface
+    ctx.save();
+    ctx.beginPath();
+
+    const blobPoints = 12;
+    for (let i = 0; i <= blobPoints; i++) {
+      const angle = (Math.PI * 2 * i) / blobPoints;
+      // Irregular radius with bubbling effect
+      const bubbleOffset = Math.sin(time * 0.008 + i * 1.5) * size * 0.2;
+      const baseOffset = Math.sin(i * 2.5) * size * 0.15;
+      const radius = size + bubbleOffset + baseOffset;
+
+      const x = Math.cos(angle) * radius;
+      const y = Math.sin(angle) * radius;
+
+      if (i === 0) {
+        ctx.moveTo(x, y);
+      } else {
+        ctx.lineTo(x, y);
+      }
+    }
+    ctx.closePath();
+
+    // Fill with toxic gradient
+    const blobGradient = ctx.createRadialGradient(0, 0, 0, 0, 0, size * 1.2);
+    blobGradient.addColorStop(0, config.color.secondary);
+    blobGradient.addColorStop(0.6, config.color.primary);
+    blobGradient.addColorStop(1, config.color.toxic);
+
+    ctx.fillStyle = blobGradient;
+    ctx.fill();
+
+    // Highlight edge
+    ctx.strokeStyle = config.color.secondary;
+    ctx.lineWidth = 2;
+    ctx.globalAlpha = 0.7;
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+
+    ctx.restore();
+
+    // Surface bubbles
+    const bubbleCount = 4;
+    for (let i = 0; i < bubbleCount; i++) {
+      const bubbleAngle = (Math.PI * 2 * i) / bubbleCount + time * 0.002;
+      const bubblePhase = Math.sin(time * 0.01 + i * 2);
+      const bubbleDist = size * (0.3 + bubblePhase * 0.2);
+      const bubbleSize = size * 0.15 * (0.8 + bubblePhase * 0.4);
+
+      const bx = Math.cos(bubbleAngle) * bubbleDist;
+      const by = Math.sin(bubbleAngle) * bubbleDist;
+
+      // Bubble highlight
+      const bubbleGradient = ctx.createRadialGradient(
+        bx - bubbleSize * 0.3, by - bubbleSize * 0.3, 0,
+        bx, by, bubbleSize
+      );
+      bubbleGradient.addColorStop(0, 'rgba(255, 255, 255, 0.6)');
+      bubbleGradient.addColorStop(0.5, config.color.secondary);
+      bubbleGradient.addColorStop(1, 'rgba(0, 150, 0, 0.3)');
+
+      ctx.fillStyle = bubbleGradient;
+      ctx.beginPath();
+      ctx.arc(bx, by, bubbleSize, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // Center toxic core
+    const coreGlow = ctx.createRadialGradient(0, 0, 0, 0, 0, size * 0.4);
+    coreGlow.addColorStop(0, '#99ff99');
+    coreGlow.addColorStop(1, 'transparent');
+    ctx.fillStyle = coreGlow;
+    ctx.beginPath();
+    ctx.arc(0, 0, size * 0.4, 0, Math.PI * 2);
     ctx.fill();
   },
 
@@ -669,6 +906,7 @@ const NPCWeaponEffects = {
     this.projectiles = [];
     this.beams = [];
     this.pendingHits = [];
+    this.areaEffects = [];
   },
 
   /**
@@ -681,5 +919,298 @@ const NPCWeaponEffects = {
       hitInfo: hitInfo,
       triggerTime: Date.now() + delay
     });
+  },
+
+  /**
+   * Create web snare area effect at impact location
+   */
+  createWebSnareEffect(x, y, radius = 150, duration = 4000) {
+    this.areaEffects.push({
+      type: 'web_snare',
+      x: x,
+      y: y,
+      radius: radius,
+      startTime: Date.now(),
+      duration: duration,
+      webPoints: this.generateWebPattern(radius)
+    });
+
+    // Spawn particles for impact
+    if (typeof ParticleSystem !== 'undefined') {
+      for (let i = 0; i < 20; i++) {
+        const angle = Math.random() * Math.PI * 2;
+        const speed = 50 + Math.random() * 100;
+        ParticleSystem.spawn({
+          x: x + (Math.random() - 0.5) * 20,
+          y: y + (Math.random() - 0.5) * 20,
+          vx: Math.cos(angle) * speed,
+          vy: Math.sin(angle) * speed,
+          life: 400 + Math.random() * 300,
+          color: '#8b0000',
+          size: 2 + Math.random() * 3,
+          type: 'glow',
+          drag: 0.92,
+          decay: 1
+        });
+      }
+    }
+  },
+
+  /**
+   * Generate web pattern points for snare effect
+   */
+  generateWebPattern(radius) {
+    const points = [];
+    const rings = 4;
+    const spokes = 8;
+
+    // Generate spoke endpoints
+    for (let s = 0; s < spokes; s++) {
+      const angle = (Math.PI * 2 * s) / spokes;
+      points.push({
+        type: 'spoke',
+        angle: angle,
+        endX: Math.cos(angle) * radius,
+        endY: Math.sin(angle) * radius
+      });
+    }
+
+    // Generate ring connection points
+    for (let r = 1; r <= rings; r++) {
+      const ringRadius = (radius / rings) * r;
+      for (let s = 0; s < spokes; s++) {
+        const angle = (Math.PI * 2 * s) / spokes;
+        points.push({
+          type: 'ring',
+          ring: r,
+          spoke: s,
+          x: Math.cos(angle) * ringRadius,
+          y: Math.sin(angle) * ringRadius
+        });
+      }
+    }
+
+    return points;
+  },
+
+  /**
+   * Create acid puddle area effect at impact location
+   */
+  createAcidPuddleEffect(x, y, radius = 100, duration = 5000) {
+    this.areaEffects.push({
+      type: 'acid_puddle',
+      x: x,
+      y: y,
+      radius: radius,
+      startTime: Date.now(),
+      duration: duration,
+      bubbles: []
+    });
+
+    // Spawn impact particles
+    if (typeof ParticleSystem !== 'undefined') {
+      for (let i = 0; i < 25; i++) {
+        const angle = Math.random() * Math.PI * 2;
+        const speed = 80 + Math.random() * 120;
+        ParticleSystem.spawn({
+          x: x,
+          y: y,
+          vx: Math.cos(angle) * speed,
+          vy: Math.sin(angle) * speed,
+          life: 500 + Math.random() * 400,
+          color: '#33cc00',
+          size: 3 + Math.random() * 4,
+          type: 'glow',
+          drag: 0.9,
+          decay: 1
+        });
+      }
+    }
+  },
+
+  /**
+   * Update area effects
+   */
+  updateAreaEffects(dt) {
+    const now = Date.now();
+
+    this.areaEffects = this.areaEffects.filter(effect => {
+      const elapsed = now - effect.startTime;
+
+      // Spawn periodic particles for acid puddle
+      if (effect.type === 'acid_puddle' && typeof ParticleSystem !== 'undefined') {
+        if (Math.random() < 0.1) {
+          const angle = Math.random() * Math.PI * 2;
+          const dist = Math.random() * effect.radius * 0.8;
+          ParticleSystem.spawn({
+            x: effect.x + Math.cos(angle) * dist,
+            y: effect.y + Math.sin(angle) * dist,
+            vx: (Math.random() - 0.5) * 20,
+            vy: -30 - Math.random() * 40, // Rise upward
+            life: 600 + Math.random() * 400,
+            color: '#66ff33',
+            size: 2 + Math.random() * 2,
+            type: 'glow',
+            drag: 0.98,
+            decay: 1
+          });
+        }
+      }
+
+      return elapsed < effect.duration;
+    });
+  },
+
+  /**
+   * Draw all area effects
+   */
+  drawAreaEffects(ctx, camera) {
+    for (const effect of this.areaEffects) {
+      const screenX = effect.x - camera.x;
+      const screenY = effect.y - camera.y;
+      const elapsed = Date.now() - effect.startTime;
+      const progress = elapsed / effect.duration;
+
+      if (effect.type === 'web_snare') {
+        this.drawWebSnareArea(ctx, screenX, screenY, effect, progress);
+      } else if (effect.type === 'acid_puddle') {
+        this.drawAcidPuddleArea(ctx, screenX, screenY, effect, progress);
+      }
+    }
+  },
+
+  /**
+   * Draw web snare area effect
+   */
+  drawWebSnareArea(ctx, screenX, screenY, effect, progress) {
+    const time = Date.now();
+    const fadeOut = progress > 0.7 ? 1 - (progress - 0.7) / 0.3 : 1;
+    const radius = effect.radius;
+
+    ctx.save();
+    ctx.translate(screenX, screenY);
+    ctx.globalAlpha = fadeOut * 0.7;
+
+    // Outer boundary ring
+    ctx.strokeStyle = '#8b0000';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.arc(0, 0, radius, 0, Math.PI * 2);
+    ctx.stroke();
+
+    // Pulsing glow
+    const pulseAlpha = 0.2 + Math.sin(time * 0.003) * 0.1;
+    const glowGradient = ctx.createRadialGradient(0, 0, 0, 0, 0, radius);
+    glowGradient.addColorStop(0, `rgba(139, 0, 0, ${pulseAlpha})`);
+    glowGradient.addColorStop(0.7, `rgba(139, 0, 0, ${pulseAlpha * 0.5})`);
+    glowGradient.addColorStop(1, 'transparent');
+    ctx.fillStyle = glowGradient;
+    ctx.beginPath();
+    ctx.arc(0, 0, radius, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Draw web spokes
+    ctx.strokeStyle = '#660033';
+    ctx.lineWidth = 2;
+
+    const spokes = 8;
+    for (let s = 0; s < spokes; s++) {
+      const angle = (Math.PI * 2 * s) / spokes;
+      const wobble = Math.sin(time * 0.002 + s) * 5;
+      ctx.beginPath();
+      ctx.moveTo(0, 0);
+      ctx.lineTo(
+        Math.cos(angle) * (radius + wobble),
+        Math.sin(angle) * (radius + wobble)
+      );
+      ctx.stroke();
+    }
+
+    // Draw web rings
+    ctx.lineWidth = 1.5;
+    const rings = 4;
+    for (let r = 1; r <= rings; r++) {
+      const ringRadius = (radius / rings) * r;
+      const ringWobble = Math.sin(time * 0.003 + r) * 3;
+
+      ctx.beginPath();
+      for (let s = 0; s <= spokes; s++) {
+        const angle = (Math.PI * 2 * s) / spokes;
+        const px = Math.cos(angle) * (ringRadius + ringWobble);
+        const py = Math.sin(angle) * (ringRadius + ringWobble);
+        if (s === 0) ctx.moveTo(px, py);
+        else ctx.lineTo(px, py);
+      }
+      ctx.stroke();
+    }
+
+    // Central web mass
+    ctx.fillStyle = 'rgba(74, 0, 0, 0.5)';
+    ctx.beginPath();
+    ctx.arc(0, 0, radius * 0.15, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.restore();
+  },
+
+  /**
+   * Draw acid puddle area effect
+   */
+  drawAcidPuddleArea(ctx, screenX, screenY, effect, progress) {
+    const time = Date.now();
+    const fadeOut = progress > 0.8 ? 1 - (progress - 0.8) / 0.2 : 1;
+    const radius = effect.radius * (progress < 0.1 ? progress / 0.1 : 1); // Expand at start
+
+    ctx.save();
+    ctx.translate(screenX, screenY);
+    ctx.globalAlpha = fadeOut * 0.8;
+
+    // Bubbling irregular puddle shape
+    ctx.beginPath();
+    const points = 16;
+    for (let i = 0; i <= points; i++) {
+      const angle = (Math.PI * 2 * i) / points;
+      const bubbleOffset = Math.sin(time * 0.005 + i * 2) * radius * 0.1;
+      const r = radius + bubbleOffset;
+      const x = Math.cos(angle) * r;
+      const y = Math.sin(angle) * r;
+      if (i === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    }
+    ctx.closePath();
+
+    // Toxic gradient fill
+    const puddleGradient = ctx.createRadialGradient(0, 0, 0, 0, 0, radius);
+    puddleGradient.addColorStop(0, 'rgba(102, 255, 51, 0.6)');
+    puddleGradient.addColorStop(0.5, 'rgba(51, 204, 0, 0.5)');
+    puddleGradient.addColorStop(0.8, 'rgba(0, 153, 0, 0.4)');
+    puddleGradient.addColorStop(1, 'rgba(0, 100, 0, 0.2)');
+    ctx.fillStyle = puddleGradient;
+    ctx.fill();
+
+    // Edge highlight
+    ctx.strokeStyle = 'rgba(102, 255, 51, 0.5)';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    // Rising bubbles
+    const bubbleCount = 6;
+    for (let i = 0; i < bubbleCount; i++) {
+      const bubblePhase = (time * 0.002 + i * 0.5) % 1;
+      const bubbleAngle = (Math.PI * 2 * i) / bubbleCount + time * 0.001;
+      const bubbleDist = radius * 0.5 * (1 - bubblePhase);
+      const bubbleSize = 3 + Math.sin(time * 0.01 + i) * 2;
+
+      const bx = Math.cos(bubbleAngle) * bubbleDist;
+      const by = Math.sin(bubbleAngle) * bubbleDist - bubblePhase * 20; // Rise up
+
+      ctx.globalAlpha = fadeOut * (1 - bubblePhase) * 0.6;
+      ctx.fillStyle = 'rgba(153, 255, 153, 0.8)';
+      ctx.beginPath();
+      ctx.arc(bx, by, bubbleSize, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    ctx.restore();
   }
 };

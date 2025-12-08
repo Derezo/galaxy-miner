@@ -849,10 +849,20 @@ module.exports = function(io) {
               authenticatedUserId
             );
 
-            // Process collected loot (non-credit items go to collector only)
             // Filter out credits from contents - they're handled via team distribution
             const nonCreditContents = progress.contents.filter(item => item.type !== 'credits');
-            const lootResults = processCollectedLoot(authenticatedUserId, nonCreditContents);
+
+            // Distribute resources to team based on rarity
+            // Common/Uncommon: Split equally
+            // Rare/Ultrarare: Collector only, team notified
+            const teamResources = distributeTeamResources(
+              nonCreditContents,
+              progress.damageContributors,
+              authenticatedUserId
+            );
+
+            // Process only the collector's portion of loot
+            const lootResults = processCollectedLoot(authenticatedUserId, teamResources.collectorLoot);
             lootResults.credits = teamCredits.collectorCredits;
 
             socket.emit('loot:complete', {
@@ -1349,6 +1359,127 @@ module.exports = function(io) {
     return { total: totalCredits, collectorCredits, distributed };
   }
 
+  // Helper: Distribute resources to team members based on rarity
+  // Common/Uncommon: Split equally between all participants
+  // Rare/Ultrarare: Collector only, team gets notification
+  function distributeTeamResources(contents, damageContributors, collectorId) {
+    const collectorIdStr = String(collectorId);
+    const result = {
+      collectorLoot: [],      // Items that go to collector
+      teamShares: new Map(),  // playerId -> [items]
+      rareDropNotifications: [] // Rare items collector got (for team notification)
+    };
+
+    // If no team (solo kill), collector gets everything
+    if (!damageContributors || Object.keys(damageContributors).length <= 1) {
+      result.collectorLoot = contents;
+      return result;
+    }
+
+    const participants = Object.keys(damageContributors);
+    const participantCount = participants.length;
+
+    // Initialize team shares
+    for (const playerId of participants) {
+      if (playerId !== collectorIdStr) {
+        result.teamShares.set(playerId, []);
+      }
+    }
+
+    for (const item of contents) {
+      if (item.type === 'resource') {
+        const rarity = item.rarity || 'common';
+
+        if (rarity === 'common' || rarity === 'uncommon') {
+          // Split common/uncommon resources equally
+          const perPlayer = Math.floor(item.quantity / participantCount);
+          const remainder = item.quantity % participantCount;
+
+          if (perPlayer > 0) {
+            // Collector gets their share + remainder
+            result.collectorLoot.push({
+              ...item,
+              quantity: perPlayer + remainder
+            });
+
+            // Other team members get their share
+            for (const playerId of participants) {
+              if (playerId !== collectorIdStr) {
+                const shares = result.teamShares.get(playerId);
+                shares.push({
+                  ...item,
+                  quantity: perPlayer
+                });
+              }
+            }
+          } else {
+            // Not enough to split - collector gets all
+            result.collectorLoot.push(item);
+          }
+        } else {
+          // Rare/Ultrarare resources go to collector only
+          result.collectorLoot.push(item);
+          result.rareDropNotifications.push({
+            resourceType: item.resourceType,
+            quantity: item.quantity,
+            rarity
+          });
+        }
+      } else {
+        // Non-resource items (buffs, components, relics) go to collector only
+        result.collectorLoot.push(item);
+      }
+    }
+
+    // Process team member shares and send notifications
+    for (const [playerId, items] of result.teamShares) {
+      if (items.length > 0) {
+        // Add resources to team member's inventory
+        for (const item of items) {
+          try {
+            safeUpsertInventory(playerId, item.resourceType, item.quantity);
+          } catch (err) {
+            logger.error(`[TEAM LOOT] Error giving resource to ${playerId}:`, err.message);
+          }
+        }
+
+        // Notify team member of their share
+        const socketId = userSockets.get(playerId);
+        if (socketId) {
+          io.to(socketId).emit('team:lootShare', {
+            resources: items,
+            rareDropNotification: result.rareDropNotifications.length > 0 ? result.rareDropNotifications : null,
+            collectorId: collectorIdStr
+          });
+
+          // Update their inventory display
+          const inventory = statements.getInventory.all(playerId);
+          const ship = statements.getShipByUserId.get(playerId);
+          io.to(socketId).emit('inventory:update', {
+            inventory,
+            credits: getSafeCredits(ship)
+          });
+        }
+      } else if (result.rareDropNotifications.length > 0) {
+        // No shared resources but notify about rare drops
+        const socketId = userSockets.get(playerId);
+        if (socketId) {
+          io.to(socketId).emit('team:lootShare', {
+            resources: [],
+            rareDropNotification: result.rareDropNotifications,
+            collectorId: collectorIdStr
+          });
+        }
+      }
+    }
+
+    if (result.rareDropNotifications.length > 0) {
+      logger.log(`[TEAM LOOT] Collector got ${result.rareDropNotifications.length} rare+ drops, team notified`);
+    }
+
+    return result;
+  }
+
   // Helper: Process collected loot and add to player
   function processCollectedLoot(userId, contents) {
     const results = {
@@ -1432,10 +1563,101 @@ module.exports = function(io) {
     return results;
   }
 
+  // ============================================
+  // SWARM ASSIMILATION BROADCASTS
+  // ============================================
+
+  /**
+   * Broadcast drone sacrifice visual effect
+   * @param {Object} data - { droneId, baseId, position: { x, y } }
+   */
+  function broadcastDroneSacrifice(data) {
+    io.emit('swarm:droneSacrifice', {
+      droneId: data.droneId,
+      baseId: data.baseId,
+      x: data.position.x,
+      y: data.position.y
+    });
+  }
+
+  /**
+   * Broadcast assimilation progress update
+   * @param {Object} data - { baseId, progress, threshold }
+   */
+  function broadcastAssimilationProgress(data) {
+    io.emit('swarm:assimilationProgress', {
+      baseId: data.baseId,
+      progress: data.progress,
+      threshold: data.threshold,
+      position: data.position // For client visual effects
+    });
+  }
+
+  /**
+   * Broadcast base assimilation complete
+   * @param {Object} data - { baseId, newType, originalFaction, convertedNpcs, position }
+   */
+  function broadcastBaseAssimilated(data) {
+    io.emit('swarm:baseAssimilated', {
+      baseId: data.baseId,
+      newType: data.newType,
+      originalFaction: data.originalFaction,
+      convertedNpcs: data.convertedNpcs || [],
+      position: data.position // For client visual effects
+    });
+  }
+
+  /**
+   * Broadcast queen spawn event
+   * @param {Object} queen - Queen NPC data
+   */
+  function broadcastQueenSpawn(queen) {
+    io.emit('swarm:queenSpawn', {
+      id: queen.id,
+      x: queen.position.x,
+      y: queen.position.y,
+      hull: queen.hull,
+      shield: queen.shield,
+      name: queen.name
+    });
+  }
+
+  /**
+   * Broadcast queen death event
+   * @param {string} queenId - ID of the dead queen
+   * @param {Object} position - { x, y } death position
+   */
+  function broadcastQueenDeath(queenId, position) {
+    io.emit('swarm:queenDeath', {
+      id: queenId,
+      x: position.x,
+      y: position.y
+    });
+  }
+
+  /**
+   * Broadcast queen aura regeneration effects (throttled - call once per second max)
+   * @param {Array} affectedBases - [{ baseId, health, maxHealth }]
+   */
+  function broadcastQueenAura(affectedBases) {
+    if (affectedBases.length > 0) {
+      io.emit('swarm:queenAura', {
+        affectedBases
+      });
+    }
+  }
+
   // Export for use by other modules
   return {
     io,
     connectedPlayers,
-    userSockets
+    userSockets,
+    // Swarm broadcasts
+    broadcastDroneSacrifice,
+    broadcastAssimilationProgress,
+    broadcastBaseAssimilated,
+    broadcastQueenSpawn,
+    broadcastQueenDeath,
+    broadcastQueenAura
   };
 };

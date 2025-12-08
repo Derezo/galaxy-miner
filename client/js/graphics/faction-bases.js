@@ -58,6 +58,46 @@ const FactionBases = {
       secondaryColor: '#664400',
       accentColor: '#ffcc00',
       glowColor: '#ff990050'
+    },
+    // ============================================
+    // ASSIMILATED BASES - Swarm-converted versions
+    // Dark crimson theme with organic corruption
+    // ============================================
+    assimilated_pirate_outpost: {
+      size: 96,  // 20% larger
+      color: '#1a0505',
+      secondaryColor: '#0d0303',
+      accentColor: '#8b0000',
+      glowColor: '#8b000050',
+      veinColor: '#990000',
+      eyeColor: '#ff0000'
+    },
+    assimilated_scavenger_yard: {
+      size: 120,  // 20% larger
+      color: '#1a0808',
+      secondaryColor: '#0d0404',
+      accentColor: '#8b0000',
+      glowColor: '#8b000050',
+      veinColor: '#990000',
+      eyeColor: '#ff0000'
+    },
+    assimilated_void_rift: {
+      size: 84,  // 20% larger
+      color: '#660033',
+      secondaryColor: '#330019',
+      accentColor: '#8b0000',
+      glowColor: '#8b000080',
+      veinColor: '#990000',
+      eyeColor: '#ff0000'
+    },
+    assimilated_mining_claim: {
+      size: 102,  // 20% larger
+      color: '#1a0a00',
+      secondaryColor: '#0d0500',
+      accentColor: '#8b0000',
+      glowColor: '#8b000050',
+      veinColor: '#990000',
+      eyeColor: '#ff0000'
     }
   },
 
@@ -135,6 +175,19 @@ const FactionBases = {
         break;
       case 'mining_claim':
         this.drawMiningClaim(ctx, config);
+        break;
+      // Assimilated bases - swarm-corrupted versions
+      case 'assimilated_pirate_outpost':
+        this.drawAssimilatedPirateOutpost(ctx, config);
+        break;
+      case 'assimilated_scavenger_yard':
+        this.drawAssimilatedScavengerYard(ctx, config);
+        break;
+      case 'assimilated_void_rift':
+        this.drawAssimilatedVoidRift(ctx, config);
+        break;
+      case 'assimilated_mining_claim':
+        this.drawAssimilatedMiningClaim(ctx, config);
         break;
       default:
         this.drawGenericBase(ctx, config);
@@ -329,6 +382,47 @@ const FactionBases = {
             drag: 0.98,
             decay: 0.9,
             gravity: 20
+          });
+        }
+        break;
+
+      // Assimilated bases - corruption spores and veins
+      case 'assimilated_pirate_outpost':
+      case 'assimilated_scavenger_yard':
+      case 'assimilated_void_rift':
+      case 'assimilated_mining_claim':
+        // Dark crimson corruption spores
+        if (Math.random() > 0.5) {
+          const sporeAngle = Math.random() * Math.PI * 2;
+          const sporeDist = size * 0.4 + Math.random() * size * 0.6;
+          ParticleSystem.spawn({
+            x: base.x + Math.cos(sporeAngle) * sporeDist,
+            y: base.y + Math.sin(sporeAngle) * sporeDist,
+            vx: (Math.random() - 0.5) * 25,
+            vy: (Math.random() - 0.5) * 25,
+            color: config.veinColor || '#990000',
+            size: 2 + Math.random() * 3,
+            life: 900 + Math.random() * 700,
+            type: 'glow',
+            drag: 0.992,
+            decay: 0.7,
+            pulse: true,
+            pulseSpeed: 2.5
+          });
+        }
+        // Occasional bright red "infection" pulse
+        if (Math.random() > 0.85) {
+          ParticleSystem.spawn({
+            x: base.x + (Math.random() - 0.5) * size * 0.6,
+            y: base.y + (Math.random() - 0.5) * size * 0.6,
+            vx: 0,
+            vy: 0,
+            color: '#ff0000',
+            size: 4 + Math.random() * 4,
+            life: 400 + Math.random() * 200,
+            type: 'glow',
+            drag: 1,
+            decay: 1.5
           });
         }
         break;
@@ -963,5 +1057,491 @@ const FactionBases = {
       top: base.y - padding,
       bottom: base.y + padding
     };
+  },
+
+  // ============================================
+  // ASSIMILATED BASE DRAWING FUNCTIONS
+  // Swarm-corrupted versions of faction bases
+  // ============================================
+
+  /**
+   * Draw a pulsing crimson swarm eye
+   * @param {CanvasRenderingContext2D} ctx
+   * @param {number} x - X position
+   * @param {number} y - Y position
+   * @param {number} size - Eye size
+   * @param {object} config - Base config with eyeColor
+   */
+  drawSwarmEye(ctx, x, y, size, config) {
+    const time = this.animationTime;
+    const pulse = 0.8 + Math.sin(time * 4) * 0.2;
+    const eyeSize = size * pulse;
+
+    // Outer glow
+    const glowGradient = ctx.createRadialGradient(x, y, 0, x, y, eyeSize * 2);
+    glowGradient.addColorStop(0, config.eyeColor || '#ff0000');
+    glowGradient.addColorStop(0.5, (config.accentColor || '#8b0000') + '60');
+    glowGradient.addColorStop(1, 'transparent');
+    ctx.fillStyle = glowGradient;
+    ctx.beginPath();
+    ctx.arc(x, y, eyeSize * 2, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Eye socket (dark ring)
+    ctx.strokeStyle = config.veinColor || '#990000';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.arc(x, y, eyeSize * 1.3, 0, Math.PI * 2);
+    ctx.stroke();
+
+    // Eye iris
+    const irisGradient = ctx.createRadialGradient(x, y, 0, x, y, eyeSize);
+    irisGradient.addColorStop(0, config.eyeColor || '#ff0000');
+    irisGradient.addColorStop(0.6, config.accentColor || '#8b0000');
+    irisGradient.addColorStop(1, '#330000');
+    ctx.fillStyle = irisGradient;
+    ctx.beginPath();
+    ctx.arc(x, y, eyeSize, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Vertical slit pupil
+    ctx.fillStyle = '#000000';
+    const slitWidth = eyeSize * 0.15;
+    const slitHeight = eyeSize * 0.8;
+    ctx.beginPath();
+    ctx.ellipse(x, y, slitWidth, slitHeight, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Eye highlight
+    ctx.fillStyle = '#ffffff50';
+    ctx.beginPath();
+    ctx.arc(x - eyeSize * 0.25, y - eyeSize * 0.3, eyeSize * 0.15, 0, Math.PI * 2);
+    ctx.fill();
+  },
+
+  /**
+   * Draw organic vein growths overlay
+   * @param {CanvasRenderingContext2D} ctx
+   * @param {number} size - Base size
+   * @param {object} config - Base config with veinColor
+   * @param {number} veinCount - Number of veins
+   */
+  drawOrganicGrowths(ctx, size, config, veinCount = 8) {
+    const time = this.animationTime;
+
+    // Draw pulsing veins radiating outward
+    ctx.lineWidth = 3;
+    for (let i = 0; i < veinCount; i++) {
+      const baseAngle = (Math.PI * 2 * i) / veinCount;
+      const length = size * 0.6 + Math.sin(time + i) * size * 0.1;
+
+      // Vein path with waviness
+      ctx.strokeStyle = config.veinColor || '#990000';
+      ctx.globalAlpha = 0.6;
+      ctx.beginPath();
+      ctx.moveTo(0, 0);
+
+      const midX = Math.cos(baseAngle + Math.sin(time + i) * 0.1) * length * 0.5;
+      const midY = Math.sin(baseAngle + Math.sin(time + i) * 0.1) * length * 0.5;
+      const endX = Math.cos(baseAngle) * length;
+      const endY = Math.sin(baseAngle) * length;
+
+      ctx.quadraticCurveTo(midX, midY, endX, endY);
+      ctx.stroke();
+
+      // Blood pulse traveling along vein
+      const pulsePos = (time * 1.5 + i * 0.4) % 1;
+      const pulseX = midX * pulsePos * 2;
+      const pulseY = midY * pulsePos * 2;
+
+      ctx.fillStyle = config.eyeColor || '#ff0000';
+      ctx.globalAlpha = 0.7 * (1 - pulsePos);
+      ctx.beginPath();
+      ctx.arc(pulseX, pulseY, 4, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+
+    // Organic membrane patches
+    ctx.fillStyle = config.secondaryColor + '80';
+    for (let i = 0; i < 5; i++) {
+      const patchAngle = (Math.PI * 2 * i) / 5 + Math.PI / 10;
+      const patchDist = size * 0.35;
+      const patchSize = size * 0.15 + Math.sin(time * 2 + i) * size * 0.03;
+      ctx.beginPath();
+      ctx.ellipse(
+        Math.cos(patchAngle) * patchDist,
+        Math.sin(patchAngle) * patchDist,
+        patchSize * 0.6,
+        patchSize,
+        patchAngle,
+        0,
+        Math.PI * 2
+      );
+      ctx.fill();
+    }
+  },
+
+  /**
+   * Assimilated Pirate Outpost
+   * - Skull replaced with swarm eye
+   * - Turrets overgrown with organic matter
+   * - Dark crimson color scheme
+   */
+  drawAssimilatedPirateOutpost(ctx, config) {
+    const time = this.animationTime;
+    const size = config.size;
+
+    // Organic outer glow (crimson)
+    const gradient = ctx.createRadialGradient(0, 0, size * 0.5, 0, 0, size * 1.5);
+    gradient.addColorStop(0, config.glowColor);
+    gradient.addColorStop(1, 'transparent');
+    ctx.fillStyle = gradient;
+    ctx.beginPath();
+    ctx.arc(0, 0, size * 1.5, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Corrupted main body - irregular octagon with organic bulges
+    ctx.fillStyle = config.secondaryColor;
+    ctx.strokeStyle = config.accentColor;
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    for (let i = 0; i < 8; i++) {
+      const angle = (Math.PI * 2 * i) / 8 - Math.PI / 8;
+      const bulge = Math.sin(time + i * 2) * size * 0.05;
+      const r = size * 0.7 + bulge;
+      if (i === 0) {
+        ctx.moveTo(Math.cos(angle) * r, Math.sin(angle) * r);
+      } else {
+        ctx.lineTo(Math.cos(angle) * r, Math.sin(angle) * r);
+      }
+    }
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+
+    // Organic veins overlay
+    this.drawOrganicGrowths(ctx, size, config, 6);
+
+    // Center core with swarm eye (replaces skull)
+    ctx.fillStyle = config.color;
+    ctx.beginPath();
+    ctx.arc(0, 0, size * 0.28, 0, Math.PI * 2);
+    ctx.fill();
+    this.drawSwarmEye(ctx, 0, 0, size * 0.15, config);
+
+    // Corrupted turret arms - now organic tentacles
+    ctx.strokeStyle = config.veinColor;
+    ctx.lineWidth = 6;
+    for (let i = 0; i < 4; i++) {
+      const angle = (Math.PI * 2 * i) / 4 + Math.PI / 4;
+      const wave = Math.sin(time * 2 + i) * 0.1;
+
+      // Tentacle arm
+      ctx.beginPath();
+      ctx.moveTo(Math.cos(angle) * size * 0.5, Math.sin(angle) * size * 0.5);
+      const tipX = Math.cos(angle + wave) * size;
+      const tipY = Math.sin(angle + wave) * size;
+      const ctrlX = Math.cos(angle + wave * 0.5) * size * 0.75;
+      const ctrlY = Math.sin(angle + wave * 0.5) * size * 0.75;
+      ctx.quadraticCurveTo(ctrlX, ctrlY, tipX, tipY);
+      ctx.stroke();
+
+      // Organic turret bulb at end
+      ctx.fillStyle = config.accentColor;
+      ctx.beginPath();
+      ctx.arc(tipX, tipY, 10 + Math.sin(time * 3 + i) * 2, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // Pulsing warning lights (now organic bioluminescence)
+    const blinkPhase = Math.floor(time * 2) % 4;
+    for (let i = 0; i < 4; i++) {
+      const angle = (Math.PI * 2 * i) / 4 + Math.PI / 4;
+      const x = Math.cos(angle) * size;
+      const y = Math.sin(angle) * size;
+
+      ctx.fillStyle = (i === blinkPhase) ? config.eyeColor : config.veinColor;
+      ctx.beginPath();
+      ctx.arc(x, y, 6, 0, Math.PI * 2);
+      ctx.fill();
+
+      if (i === blinkPhase) {
+        ctx.fillStyle = config.eyeColor + '40';
+        ctx.beginPath();
+        ctx.arc(x, y, 14, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+  },
+
+  /**
+   * Assimilated Scavenger Yard
+   * - Crane arm becomes tentacle
+   * - Debris becomes organic masses
+   * - Central salvage node becomes swarm eye
+   */
+  drawAssimilatedScavengerYard(ctx, config) {
+    const time = this.animationTime;
+    const size = config.size;
+
+    // Organic glow
+    const gradient = ctx.createRadialGradient(0, 0, 0, 0, 0, size * 1.3);
+    gradient.addColorStop(0, config.glowColor);
+    gradient.addColorStop(1, 'transparent');
+    ctx.fillStyle = gradient;
+    ctx.beginPath();
+    ctx.arc(0, 0, size * 1.3, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Assimilated debris - organic pods instead of metal
+    const debrisCount = 10;
+    for (let i = 0; i < debrisCount; i++) {
+      const angle = (Math.PI * 2 * i) / debrisCount + Math.sin(i * 1.5) * 0.3;
+      const dist = size * (0.35 + (i % 3) * 0.2);
+      const podSize = 10 + (i % 4) * 8;
+      const pulse = Math.sin(time * 2 + i) * 0.15;
+
+      ctx.save();
+      ctx.translate(Math.cos(angle) * dist, Math.sin(angle) * dist);
+      ctx.rotate(angle);
+
+      // Organic pod shape
+      const podGradient = ctx.createRadialGradient(0, 0, 0, 0, 0, podSize);
+      podGradient.addColorStop(0, config.veinColor);
+      podGradient.addColorStop(0.7, config.secondaryColor);
+      podGradient.addColorStop(1, config.color);
+      ctx.fillStyle = podGradient;
+      ctx.beginPath();
+      ctx.ellipse(0, 0, podSize * (0.7 + pulse), podSize * (1 + pulse), 0, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.restore();
+    }
+
+    // Tentacle crane arm (replaces mechanical crane)
+    const tentacleAngle = Math.sin(time * 0.4) * 0.5;
+    const tentacleLength = size * 0.85;
+    ctx.save();
+    ctx.rotate(tentacleAngle - Math.PI / 4);
+
+    // Base bulb
+    ctx.fillStyle = config.accentColor;
+    ctx.beginPath();
+    ctx.arc(0, 0, 15, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Tentacle segments
+    ctx.strokeStyle = config.veinColor;
+    ctx.lineWidth = 8;
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    const segments = 6;
+    for (let i = 1; i <= segments; i++) {
+      const segLen = (tentacleLength / segments) * i;
+      const wave = Math.sin(time * 3 + i * 0.5) * 10 * (i / segments);
+      ctx.lineTo(segLen, wave);
+    }
+    ctx.stroke();
+
+    // Claw/sucker tips
+    const tipX = tentacleLength;
+    const tipY = Math.sin(time * 3 + segments * 0.5) * 10;
+    const suckOpen = 0.4 + Math.sin(time * 2) * 0.1;
+    ctx.strokeStyle = config.eyeColor;
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.moveTo(tipX, tipY);
+    ctx.lineTo(tipX + 18, tipY - 18 * suckOpen);
+    ctx.moveTo(tipX, tipY);
+    ctx.lineTo(tipX + 18, tipY + 18 * suckOpen);
+    ctx.stroke();
+
+    ctx.restore();
+
+    // Central swarm eye (replaces salvage node)
+    const pulseIntensity = 0.5 + Math.sin(time * 2) * 0.3;
+    ctx.fillStyle = `rgba(139, 0, 0, ${pulseIntensity * 0.4})`;
+    ctx.beginPath();
+    ctx.arc(0, 0, size * 0.35, 0, Math.PI * 2);
+    ctx.fill();
+
+    this.drawSwarmEye(ctx, 0, 0, size * 0.12, config);
+  },
+
+  /**
+   * Assimilated Void Rift
+   * - Rings turn crimson with organic texture
+   * - Energy tendrils become blood vessels
+   * - Core becomes swarm eye
+   */
+  drawAssimilatedVoidRift(ctx, config) {
+    const time = this.animationTime;
+    const size = config.size;
+
+    // Swirling crimson aura (replacing purple)
+    for (let ring = 3; ring >= 0; ring--) {
+      const ringSize = size * (1.2 - ring * 0.15);
+      const rotation = time * (0.5 + ring * 0.2) * ((ring % 2) ? 1 : -1);
+
+      ctx.save();
+      ctx.rotate(rotation);
+
+      // Corrupted organic ring
+      const gradient = ctx.createRadialGradient(0, 0, ringSize * 0.5, 0, 0, ringSize);
+      gradient.addColorStop(0, 'transparent');
+      gradient.addColorStop(0.5, config.accentColor + '40');
+      gradient.addColorStop(1, 'transparent');
+
+      ctx.fillStyle = gradient;
+      ctx.beginPath();
+      for (let i = 0; i < 24; i++) {
+        const angle = (Math.PI * 2 * i) / 24;
+        const distort = Math.sin(angle * 3 + time * 2 + ring) * ringSize * 0.2;
+        const r = ringSize + distort;
+        if (i === 0) {
+          ctx.moveTo(Math.cos(angle) * r, Math.sin(angle) * r);
+        } else {
+          ctx.lineTo(Math.cos(angle) * r, Math.sin(angle) * r);
+        }
+      }
+      ctx.closePath();
+      ctx.fill();
+
+      ctx.restore();
+    }
+
+    // Organic blood veins (replacing energy tendrils)
+    this.drawOrganicGrowths(ctx, size, config, 7);
+
+    // Dark corrupted core
+    const coreGradient = ctx.createRadialGradient(0, 0, 0, 0, 0, size * 0.5);
+    coreGradient.addColorStop(0, '#000000');
+    coreGradient.addColorStop(0.6, config.secondaryColor);
+    coreGradient.addColorStop(1, 'transparent');
+    ctx.fillStyle = coreGradient;
+    ctx.beginPath();
+    ctx.arc(0, 0, size * 0.5, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Central swarm eye
+    this.drawSwarmEye(ctx, 0, 0, size * 0.18, config);
+  },
+
+  /**
+   * Assimilated Mining Claim
+   * - Platform overgrown with organic matter
+   * - Mining laser becomes spore emitter
+   * - Asteroid absorbed into organic mass
+   */
+  drawAssimilatedMiningClaim(ctx, config) {
+    const time = this.animationTime;
+    const size = config.size;
+
+    // Organic glow
+    const gradient = ctx.createRadialGradient(0, 0, size * 0.3, 0, 0, size * 1.2);
+    gradient.addColorStop(0, config.glowColor);
+    gradient.addColorStop(1, 'transparent');
+    ctx.fillStyle = gradient;
+    ctx.beginPath();
+    ctx.arc(0, 0, size * 1.2, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Assimilated asteroid - organic mass with veins
+    ctx.fillStyle = config.secondaryColor;
+    ctx.beginPath();
+    for (let i = 0; i < 12; i++) {
+      const angle = (Math.PI * 2 * i) / 12;
+      const pulse = Math.sin(time * 2 + i) * size * 0.05;
+      const r = size * 0.45 * (0.8 + Math.sin(i * 2.5) * 0.2) + pulse;
+      if (i === 0) {
+        ctx.moveTo(Math.cos(angle) * r, Math.sin(angle) * r);
+      } else {
+        ctx.lineTo(Math.cos(angle) * r, Math.sin(angle) * r);
+      }
+    }
+    ctx.closePath();
+    ctx.fill();
+
+    // Infected resource nodes (pulsing crimson)
+    ctx.fillStyle = config.eyeColor;
+    for (let i = 0; i < 4; i++) {
+      const angle = (Math.PI * 2 * i) / 4 + 0.3;
+      const dist = size * 0.22;
+      const nodeSize = 5 + Math.sin(time * 3 + i) * 2;
+      ctx.beginPath();
+      ctx.arc(Math.cos(angle) * dist, Math.sin(angle) * dist, nodeSize, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // Organic veins on asteroid
+    this.drawOrganicGrowths(ctx, size * 0.5, config, 5);
+
+    // Corrupted platform - organic growth over metal
+    ctx.fillStyle = config.color;
+    ctx.strokeStyle = config.veinColor;
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    // Irregular organic platform shape
+    ctx.moveTo(-size * 0.85, size * 0.35);
+    ctx.quadraticCurveTo(-size * 0.5, size * 0.3 + Math.sin(time) * 5, 0, size * 0.35);
+    ctx.quadraticCurveTo(size * 0.5, size * 0.4 + Math.sin(time + 1) * 5, size * 0.85, size * 0.35);
+    ctx.lineTo(size * 0.85, size * 0.55);
+    ctx.quadraticCurveTo(size * 0.5, size * 0.6 + Math.sin(time + 2) * 3, 0, size * 0.55);
+    ctx.quadraticCurveTo(-size * 0.5, size * 0.5 + Math.sin(time + 3) * 3, -size * 0.85, size * 0.55);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+
+    // Organic support tendrils (replacing struts)
+    ctx.strokeStyle = config.veinColor;
+    ctx.lineWidth = 5;
+    ctx.beginPath();
+    ctx.moveTo(-size * 0.5, size * 0.35);
+    ctx.quadraticCurveTo(-size * 0.4, size * 0.15, -size * 0.25, 0);
+    ctx.moveTo(size * 0.5, size * 0.35);
+    ctx.quadraticCurveTo(size * 0.4, size * 0.15, size * 0.25, 0);
+    ctx.stroke();
+
+    // Spore emitter (replaces mining laser)
+    const sporeActive = Math.floor(time * 2) % 3 !== 0;
+    if (sporeActive) {
+      // Spore stream
+      ctx.strokeStyle = config.eyeColor;
+      ctx.lineWidth = 4;
+      ctx.globalAlpha = 0.5 + Math.sin(time * 8) * 0.3;
+      ctx.beginPath();
+      ctx.moveTo(0, size * 0.4);
+      ctx.lineTo(0, size * 0.1);
+      ctx.stroke();
+
+      // Spore particles
+      ctx.fillStyle = config.veinColor;
+      for (let i = 0; i < 4; i++) {
+        const sporeY = size * 0.1 + ((time * 100 + i * 25) % 30);
+        const sporeX = Math.sin(time * 5 + i) * 5;
+        ctx.globalAlpha = 0.6 - (sporeY - size * 0.1) / 40;
+        ctx.beginPath();
+        ctx.arc(sporeX, sporeY, 3, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.globalAlpha = 1;
+    }
+
+    // Corruption veins on platform
+    ctx.strokeStyle = config.veinColor;
+    ctx.lineWidth = 2;
+    ctx.globalAlpha = 0.5;
+    for (let i = 0; i < 4; i++) {
+      const startX = -size * 0.7 + i * size * 0.4;
+      ctx.beginPath();
+      ctx.moveTo(startX, size * 0.4);
+      ctx.quadraticCurveTo(startX + 10, size * 0.45, startX + 5, size * 0.52);
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+
+    // Central swarm eye on platform
+    this.drawSwarmEye(ctx, 0, size * 0.45, size * 0.08, config);
   }
 };

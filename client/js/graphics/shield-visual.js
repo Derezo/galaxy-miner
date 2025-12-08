@@ -61,6 +61,23 @@ const ShieldVisual = {
     }
   },
 
+  // Faction-specific shield configurations (overrides tier config)
+  FACTION_SHIELDS: {
+    swarm_queen: {
+      shape: 'honeycomb',
+      cellCount: 19,        // Center + inner ring (6) + outer ring (12)
+      cellRadius: 12,       // Radius of each hexagonal cell
+      primaryColor: { r: 139, g: 0, b: 0 },      // Deep crimson
+      secondaryColor: { r: 60, g: 0, b: 0 },     // Dark crimson
+      glowColor: 'rgba(139, 0, 0, 0.6)',
+      crackedColor: { r: 80, g: 0, b: 0 },       // Damaged cell color
+      size: 1.4
+    }
+  },
+
+  // Honeycomb cell state tracking per entity
+  honeycombStates: new Map(),
+
   // Base shield radius relative to ship size
   BASE_RADIUS: 28,
 
@@ -470,6 +487,366 @@ const ShieldVisual = {
     for (const [id, entry] of this.smoothedShields) {
       if (this.time - entry.lastUpdate > maxAge) {
         this.smoothedShields.delete(id);
+      }
+    }
+  },
+
+  /**
+   * Generate honeycomb cell positions in a hexagonal grid pattern
+   * Returns array of { x, y, ring } for each cell
+   */
+  generateHoneycombCells(cellRadius, cellCount) {
+    const cells = [];
+    const spacing = cellRadius * 1.75; // Spacing between cell centers
+
+    // Center cell
+    cells.push({ x: 0, y: 0, ring: 0, index: 0 });
+
+    if (cellCount <= 1) return cells;
+
+    // Inner ring (6 cells)
+    for (let i = 0; i < 6; i++) {
+      const angle = (i * Math.PI / 3) - Math.PI / 6;
+      cells.push({
+        x: Math.cos(angle) * spacing,
+        y: Math.sin(angle) * spacing,
+        ring: 1,
+        index: cells.length
+      });
+    }
+
+    if (cellCount <= 7) return cells;
+
+    // Outer ring (12 cells)
+    const outerSpacing = spacing * 1.9;
+    for (let i = 0; i < 12; i++) {
+      const angle = (i * Math.PI / 6) - Math.PI / 12;
+      cells.push({
+        x: Math.cos(angle) * outerSpacing,
+        y: Math.sin(angle) * outerSpacing,
+        ring: 2,
+        index: cells.length
+      });
+    }
+
+    return cells;
+  },
+
+  /**
+   * Get or create honeycomb state for an entity
+   */
+  getHoneycombState(entityId, cellCount, shieldPercent) {
+    if (!this.honeycombStates.has(entityId)) {
+      // Initialize all cells as healthy
+      const cells = [];
+      for (let i = 0; i < cellCount; i++) {
+        cells.push({
+          health: 1.0,      // 0-1, full health
+          cracked: false,   // Visual crack overlay
+          broken: false,    // Cell completely destroyed
+          pulsePhase: Math.random() * Math.PI * 2  // Random pulse offset
+        });
+      }
+      this.honeycombStates.set(entityId, {
+        cells,
+        lastShieldPercent: shieldPercent,
+        lastUpdate: this.time
+      });
+    }
+
+    const state = this.honeycombStates.get(entityId);
+
+    // Update cell health based on shield percentage changes
+    const shieldDelta = state.lastShieldPercent - shieldPercent;
+    if (shieldDelta > 0) {
+      // Shield took damage - distribute to cells
+      this.distributeDamageToHoneycomb(state, shieldDelta, shieldPercent);
+    } else if (shieldDelta < 0) {
+      // Shield regenerating - heal cells
+      this.healHoneycombCells(state, -shieldDelta, shieldPercent);
+    }
+
+    state.lastShieldPercent = shieldPercent;
+    state.lastUpdate = this.time;
+
+    return state;
+  },
+
+  /**
+   * Distribute damage across honeycomb cells
+   */
+  distributeDamageToHoneycomb(state, damagePercent, currentPercent) {
+    const damagePerCell = damagePercent / 100;
+
+    // Damage outer cells first, then inner
+    const cellsByRing = [...state.cells]
+      .map((cell, idx) => ({ cell, idx }))
+      .filter(c => !c.cell.broken)
+      .sort((a, b) => {
+        // Outer ring first (higher index = outer)
+        if (a.idx > 6 && b.idx <= 6) return -1;
+        if (b.idx > 6 && a.idx <= 6) return 1;
+        if (a.idx > 0 && b.idx === 0) return -1;
+        if (b.idx > 0 && a.idx === 0) return 1;
+        return 0;
+      });
+
+    let remainingDamage = damagePerCell * 3; // Amplify for visual effect
+
+    for (const { cell, idx } of cellsByRing) {
+      if (remainingDamage <= 0) break;
+
+      const cellDamage = Math.min(remainingDamage, cell.health);
+      cell.health -= cellDamage;
+      remainingDamage -= cellDamage;
+
+      // Mark as cracked when below 50%
+      if (cell.health < 0.5 && !cell.cracked) {
+        cell.cracked = true;
+      }
+
+      // Mark as broken when depleted
+      if (cell.health <= 0) {
+        cell.health = 0;
+        cell.broken = true;
+      }
+    }
+  },
+
+  /**
+   * Heal honeycomb cells as shield regenerates
+   */
+  healHoneycombCells(state, healPercent, currentPercent) {
+    const healPerCell = healPercent / 100;
+
+    // Heal center cell first, then inner ring, then outer
+    const cellsByRing = [...state.cells]
+      .map((cell, idx) => ({ cell, idx }))
+      .sort((a, b) => a.idx - b.idx);
+
+    let remainingHeal = healPerCell * 3;
+
+    for (const { cell } of cellsByRing) {
+      if (remainingHeal <= 0) break;
+
+      const cellHeal = Math.min(remainingHeal, 1 - cell.health);
+      cell.health += cellHeal;
+      remainingHeal -= cellHeal;
+
+      // Restore cracked cells when above 70%
+      if (cell.health > 0.7) {
+        cell.cracked = false;
+      }
+
+      // Restore broken cells when healed
+      if (cell.broken && cell.health > 0.3) {
+        cell.broken = false;
+      }
+    }
+  },
+
+  /**
+   * Draw a single hexagonal cell
+   */
+  drawHoneycombCell(ctx, x, y, radius, cellState, config, time) {
+    const { health, cracked, broken, pulsePhase } = cellState;
+
+    // Don't draw broken cells (leave gap)
+    if (broken) {
+      // Draw faint ghost outline for broken cell
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.beginPath();
+      for (let i = 0; i < 6; i++) {
+        const angle = (i * Math.PI / 3) - Math.PI / 2;
+        const px = Math.cos(angle) * radius * 0.9;
+        const py = Math.sin(angle) * radius * 0.9;
+        if (i === 0) ctx.moveTo(px, py);
+        else ctx.lineTo(px, py);
+      }
+      ctx.closePath();
+      ctx.strokeStyle = `rgba(${config.crackedColor.r}, ${config.crackedColor.g}, ${config.crackedColor.b}, 0.2)`;
+      ctx.lineWidth = 1;
+      ctx.stroke();
+      ctx.restore();
+      return;
+    }
+
+    // Pulse effect based on health
+    const pulse = 1 + Math.sin(time * 3 + pulsePhase) * 0.05 * health;
+    const effectiveRadius = radius * pulse;
+
+    ctx.save();
+    ctx.translate(x, y);
+
+    // Create hexagon path
+    ctx.beginPath();
+    for (let i = 0; i < 6; i++) {
+      const angle = (i * Math.PI / 3) - Math.PI / 2;
+      const px = Math.cos(angle) * effectiveRadius;
+      const py = Math.sin(angle) * effectiveRadius;
+      if (i === 0) ctx.moveTo(px, py);
+      else ctx.lineTo(px, py);
+    }
+    ctx.closePath();
+
+    // Fill with gradient based on health
+    const gradient = ctx.createRadialGradient(0, 0, 0, 0, 0, effectiveRadius);
+    const alpha = 0.3 + health * 0.5;
+
+    if (cracked) {
+      // Damaged cell - darker, more red
+      gradient.addColorStop(0, `rgba(${config.crackedColor.r}, ${config.crackedColor.g}, ${config.crackedColor.b}, ${alpha * 0.6})`);
+      gradient.addColorStop(1, `rgba(${config.secondaryColor.r}, ${config.secondaryColor.g}, ${config.secondaryColor.b}, ${alpha})`);
+    } else {
+      // Healthy cell - crimson glow
+      gradient.addColorStop(0, `rgba(${config.primaryColor.r + 40}, ${config.primaryColor.g}, ${config.primaryColor.b}, ${alpha * 0.4})`);
+      gradient.addColorStop(0.7, `rgba(${config.primaryColor.r}, ${config.primaryColor.g}, ${config.primaryColor.b}, ${alpha * 0.7})`);
+      gradient.addColorStop(1, `rgba(${config.secondaryColor.r}, ${config.secondaryColor.g}, ${config.secondaryColor.b}, ${alpha})`);
+    }
+
+    ctx.fillStyle = gradient;
+    ctx.fill();
+
+    // Draw border
+    const borderAlpha = 0.5 + health * 0.5;
+    ctx.strokeStyle = `rgba(${config.primaryColor.r + 60}, ${config.primaryColor.g + 20}, ${config.primaryColor.b + 20}, ${borderAlpha})`;
+    ctx.lineWidth = cracked ? 1 : 2;
+    ctx.stroke();
+
+    // Draw cracks if damaged
+    if (cracked) {
+      ctx.strokeStyle = `rgba(0, 0, 0, ${0.6 - health * 0.4})`;
+      ctx.lineWidth = 1;
+
+      // Random crack lines
+      const crackCount = Math.floor((1 - health) * 4) + 1;
+      for (let i = 0; i < crackCount; i++) {
+        const startAngle = (i / crackCount) * Math.PI * 2 + pulsePhase;
+        ctx.beginPath();
+        ctx.moveTo(0, 0);
+        const crackLength = effectiveRadius * (0.5 + Math.random() * 0.4);
+        const endX = Math.cos(startAngle) * crackLength;
+        const endY = Math.sin(startAngle) * crackLength;
+
+        // Jagged crack line
+        const midX = endX * 0.5 + (Math.random() - 0.5) * radius * 0.3;
+        const midY = endY * 0.5 + (Math.random() - 0.5) * radius * 0.3;
+        ctx.lineTo(midX, midY);
+        ctx.lineTo(endX, endY);
+        ctx.stroke();
+      }
+    }
+
+    // Inner glow for healthy cells
+    if (health > 0.7 && !cracked) {
+      ctx.beginPath();
+      ctx.arc(0, 0, effectiveRadius * 0.3, 0, Math.PI * 2);
+      const glowGradient = ctx.createRadialGradient(0, 0, 0, 0, 0, effectiveRadius * 0.3);
+      glowGradient.addColorStop(0, `rgba(255, 100, 100, ${0.3 * health})`);
+      glowGradient.addColorStop(1, 'rgba(255, 100, 100, 0)');
+      ctx.fillStyle = glowGradient;
+      ctx.fill();
+    }
+
+    ctx.restore();
+  },
+
+  /**
+   * Draw honeycomb shield for swarm queen
+   * @param {CanvasRenderingContext2D} ctx - Canvas context
+   * @param {number} screenX - Screen X position
+   * @param {number} screenY - Screen Y position
+   * @param {number} rotation - Ship rotation
+   * @param {number} shieldPercent - Shield percentage (0-100)
+   * @param {string} entityId - Unique entity identifier
+   * @param {number} shipSize - Ship size for scaling
+   */
+  drawHoneycombShield(ctx, screenX, screenY, rotation, shieldPercent, entityId, shipSize = 40) {
+    if (shieldPercent <= 0) return;
+
+    const config = this.FACTION_SHIELDS.swarm_queen;
+    const state = this.getHoneycombState(entityId, config.cellCount, shieldPercent);
+    const cells = this.generateHoneycombCells(config.cellRadius, config.cellCount);
+
+    // Scale based on ship size
+    const scale = (shipSize / 40) * config.size;
+
+    ctx.save();
+    ctx.translate(screenX, screenY);
+    ctx.rotate(rotation);
+    ctx.scale(scale, scale);
+
+    // Outer glow effect
+    const glowRadius = config.cellRadius * 4;
+    const glowGradient = ctx.createRadialGradient(0, 0, 0, 0, 0, glowRadius);
+    glowGradient.addColorStop(0, 'rgba(139, 0, 0, 0)');
+    glowGradient.addColorStop(0.7, 'rgba(139, 0, 0, 0.1)');
+    glowGradient.addColorStop(1, 'rgba(139, 0, 0, 0.3)');
+
+    ctx.beginPath();
+    ctx.arc(0, 0, glowRadius, 0, Math.PI * 2);
+    ctx.fillStyle = glowGradient;
+    ctx.fill();
+
+    // Draw each cell
+    for (let i = 0; i < cells.length && i < state.cells.length; i++) {
+      const cell = cells[i];
+      const cellState = state.cells[i];
+      this.drawHoneycombCell(ctx, cell.x, cell.y, config.cellRadius, cellState, config, this.time);
+    }
+
+    // Draw connecting energy lines between cells
+    ctx.strokeStyle = `rgba(${config.primaryColor.r}, ${config.primaryColor.g}, ${config.primaryColor.b}, 0.2)`;
+    ctx.lineWidth = 1;
+
+    for (let i = 1; i < cells.length; i++) {
+      if (state.cells[i].broken) continue;
+
+      // Connect to center
+      if (i <= 6 && !state.cells[0].broken) {
+        ctx.beginPath();
+        ctx.moveTo(0, 0);
+        ctx.lineTo(cells[i].x * 0.3, cells[i].y * 0.3);
+        ctx.stroke();
+      }
+    }
+
+    ctx.restore();
+  },
+
+  /**
+   * Draw shield for faction-specific entities (NPCs with custom shields)
+   * @param {CanvasRenderingContext2D} ctx - Canvas context
+   * @param {number} screenX - Screen X position
+   * @param {number} screenY - Screen Y position
+   * @param {number} rotation - Ship rotation
+   * @param {number} shieldPercent - Shield percentage
+   * @param {string} npcType - NPC type for faction shield lookup
+   * @param {string} entityId - Unique entity identifier
+   * @param {number} shipSize - Ship size for scaling
+   */
+  drawFactionShield(ctx, screenX, screenY, rotation, shieldPercent, npcType, entityId, shipSize = 20) {
+    // Check for faction-specific shield
+    if (this.FACTION_SHIELDS[npcType]) {
+      if (npcType === 'swarm_queen') {
+        this.drawHoneycombShield(ctx, screenX, screenY, rotation, shieldPercent, entityId, shipSize);
+        return;
+      }
+    }
+
+    // Fall back to tier-based shield (use tier 5 for bosses)
+    this.drawShieldForEntity(ctx, 0, 0, screenX, screenY, rotation, shieldPercent, 5, entityId, shipSize);
+  },
+
+  /**
+   * Clean up honeycomb states for entities that haven't been updated
+   */
+  cleanupHoneycombStates() {
+    const maxAge = 10; // seconds
+    for (const [id, state] of this.honeycombStates) {
+      if (this.time - state.lastUpdate > maxAge) {
+        this.honeycombStates.delete(id);
       }
     }
   }

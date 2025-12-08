@@ -234,8 +234,11 @@ const UIState = createStore({
   currentTab: 'cargo',
   modalStack: [],
 
-  // Toast notifications
-  toasts: []
+  // Toast notifications (legacy)
+  toasts: [],
+
+  // Message stack notifications (new)
+  messages: []
 });
 
 // Export for browser

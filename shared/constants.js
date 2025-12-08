@@ -956,7 +956,7 @@ const CONSTANTS = {
       name: 'Swarm Hive',
       faction: 'swarm',
       health: 5000,
-      size: 200,
+      size: 240,  // Increased 20% from 200
       respawnTime: 600000, // 10 minutes
       continuousSpawn: true,
       spawnInterval: 10000, // 10 seconds
@@ -1010,6 +1010,132 @@ const CONSTANTS = {
         orbitsWithBelt: true
       }
     }
+  },
+
+  // Swarm Assimilation System
+  SWARM_ASSIMILATION: {
+    DRONE_ASSIMILATE_SPEED: 120,        // Movement speed toward target base
+    ASSIMILATION_THRESHOLD: 3,          // Drones needed to convert a base
+    ASSIMILATE_RANGE: 50,               // Distance to "reach" the base for sacrifice
+    SEARCH_RANGE: 2000                  // Range drones search for enemy bases
+  },
+
+  // Swarm Egg Hatching
+  SWARM_HATCHING: {
+    SPAWN_RADIUS: 100,                  // Eggs spawn within 100 units of base
+    HATCH_DURATION: 2500,               // 2.5 seconds hatch time for regular swarm
+    QUEEN_HATCH_DURATION: 4000          // 4 seconds hatch time for queen
+  },
+
+  // Swarm Queen Spawning
+  SWARM_QUEEN_SPAWN: {
+    ASSIMILATED_BASES_REQUIRED: 3,      // Bases in same sector to trigger queen
+    QUEEN_SPAWN_COOLDOWN: 3600000,      // 1 hour between queen spawns (server-wide)
+    MAX_QUEENS: 1,                       // Maximum queens at any time
+    QUEEN_AURA_RANGE: 2000,             // Range for base health regen aura
+    BASE_REGEN_PERCENT: 0.005,          // 0.5% health/second for bases in aura
+    QUEEN_GUARD_RANGE: 500,             // Range where swarm NPCs switch to guard mode
+    QUEEN_SIZE_MULTIPLIER: 2.5          // 150% larger than normal boss visual (spider)
+  },
+
+  // Swarm Queen Phase-Based Boss AI
+  SWARM_QUEEN_PHASES: {
+    // Phase thresholds (percentage of max health)
+    HUNT: {
+      minHealth: 0.75,
+      maxHealth: 1.0,
+      name: 'Hunt Phase',
+      color: { primary: '#8b0000', glow: '#ff000040' }
+    },
+    SIEGE: {
+      minHealth: 0.50,
+      maxHealth: 0.75,
+      name: 'Siege Phase',
+      color: { primary: '#990033', glow: '#ff336640' }
+    },
+    SWARM: {
+      minHealth: 0.10,
+      maxHealth: 0.50,
+      name: 'Swarm Phase',
+      color: { primary: '#660066', glow: '#9900ff60' }
+    },
+    DESPERATION: {
+      minHealth: 0,
+      maxHealth: 0.10,
+      name: 'Desperation Phase',
+      color: { primary: '#ff3300', glow: '#ff660080' }
+    }
+  },
+
+  // Phase-specific modifiers
+  SWARM_QUEEN_PHASE_MODIFIERS: {
+    HUNT: {
+      speedMultiplier: 2.0,           // 40 -> 80 units/sec for pursuit
+      damageMultiplier: 1.0,
+      spawnRateMultiplier: 0.5,       // Slower spawns during hunt
+      aggroMultiplier: 1.5
+    },
+    SIEGE: {
+      speedMultiplier: 0.6,           // Slower, defensive
+      damageMultiplier: 0.8,
+      spawnRateMultiplier: 2.0,       // Double spawn rate
+      aggroMultiplier: 1.0
+    },
+    SWARM: {
+      speedMultiplier: 0.8,
+      damageMultiplier: 1.2,
+      spawnRateMultiplier: 3.0,       // Triple spawn rate
+      aggroMultiplier: 2.0
+    },
+    DESPERATION: {
+      speedMultiplier: 2.5,           // Berserk speed
+      damageMultiplier: 2.0,          // Double damage
+      spawnRateMultiplier: 0,         // No more spawning, all-in attack
+      aggroMultiplier: 3.0
+    }
+  },
+
+  // Queen Special Attacks
+  QUEEN_ATTACKS: {
+    WEB_SNARE: {
+      cooldown: 15000,                // 15 second cooldown
+      range: 400,                      // Cast range
+      radius: 150,                     // Effect radius
+      duration: 4000,                  // 4 seconds of slow
+      slowPercent: 0.6,                // 60% movement speed reduction
+      chargeTime: 1000,                // 1 second charge animation
+      projectileSpeed: 300             // Web projectile speed
+    },
+    ACID_BURST: {
+      cooldown: 12000,                // 12 second cooldown
+      range: 350,                      // Cast range
+      radius: 100,                     // Explosion radius
+      damage: 15,                      // Impact damage
+      dotDamage: 5,                    // Damage per tick
+      dotDuration: 5000,               // 5 seconds DoT
+      dotInterval: 1000,               // Tick every second
+      projectileSpeed: 250
+    }
+  },
+
+  // NPC to Swarm conversion mapping
+  SWARM_CONVERSION_MAP: {
+    // Pirates
+    pirate_scout: 'swarm_drone',
+    pirate_fighter: 'swarm_worker',
+    pirate_captain: 'swarm_warrior',
+    // Scavengers
+    scavenger_scrapper: 'swarm_drone',
+    scavenger_salvager: 'swarm_worker',
+    scavenger_collector: 'swarm_warrior',
+    // Void
+    void_whisper: 'swarm_drone',
+    void_shadow: 'swarm_worker',
+    void_phantom: 'swarm_warrior',
+    // Rogue Miners
+    rogue_prospector: 'swarm_drone',
+    rogue_driller: 'swarm_worker',
+    rogue_excavator: 'swarm_warrior'
   },
 
   // Wreckage

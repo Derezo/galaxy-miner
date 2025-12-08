@@ -10,11 +10,11 @@ const Renderer = {
   lastDt: 0,
 
   init() {
-    this.canvas = document.getElementById('gameCanvas');
-    this.ctx = this.canvas.getContext('2d');
+    this.canvas = document.getElementById("gameCanvas");
+    this.ctx = this.canvas.getContext("2d");
 
     // Handle resize
-    window.addEventListener('resize', () => this.resize());
+    window.addEventListener("resize", () => this.resize());
     this.resize();
 
     // Initialize graphics systems
@@ -22,57 +22,57 @@ const Renderer = {
     ShipGeometry.init();
 
     // Initialize NPC ship geometry if available
-    if (typeof NPCShipGeometry !== 'undefined') {
+    if (typeof NPCShipGeometry !== "undefined") {
       NPCShipGeometry.init();
     }
 
     // Initialize death effects if available
-    if (typeof DeathEffects !== 'undefined') {
+    if (typeof DeathEffects !== "undefined") {
       DeathEffects.init();
     }
 
     // Initialize base destruction sequence if available
-    if (typeof BaseDestructionSequence !== 'undefined') {
+    if (typeof BaseDestructionSequence !== "undefined") {
       BaseDestructionSequence.init();
     }
 
     // Initialize linked damage effect if available
-    if (typeof LinkedDamageEffect !== 'undefined') {
+    if (typeof LinkedDamageEffect !== "undefined") {
       LinkedDamageEffect.init();
     }
 
     // Initialize formation succession effect if available
-    if (typeof FormationSuccessionEffect !== 'undefined') {
+    if (typeof FormationSuccessionEffect !== "undefined") {
       FormationSuccessionEffect.init();
     }
 
     // Initialize NPC weapon effects if available
-    if (typeof NPCWeaponEffects !== 'undefined') {
+    if (typeof NPCWeaponEffects !== "undefined") {
       NPCWeaponEffects.init();
     }
 
     // Initialize faction bases if available
-    if (typeof FactionBases !== 'undefined') {
+    if (typeof FactionBases !== "undefined") {
       FactionBases.init();
     }
 
     // Initialize star effects if available
-    if (typeof StarEffects !== 'undefined') {
+    if (typeof StarEffects !== "undefined") {
       StarEffects.init();
     }
 
     // Initialize new HUD visual modules
-    if (typeof ShieldVisual !== 'undefined') {
+    if (typeof ShieldVisual !== "undefined") {
       ShieldVisual.init();
     }
-    if (typeof HullBarRenderer !== 'undefined') {
+    if (typeof HullBarRenderer !== "undefined") {
       HullBarRenderer.init();
     }
-    if (typeof BoostIndicator !== 'undefined') {
+    if (typeof BoostIndicator !== "undefined") {
       BoostIndicator.init();
     }
 
-    Logger.log('Renderer initialized with advanced graphics');
+    Logger.log("Renderer initialized with advanced graphics");
   },
 
   resize() {
@@ -89,55 +89,63 @@ const Renderer = {
     WeaponRenderer.update(dt);
 
     // Update NPC weapon effects
-    if (typeof NPCWeaponEffects !== 'undefined') {
+    if (typeof NPCWeaponEffects !== "undefined") {
       NPCWeaponEffects.update(dt);
     }
 
     // Update death effects
-    if (typeof DeathEffects !== 'undefined') {
+    if (typeof DeathEffects !== "undefined") {
       DeathEffects.update(dt);
     }
 
     // Update base destruction sequences
-    if (typeof BaseDestructionSequence !== 'undefined') {
+    if (typeof BaseDestructionSequence !== "undefined") {
       BaseDestructionSequence.update(dt);
     }
 
     // Update linked damage effect
-    if (typeof LinkedDamageEffect !== 'undefined') {
+    if (typeof LinkedDamageEffect !== "undefined") {
       LinkedDamageEffect.update(dt);
     }
 
     // Update formation succession effect
-    if (typeof FormationSuccessionEffect !== 'undefined') {
+    if (typeof FormationSuccessionEffect !== "undefined") {
       FormationSuccessionEffect.update(dt);
     }
 
     // Update faction bases animation
-    if (typeof FactionBases !== 'undefined') {
+    if (typeof FactionBases !== "undefined") {
       FactionBases.update(dt);
     }
 
     // Update star effects (corona flares, heat overlay)
-    if (typeof StarEffects !== 'undefined' && typeof Player !== 'undefined') {
-      const objects = World.getVisibleObjects(Player.position, Math.max(this.canvas.width, this.canvas.height));
+    if (typeof StarEffects !== "undefined" && typeof Player !== "undefined") {
+      const objects = World.getVisibleObjects(
+        Player.position,
+        Math.max(this.canvas.width, this.canvas.height)
+      );
       StarEffects.update(dt, objects.stars, Player.position);
     }
 
     // Update player death effect sequence
-    if (typeof PlayerDeathEffect !== 'undefined') {
+    if (typeof PlayerDeathEffect !== "undefined") {
       PlayerDeathEffect.update(dt);
     }
 
     // Update new HUD visual modules
-    if (typeof ShieldVisual !== 'undefined') {
+    if (typeof ShieldVisual !== "undefined") {
       ShieldVisual.update(dt);
     }
-    if (typeof HullBarRenderer !== 'undefined') {
+    if (typeof HullBarRenderer !== "undefined") {
       HullBarRenderer.update(dt);
     }
-    if (typeof BoostIndicator !== 'undefined') {
+    if (typeof BoostIndicator !== "undefined") {
       BoostIndicator.update(dt);
+    }
+
+    // Update reward display animation
+    if (typeof RewardDisplay !== "undefined") {
+      RewardDisplay.update(dt);
     }
   },
 
@@ -152,7 +160,7 @@ const Renderer = {
   drawStarfield() {
     // Simple static starfield for background
     const ctx = this.ctx;
-    ctx.fillStyle = '#ffffff';
+    ctx.fillStyle = "#ffffff";
 
     // Use camera position to create parallax
     const offsetX = (this.camera.x * 0.1) % 100;
@@ -174,14 +182,14 @@ const Renderer = {
     this.camera.y = Player.position.y - this.canvas.height / 2;
 
     // Apply screen shake offset from base destruction sequences
-    if (typeof BaseDestructionSequence !== 'undefined') {
+    if (typeof BaseDestructionSequence !== "undefined") {
       const shake = BaseDestructionSequence.getScreenShakeOffset();
       this.camera.x += shake.x;
       this.camera.y += shake.y;
     }
 
     // Apply screen shake from player death effect
-    if (typeof PlayerDeathEffect !== 'undefined') {
+    if (typeof PlayerDeathEffect !== "undefined") {
       const deathShake = PlayerDeathEffect.getScreenShakeOffset();
       this.camera.x += deathShake.x;
       this.camera.y += deathShake.y;
@@ -191,22 +199,27 @@ const Renderer = {
   worldToScreen(x, y) {
     return {
       x: x - this.camera.x,
-      y: y - this.camera.y
+      y: y - this.camera.y,
     };
   },
 
   isOnScreen(x, y, margin = 100) {
     const screen = this.worldToScreen(x, y);
-    return screen.x > -margin &&
-           screen.x < this.canvas.width + margin &&
-           screen.y > -margin &&
-           screen.y < this.canvas.height + margin;
+    return (
+      screen.x > -margin &&
+      screen.x < this.canvas.width + margin &&
+      screen.y > -margin &&
+      screen.y < this.canvas.height + margin
+    );
   },
 
   drawWorld() {
     this.updateCamera();
 
-    const objects = World.getVisibleObjects(Player.position, Math.max(this.canvas.width, this.canvas.height));
+    const objects = World.getVisibleObjects(
+      Player.position,
+      Math.max(this.canvas.width, this.canvas.height)
+    );
 
     // Draw stars (background layer)
     for (const star of objects.stars) {
@@ -236,37 +249,46 @@ const Renderer = {
     // Use server-sent positions when available for accurate hit detection
     for (const base of objects.bases) {
       // Skip destroyed bases
-      if (typeof Entities !== 'undefined' && Entities.isBaseDestroyed(base.id)) continue;
+      if (typeof Entities !== "undefined" && Entities.isBaseDestroyed(base.id))
+        continue;
 
       // Get server-authoritative position and state if available
       let renderBase = base;
-      if (typeof Entities !== 'undefined') {
+      if (typeof Entities !== "undefined") {
         const serverBase = Entities.bases.get(base.id);
         if (serverBase && serverBase.position) {
           // Use server position for rendering to match hit detection
+          // Also use server type/faction for assimilated bases
           renderBase = {
             ...base,
             x: serverBase.position.x,
             y: serverBase.position.y,
             health: serverBase.health,
-            maxHealth: serverBase.maxHealth
+            maxHealth: serverBase.maxHealth,
+            type: serverBase.type || base.type,
+            faction: serverBase.faction || base.faction,
           };
         } else {
           // Fallback: check for health state only
           const state = Entities.getBaseState(base.id);
           if (state && state.health !== undefined) {
-            renderBase = { ...base, health: state.health, maxHealth: state.maxHealth };
+            renderBase = {
+              ...base,
+              health: state.health,
+              maxHealth: state.maxHealth,
+            };
           }
         }
       }
 
-      if (!this.isOnScreen(renderBase.x, renderBase.y, renderBase.size)) continue;
+      if (!this.isOnScreen(renderBase.x, renderBase.y, renderBase.size))
+        continue;
 
       // Merge health state from Entities into base object for rendering
       let baseWithHealth = renderBase;
 
       // Use FactionBases module for rendering (with fallback)
-      if (typeof FactionBases !== 'undefined' && FactionBases.draw) {
+      if (typeof FactionBases !== "undefined" && FactionBases.draw) {
         FactionBases.draw(this.ctx, baseWithHealth, this.camera);
       } else {
         this.drawBase(baseWithHealth);
@@ -274,8 +296,8 @@ const Renderer = {
     }
 
     // Also render server-known bases that aren't in the procedural list
-    if (typeof Entities !== 'undefined') {
-      const proceduralIds = new Set(objects.bases.map(b => b.id));
+    if (typeof Entities !== "undefined") {
+      const proceduralIds = new Set(objects.bases.map((b) => b.id));
       for (const [baseId, serverBase] of Entities.bases) {
         if (proceduralIds.has(baseId)) continue; // Already rendered
         if (Entities.isBaseDestroyed(baseId)) continue;
@@ -290,12 +312,12 @@ const Renderer = {
           type: serverBase.type,
           name: serverBase.name,
           health: serverBase.health,
-          maxHealth: serverBase.maxHealth
+          maxHealth: serverBase.maxHealth,
         };
 
         if (!this.isOnScreen(base.x, base.y, base.size)) continue;
 
-        if (typeof FactionBases !== 'undefined' && FactionBases.draw) {
+        if (typeof FactionBases !== "undefined" && FactionBases.draw) {
           FactionBases.draw(this.ctx, base, this.camera);
         } else {
           this.drawBase(base);
@@ -310,7 +332,7 @@ const Renderer = {
     const size = star.size || 400;
 
     // Draw corona glow effect first (background layer)
-    if (typeof StarEffects !== 'undefined') {
+    if (typeof StarEffects !== "undefined") {
       StarEffects.drawCoronaGlow(ctx, screen.x, screen.y, star);
     }
 
@@ -320,25 +342,29 @@ const Renderer = {
 
     // Main star body with multi-layer gradient
     const gradient = ctx.createRadialGradient(
-      screen.x, screen.y, 0,
-      screen.x, screen.y, size * turbulence
+      screen.x,
+      screen.y,
+      0,
+      screen.x,
+      screen.y,
+      size * turbulence
     );
 
     // Get star colors based on type
     const colorSchemes = {
-      '#ffff00': { core: '#ffffff', mid: '#ffff88', outer: '#ffaa00' },
-      '#ffaa00': { core: '#ffffff', mid: '#ffcc44', outer: '#ff6600' },
-      '#ff6600': { core: '#ffff88', mid: '#ff8844', outer: '#cc2200' },
-      '#ffffff': { core: '#ffffff', mid: '#ddddff', outer: '#8888cc' },
-      '#aaaaff': { core: '#ffffff', mid: '#aaddff', outer: '#4466aa' }
+      "#ffff00": { core: "#ffffff", mid: "#ffff88", outer: "#ffaa00" },
+      "#ffaa00": { core: "#ffffff", mid: "#ffcc44", outer: "#ff6600" },
+      "#ff6600": { core: "#ffff88", mid: "#ff8844", outer: "#cc2200" },
+      "#ffffff": { core: "#ffffff", mid: "#ddddff", outer: "#8888cc" },
+      "#aaaaff": { core: "#ffffff", mid: "#aaddff", outer: "#4466aa" },
     };
-    const scheme = colorSchemes[star.color] || colorSchemes['#ffff00'];
+    const scheme = colorSchemes[star.color] || colorSchemes["#ffff00"];
 
     gradient.addColorStop(0, scheme.core);
     gradient.addColorStop(0.25, scheme.mid);
     gradient.addColorStop(0.7, star.color);
-    gradient.addColorStop(0.9, scheme.outer + 'aa');
-    gradient.addColorStop(1, 'transparent');
+    gradient.addColorStop(0.9, scheme.outer + "aa");
+    gradient.addColorStop(1, "transparent");
 
     ctx.fillStyle = gradient;
     ctx.beginPath();
@@ -348,7 +374,7 @@ const Renderer = {
     // Animated dark spots on surface (sunspots)
     ctx.save();
     ctx.globalAlpha = 0.15;
-    ctx.fillStyle = '#000000';
+    ctx.fillStyle = "#000000";
     for (let i = 0; i < 3; i++) {
       const spotAngle = time * 0.2 + i * 2;
       const spotDist = size * 0.4 * (0.5 + Math.sin(time * 0.5 + i) * 0.3);
@@ -364,12 +390,16 @@ const Renderer = {
 
     // Bright white core
     const coreGradient = ctx.createRadialGradient(
-      screen.x, screen.y, 0,
-      screen.x, screen.y, size * 0.3
+      screen.x,
+      screen.y,
+      0,
+      screen.x,
+      screen.y,
+      size * 0.3
     );
-    coreGradient.addColorStop(0, '#ffffff');
-    coreGradient.addColorStop(0.5, '#ffffee');
-    coreGradient.addColorStop(1, 'transparent');
+    coreGradient.addColorStop(0, "#ffffff");
+    coreGradient.addColorStop(0.5, "#ffffee");
+    coreGradient.addColorStop(1, "transparent");
 
     ctx.fillStyle = coreGradient;
     ctx.beginPath();
@@ -380,7 +410,7 @@ const Renderer = {
     const zones = CONSTANTS.STAR_ZONES || { CORONA: 1.5, WARM: 1.3 };
     ctx.save();
     ctx.globalAlpha = 0.1 + Math.sin(time * 2) * 0.05;
-    ctx.strokeStyle = '#ff6600';
+    ctx.strokeStyle = "#ff6600";
     ctx.lineWidth = 2;
     ctx.setLineDash([10, 20]);
     ctx.beginPath();
@@ -397,20 +427,22 @@ const Renderer = {
 
     // Planet body
     const colors = {
-      rocky: '#8B4513',
-      gas: '#DEB887',
-      ice: '#ADD8E6',
-      lava: '#FF4500',
-      ocean: '#4169E1'
+      rocky: "#8B4513",
+      gas: "#DEB887",
+      ice: "#ADD8E6",
+      lava: "#FF4500",
+      ocean: "#4169E1",
     };
 
-    ctx.fillStyle = depleted ? '#444444' : (colors[planet.type] || CONSTANTS.COLORS.PLANET);
+    ctx.fillStyle = depleted
+      ? "#444444"
+      : colors[planet.type] || CONSTANTS.COLORS.PLANET;
     ctx.beginPath();
     ctx.arc(screen.x, screen.y, planet.size, 0, Math.PI * 2);
     ctx.fill();
 
     // Border
-    ctx.strokeStyle = depleted ? '#333333' : '#666666';
+    ctx.strokeStyle = depleted ? "#333333" : "#666666";
     ctx.lineWidth = 2;
     ctx.stroke();
   },
@@ -420,13 +452,13 @@ const Renderer = {
     const ctx = this.ctx;
     const depleted = World.isObjectDepleted(asteroid.id);
 
-    ctx.fillStyle = depleted ? '#333333' : CONSTANTS.COLORS.ASTEROID;
+    ctx.fillStyle = depleted ? "#333333" : CONSTANTS.COLORS.ASTEROID;
     ctx.beginPath();
     ctx.arc(screen.x, screen.y, asteroid.size, 0, Math.PI * 2);
     ctx.fill();
 
     // Rough edges (simple polygon)
-    ctx.strokeStyle = depleted ? '#222222' : '#666666';
+    ctx.strokeStyle = depleted ? "#222222" : "#666666";
     ctx.lineWidth = 1;
     ctx.stroke();
   },
@@ -442,12 +474,12 @@ const Renderer = {
 
     // Background void - dark outer edges fading to transparent (no border)
     const voidGradient = ctx.createRadialGradient(0, 0, 0, 0, 0, size);
-    voidGradient.addColorStop(0, 'rgba(200, 230, 255, 0.15)');  // Bright center glow
-    voidGradient.addColorStop(0.15, 'rgba(100, 180, 255, 0.1)');
-    voidGradient.addColorStop(0.4, 'rgba(20, 40, 80, 0.3)');
-    voidGradient.addColorStop(0.7, 'rgba(5, 10, 30, 0.5)');
-    voidGradient.addColorStop(0.9, 'rgba(0, 0, 10, 0.3)');
-    voidGradient.addColorStop(1, 'transparent');
+    voidGradient.addColorStop(0, "rgba(200, 230, 255, 0.15)"); // Bright center glow
+    voidGradient.addColorStop(0.15, "rgba(100, 180, 255, 0.1)");
+    voidGradient.addColorStop(0.4, "rgba(20, 40, 80, 0.3)");
+    voidGradient.addColorStop(0.7, "rgba(5, 10, 30, 0.5)");
+    voidGradient.addColorStop(0.9, "rgba(0, 0, 10, 0.3)");
+    voidGradient.addColorStop(1, "transparent");
     ctx.fillStyle = voidGradient;
     ctx.beginPath();
     ctx.arc(0, 0, size, 0, Math.PI * 2);
@@ -456,7 +488,16 @@ const Renderer = {
     // Main swirling spiral arms (8 arms for denser vortex effect)
     const numArms = 8;
     // Mixed colors: cyan, blue, and some warm orange/yellow like the reference
-    const armColors = ['#00ffff', '#4488ff', '#ff8844', '#00ccff', '#ffaa44', '#0066cc', '#88ddff', '#ff6622'];
+    const armColors = [
+      "#00ffff",
+      "#4488ff",
+      "#ff8844",
+      "#00ccff",
+      "#ffaa44",
+      "#0066cc",
+      "#88ddff",
+      "#ff6622",
+    ];
 
     for (let arm = 0; arm < numArms; arm++) {
       const armAngle = (arm / numArms) * Math.PI * 2;
@@ -469,14 +510,15 @@ const Renderer = {
 
       // Draw spiral arm as curved path spiraling inward
       ctx.beginPath();
-      const spiralTurns = 2.0;  // More turns for tighter spiral
+      const spiralTurns = 2.0; // More turns for tighter spiral
       const startRadius = size * 0.92;
       const endRadius = size * 0.05;
 
       for (let i = 0; i <= 80; i++) {
         const t = i / 80;
         const angle = t * Math.PI * 2 * spiralTurns;
-        const radius = startRadius - (startRadius - endRadius) * Math.pow(t, 0.8);  // Accelerate toward center
+        const radius =
+          startRadius - (startRadius - endRadius) * Math.pow(t, 0.8); // Accelerate toward center
         // Organic wobble
         const wobble = Math.sin(t * 12 + time * 4) * 2;
         const x = Math.cos(angle) * (radius + wobble);
@@ -508,7 +550,7 @@ const Renderer = {
       const particleTime = (time * 0.8 + i * 0.12) % 1;
       const particleAngle = (i / numParticles) * Math.PI * 2 + time * 2.5;
       const particleRadius = size * (0.95 - particleTime * 0.9);
-      const spiralOffset = particleTime * Math.PI * 4;  // Tighter spiral
+      const spiralOffset = particleTime * Math.PI * 4; // Tighter spiral
 
       const px = Math.cos(particleAngle + spiralOffset) * particleRadius;
       const py = Math.sin(particleAngle + spiralOffset) * particleRadius;
@@ -518,7 +560,7 @@ const Renderer = {
       const particleAlpha = 0.4 + particleTime * 0.5;
 
       // Mix of colors - white, cyan, orange, yellow
-      const colors = ['#ffffff', '#00ffff', '#ffaa44', '#88ddff', '#ffcc66'];
+      const colors = ["#ffffff", "#00ffff", "#ffaa44", "#88ddff", "#ffcc66"];
       ctx.fillStyle = colors[i % colors.length];
       ctx.globalAlpha = particleAlpha;
       ctx.beginPath();
@@ -534,7 +576,7 @@ const Renderer = {
       const ringRadius = size * (0.15 + ringPhase * 0.75);
       const ringAlpha = 0.35 * (1 - ringPhase);
 
-      ctx.strokeStyle = ring % 2 === 0 ? '#88ddff' : '#ffffff';
+      ctx.strokeStyle = ring % 2 === 0 ? "#88ddff" : "#ffffff";
       ctx.lineWidth = 1.2;
       ctx.globalAlpha = ringAlpha;
       ctx.beginPath();
@@ -546,11 +588,11 @@ const Renderer = {
 
     // Bright center core - the "light at the end of the tunnel"
     const coreGlow = ctx.createRadialGradient(0, 0, 0, 0, 0, size * 0.25);
-    coreGlow.addColorStop(0, 'rgba(255, 255, 255, 0.95)');
-    coreGlow.addColorStop(0.2, 'rgba(200, 240, 255, 0.8)');
-    coreGlow.addColorStop(0.5, 'rgba(100, 200, 255, 0.4)');
-    coreGlow.addColorStop(0.8, 'rgba(50, 100, 200, 0.15)');
-    coreGlow.addColorStop(1, 'transparent');
+    coreGlow.addColorStop(0, "rgba(255, 255, 255, 0.95)");
+    coreGlow.addColorStop(0.2, "rgba(200, 240, 255, 0.8)");
+    coreGlow.addColorStop(0.5, "rgba(100, 200, 255, 0.4)");
+    coreGlow.addColorStop(0.8, "rgba(50, 100, 200, 0.15)");
+    coreGlow.addColorStop(1, "transparent");
     ctx.fillStyle = coreGlow;
     ctx.beginPath();
     ctx.arc(0, 0, size * 0.25, 0, Math.PI * 2);
@@ -561,7 +603,7 @@ const Renderer = {
     const innerCore = ctx.createRadialGradient(0, 0, 0, 0, 0, size * 0.1);
     innerCore.addColorStop(0, `rgba(255, 255, 255, ${corePulse})`);
     innerCore.addColorStop(0.5, `rgba(180, 220, 255, ${corePulse * 0.6})`);
-    innerCore.addColorStop(1, 'transparent');
+    innerCore.addColorStop(1, "transparent");
     ctx.fillStyle = innerCore;
     ctx.beginPath();
     ctx.arc(0, 0, size * 0.1, 0, Math.PI * 2);
@@ -580,14 +622,14 @@ const Renderer = {
 
     // Simple fallback rendering - octagonal base with faction color
     const colors = {
-      pirate: '#ff3300',
-      scavenger: '#999966',
-      swarm: '#8b0000',
-      void: '#9900ff',
-      rogue_miner: '#ff9900'
+      pirate: "#ff3300",
+      scavenger: "#999966",
+      swarm: "#8b0000",
+      void: "#9900ff",
+      rogue_miner: "#ff9900",
     };
 
-    const color = colors[base.faction] || '#888888';
+    const color = colors[base.faction] || "#888888";
 
     ctx.save();
     ctx.translate(screen.x, screen.y);
@@ -606,14 +648,14 @@ const Renderer = {
     ctx.fill();
 
     // Border
-    ctx.strokeStyle = '#ffffff';
+    ctx.strokeStyle = "#ffffff";
     ctx.lineWidth = 2;
     ctx.stroke();
 
     // Name label
-    ctx.fillStyle = '#ffffff';
-    ctx.font = '12px monospace';
-    ctx.textAlign = 'center';
+    ctx.fillStyle = "#ffffff";
+    ctx.font = "12px monospace";
+    ctx.textAlign = "center";
     ctx.fillText(base.name, 0, base.size + 20);
 
     ctx.restore();
@@ -625,21 +667,25 @@ const Renderer = {
 
     // Faction colors for wreckage
     const FACTION_COLORS = {
-      pirate: '#ff3300',
-      scavenger: '#999966',
-      swarm: '#8b0000',
-      void: '#9900ff',
-      rogue_miner: '#ff9900',
-      unknown: '#888888'
+      pirate: "#ff3300",
+      scavenger: "#999966",
+      swarm: "#8b0000",
+      void: "#9900ff",
+      rogue_miner: "#ff9900",
+      unknown: "#888888",
     };
 
     // Update wreckage rotation
     Entities.updateWreckageRotation(dt);
 
     for (const [id, wreckage] of Entities.wreckage) {
-      if (!this.isOnScreen(wreckage.position.x, wreckage.position.y, 50)) continue;
+      if (!this.isOnScreen(wreckage.position.x, wreckage.position.y, 50))
+        continue;
 
-      const screen = this.worldToScreen(wreckage.position.x, wreckage.position.y);
+      const screen = this.worldToScreen(
+        wreckage.position.x,
+        wreckage.position.y
+      );
       const color = FACTION_COLORS[wreckage.faction] || FACTION_COLORS.unknown;
 
       ctx.save();
@@ -668,7 +714,7 @@ const Renderer = {
         ctx.fill();
 
         // Outline
-        ctx.strokeStyle = '#ffffff';
+        ctx.strokeStyle = "#ffffff";
         ctx.lineWidth = 1;
         ctx.globalAlpha = 0.5;
         ctx.stroke();
@@ -680,8 +726,8 @@ const Renderer = {
       const glowRadius = 20 + wreckage.contentCount * 2;
 
       const gradient = ctx.createRadialGradient(0, 0, 0, 0, 0, glowRadius);
-      gradient.addColorStop(0, color + '66');
-      gradient.addColorStop(1, 'transparent');
+      gradient.addColorStop(0, color + "66");
+      gradient.addColorStop(1, "transparent");
 
       ctx.globalAlpha = pulseIntensity;
       ctx.fillStyle = gradient;
@@ -694,14 +740,14 @@ const Renderer = {
       // Draw label below wreckage
       ctx.globalAlpha = 0.8;
       ctx.fillStyle = color;
-      ctx.font = '10px monospace';
-      ctx.textAlign = 'center';
-      ctx.fillText(wreckage.npcName || 'Wreckage', screen.x, screen.y + 25);
+      ctx.font = "10px monospace";
+      ctx.textAlign = "center";
+      ctx.fillText(wreckage.npcName || "Wreckage", screen.x, screen.y + 25);
 
       // Draw loot count indicator
       if (wreckage.contentCount > 0) {
-        ctx.fillStyle = '#ffffff';
-        ctx.font = 'bold 8px monospace';
+        ctx.fillStyle = "#ffffff";
+        ctx.font = "bold 8px monospace";
         ctx.fillText(`x${wreckage.contentCount}`, screen.x, screen.y + 35);
       }
 
@@ -723,23 +769,28 @@ const Renderer = {
     const y = screen.y - 40;
 
     // Background
-    ctx.fillStyle = '#333333';
+    ctx.fillStyle = "#333333";
     ctx.fillRect(x, y, barWidth, barHeight);
 
     // Progress (golden color for loot)
-    ctx.fillStyle = '#ffcc00';
-    ctx.fillRect(x, y, barWidth * Math.min(1, Player.collectProgress), barHeight);
+    ctx.fillStyle = "#ffcc00";
+    ctx.fillRect(
+      x,
+      y,
+      barWidth * Math.min(1, Player.collectProgress),
+      barHeight
+    );
 
     // Border
-    ctx.strokeStyle = '#ffffff';
+    ctx.strokeStyle = "#ffffff";
     ctx.lineWidth = 1;
     ctx.strokeRect(x, y, barWidth, barHeight);
 
     // Label
-    ctx.fillStyle = '#ffffff';
-    ctx.font = '10px monospace';
-    ctx.textAlign = 'center';
-    ctx.fillText('Collecting...', screen.x, y - 4);
+    ctx.fillStyle = "#ffffff";
+    ctx.font = "10px monospace";
+    ctx.textAlign = "center";
+    ctx.fillText("Collecting...", screen.x, y - 8);
   },
 
   drawEntities() {
@@ -751,7 +802,7 @@ const Renderer = {
 
     // Draw tractor beam first (behind everything)
     if (Player.miningTarget && Player.miningProgress > 0) {
-      const resourceType = Player.miningTarget.resources?.[0] || 'default';
+      const resourceType = Player.miningTarget.resources?.[0] || "default";
       TractorBeamRenderer.draw(
         ctx,
         Player.position,
@@ -773,7 +824,7 @@ const Renderer = {
         this.camera,
         Player.ship.miningTier,
         Player.collectProgress,
-        'loot',
+        "loot",
         dt
       );
     }
@@ -791,15 +842,22 @@ const Renderer = {
           this.camera,
           player.mining.miningTier || 1,
           0.7, // constant intensity for other players
-          player.mining.resourceType || 'default',
+          player.mining.resourceType || "default",
           dt
         );
       }
 
-      this.drawShip(player.position, player.rotation, 'other', player.username, 1, player.colorId);
+      this.drawShip(
+        player.position,
+        player.rotation,
+        "other",
+        player.username,
+        1,
+        player.colorId
+      );
 
       // Draw status icon above player if not idle
-      if (player.status && player.status !== 'idle') {
+      if (player.status && player.status !== "idle") {
         const screen = this.worldToScreen(player.position.x, player.position.y);
         StatusIconRenderer.draw(ctx, screen.x, screen.y, player.status);
       }
@@ -810,15 +868,43 @@ const Renderer = {
       if (!this.isOnScreen(npc.position.x, npc.position.y)) continue;
 
       // Use faction-specific ship renderer if available
-      if (typeof NPCShipGeometry !== 'undefined' && npc.type) {
+      if (typeof NPCShipGeometry !== "undefined" && npc.type) {
         const screen = this.worldToScreen(npc.position.x, npc.position.y);
-        NPCShipGeometry.draw(ctx, npc.position, npc.rotation, npc.type, npc.faction, screen);
+
+        // Check if this is an attached assimilation drone (worm visual)
+        if (NPCShipGeometry.isAttachedDrone(npc)) {
+          NPCShipGeometry.drawAttachedWorm(ctx, screen, npc, Date.now());
+          continue; // Skip normal ship rendering and label
+        }
+
+        // Check if swarm NPC is still hatching from egg
+        const hatchProgress = NPCShipGeometry.getHatchProgress(npc);
+        if (hatchProgress !== null) {
+          // Draw hatching egg instead of ship
+          NPCShipGeometry.drawSwarmEgg(
+            ctx,
+            screen,
+            hatchProgress,
+            npc.type,
+            Date.now()
+          );
+          continue; // Skip normal ship rendering
+        }
+
+        NPCShipGeometry.draw(
+          ctx,
+          npc.position,
+          npc.rotation,
+          npc.type,
+          npc.faction,
+          screen
+        );
 
         // Draw shield visual for NPCs with shields
-        if (typeof ShieldVisual !== 'undefined' && npc.shieldMax > 0) {
+        if (typeof ShieldVisual !== "undefined" && npc.shieldMax > 0) {
           const shieldPercent = (npc.shield / npc.shieldMax) * 100;
           // NPCs use tier based on their variant (bosses = tier 3-4, regular = tier 1-2)
-          const shieldTier = npc.isBoss ? 4 : (npc.isElite ? 3 : 2);
+          const shieldTier = npc.isBoss ? 4 : npc.isElite ? 3 : 2;
           ShieldVisual.drawShieldForEntity(
             ctx,
             npc.position.x,
@@ -835,15 +921,20 @@ const Renderer = {
 
         // Draw name above NPC
         if (npc.name) {
-          ctx.fillStyle = NPCShipGeometry.FACTION_COLORS[npc.faction]?.outline || '#ffffff';
-          ctx.font = '10px monospace';
-          ctx.textAlign = 'center';
-          ctx.textBaseline = 'bottom';
-          ctx.fillText(npc.name, screen.x, screen.y - NPCShipGeometry.SIZE * 1.5);
+          ctx.fillStyle =
+            NPCShipGeometry.FACTION_COLORS[npc.faction]?.outline || "#ffffff";
+          ctx.font = "10px monospace";
+          ctx.textAlign = "center";
+          ctx.textBaseline = "bottom";
+          ctx.fillText(
+            npc.name,
+            screen.x,
+            screen.y - NPCShipGeometry.SIZE * 1.5
+          );
         }
 
         // Draw hull bar for damaged NPCs (using new renderer)
-        if (typeof HullBarRenderer !== 'undefined') {
+        if (typeof HullBarRenderer !== "undefined") {
           const lastDamageTime = npc.lastDamageTime || 0;
           HullBarRenderer.drawBar(
             ctx,
@@ -859,7 +950,7 @@ const Renderer = {
         }
       } else {
         // Fallback to generic ship
-        this.drawShip(npc.position, npc.rotation, 'npc', npc.name, 1);
+        this.drawShip(npc.position, npc.rotation, "npc", npc.name, 1);
       }
     }
 
@@ -867,43 +958,48 @@ const Renderer = {
     WeaponRenderer.draw(ctx, this.camera);
 
     // Draw NPC weapon effects
-    if (typeof NPCWeaponEffects !== 'undefined') {
+    if (typeof NPCWeaponEffects !== "undefined") {
       NPCWeaponEffects.draw(ctx, this.camera);
     }
 
     // Draw death effects
-    if (typeof DeathEffects !== 'undefined') {
+    if (typeof DeathEffects !== "undefined") {
       DeathEffects.draw(ctx, this.camera);
     }
 
     // Draw player death wreckage particles (in world space)
-    if (typeof PlayerDeathEffect !== 'undefined') {
+    if (typeof PlayerDeathEffect !== "undefined") {
       PlayerDeathEffect.drawWreckage(ctx, this.camera);
     }
 
     // Draw base destruction sequences
-    if (typeof BaseDestructionSequence !== 'undefined') {
+    if (typeof BaseDestructionSequence !== "undefined") {
       BaseDestructionSequence.draw(ctx, this.camera);
     }
 
     // Draw linked damage effects (swarm)
-    if (typeof LinkedDamageEffect !== 'undefined') {
+    if (typeof LinkedDamageEffect !== "undefined") {
       LinkedDamageEffect.draw(ctx, this.camera);
     }
 
     // Draw formation succession effects (void)
-    if (typeof FormationSuccessionEffect !== 'undefined') {
+    if (typeof FormationSuccessionEffect !== "undefined") {
       FormationSuccessionEffect.draw(ctx, this.camera);
     }
 
     // Draw emotes
-    if (typeof EmoteRenderer !== 'undefined') {
+    if (typeof EmoteRenderer !== "undefined") {
       EmoteRenderer.update();
       EmoteRenderer.draw(ctx, this.camera);
     }
 
     // Draw particles
-    ParticleSystem.draw(ctx, this.camera, this.canvas.width, this.canvas.height);
+    ParticleSystem.draw(
+      ctx,
+      this.camera,
+      this.canvas.width,
+      this.canvas.height
+    );
 
     // Draw legacy effects
     this.drawEffects();
@@ -917,20 +1013,45 @@ const Renderer = {
     const shieldTier = Player.ship.shieldTier || 1;
 
     // Draw boost cooldown indicator under ship (draw first, behind everything)
-    if (typeof BoostIndicator !== 'undefined') {
-      const isOnCooldown = Player.isBoostOnCooldown && Player.isBoostOnCooldown();
+    if (typeof BoostIndicator !== "undefined") {
+      const isOnCooldown =
+        Player.isBoostOnCooldown && Player.isBoostOnCooldown();
       const isActive = Player.isBoostActive && Player.isBoostActive();
-      const cooldownPercent = Player.getBoostCooldownPercent ? Player.getBoostCooldownPercent() : 0;
-      BoostIndicator.draw(ctx, screen.x, screen.y, isOnCooldown, cooldownPercent, isActive);
+      const cooldownPercent = Player.getBoostCooldownPercent
+        ? Player.getBoostCooldownPercent()
+        : 0;
+      BoostIndicator.draw(
+        ctx,
+        screen.x,
+        screen.y,
+        isOnCooldown,
+        cooldownPercent,
+        isActive
+      );
     }
 
     // Draw invulnerability glow if active (behind ship)
-    if (typeof PlayerDeathEffect !== 'undefined' && PlayerDeathEffect.isInvulnerable()) {
-      PlayerDeathEffect.drawInvulnerabilityGlow(ctx, screen.x, screen.y, ShipGeometry.SIZE);
+    if (
+      typeof PlayerDeathEffect !== "undefined" &&
+      PlayerDeathEffect.isInvulnerable()
+    ) {
+      PlayerDeathEffect.drawInvulnerabilityGlow(
+        ctx,
+        screen.x,
+        screen.y,
+        ShipGeometry.SIZE
+      );
     }
 
     // Draw player ship with custom color
-    this.drawShip(Player.position, Player.rotation, 'player', Player.username, visualTier, Player.colorId);
+    this.drawShip(
+      Player.position,
+      Player.rotation,
+      "player",
+      Player.username,
+      visualTier,
+      Player.colorId
+    );
 
     // Draw thrust effect
     if (Player.isThrusting()) {
@@ -952,7 +1073,7 @@ const Renderer = {
     }
 
     // Draw shield visual around ship
-    if (typeof ShieldVisual !== 'undefined' && Player.shield.max > 0) {
+    if (typeof ShieldVisual !== "undefined" && Player.shield.max > 0) {
       const shieldPercent = (Player.shield.current / Player.shield.max) * 100;
       ShieldVisual.drawShieldForEntity(
         ctx,
@@ -963,13 +1084,13 @@ const Renderer = {
         Player.rotation,
         shieldPercent,
         shieldTier,
-        'player',
+        "player",
         ShipGeometry.SIZE
       );
     }
 
     // Draw hull HP bar above ship
-    if (typeof HullBarRenderer !== 'undefined') {
+    if (typeof HullBarRenderer !== "undefined") {
       const lastDamageTime = Player.lastDamageTime || 0;
       HullBarRenderer.drawBar(
         ctx,
@@ -1010,7 +1131,7 @@ const Renderer = {
     const colors = ShipGeometry.getShipColors(type, tier, colorId);
     const scale = ShipGeometry.SIZE_SCALE[tier] || 1;
     const glowIntensity = ShipGeometry.GLOW_INTENSITY[tier] || 0;
-    const isPlayer = type === 'player';
+    const isPlayer = type === "player";
 
     ctx.save();
     ctx.translate(screen.x, screen.y);
@@ -1026,9 +1147,9 @@ const Renderer = {
     // Draw name tag below ship
     if (name) {
       ctx.fillStyle = colors.accent;
-      ctx.font = '12px monospace';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'top';
+      ctx.font = "12px monospace";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "top";
       ctx.fillText(name, screen.x, screen.y + ShipGeometry.SIZE * scale + 5);
     }
   },
@@ -1046,21 +1167,21 @@ const Renderer = {
     // Shield bar (if NPC has shields)
     if (npc.shieldMax > 0) {
       const shieldRatio = Math.max(0, npc.shield / npc.shieldMax);
-      ctx.fillStyle = '#333333';
+      ctx.fillStyle = "#333333";
       ctx.fillRect(x, y - 6, barWidth, barHeight);
-      ctx.fillStyle = '#00aaff';
+      ctx.fillStyle = "#00aaff";
       ctx.fillRect(x, y - 6, barWidth * shieldRatio, barHeight);
     }
 
     // Hull bar
     const hullRatio = Math.max(0, npc.hull / npc.hullMax);
-    ctx.fillStyle = '#333333';
+    ctx.fillStyle = "#333333";
     ctx.fillRect(x, y, barWidth, barHeight);
 
     // Color based on health
-    let hullColor = '#00ff00';
-    if (hullRatio < 0.3) hullColor = '#ff3300';
-    else if (hullRatio < 0.6) hullColor = '#ffaa00';
+    let hullColor = "#00ff00";
+    if (hullRatio < 0.3) hullColor = "#ff3300";
+    else if (hullRatio < 0.6) hullColor = "#ffaa00";
 
     ctx.fillStyle = hullColor;
     ctx.fillRect(x, y, barWidth * hullRatio, barHeight);
@@ -1080,23 +1201,28 @@ const Renderer = {
   },
 
   drawMiningProgress() {
-    const screen = this.worldToScreen(Player.miningTarget.x, Player.miningTarget.y);
+    const screen = this.worldToScreen(
+      Player.miningTarget.x,
+      Player.miningTarget.y
+    );
     const ctx = this.ctx;
     const target = Player.miningTarget;
 
     // Get target name and resources
-    let targetName = target.type || 'Asteroid';
+    let targetName = target.type || "Asteroid";
     if (target.resources) {
       // Handle both array and string resources
-      const resourceList = Array.isArray(target.resources) ? target.resources : [target.resources];
+      const resourceList = Array.isArray(target.resources)
+        ? target.resources
+        : [target.resources];
       if (resourceList.length > 0) {
         // Show potential resources
-        const resourceNames = resourceList.map(r => {
+        const resourceNames = resourceList.map((r) => {
           const info = CONSTANTS.RESOURCE_TYPES[r];
           return info ? info.name : r;
         });
-        targetName = resourceNames.slice(0, 2).join(', ');
-        if (resourceList.length > 2) targetName += '...';
+        targetName = resourceNames.slice(0, 2).join(", ");
+        if (resourceList.length > 2) targetName += "...";
       }
     }
 
@@ -1107,30 +1233,35 @@ const Renderer = {
     const y = screen.y - (target.size || 20) - 30;
 
     // Background
-    ctx.fillStyle = '#333333';
+    ctx.fillStyle = "#333333";
     ctx.fillRect(x, y, barWidth, barHeight);
 
     // Progress
-    ctx.fillStyle = '#00ff00';
-    ctx.fillRect(x, y, barWidth * Math.min(1, Player.miningProgress), barHeight);
+    ctx.fillStyle = "#00ff00";
+    ctx.fillRect(
+      x,
+      y,
+      barWidth * Math.min(1, Player.miningProgress),
+      barHeight
+    );
 
     // Border
-    ctx.strokeStyle = '#ffffff';
+    ctx.strokeStyle = "#ffffff";
     ctx.lineWidth = 1;
     ctx.strokeRect(x, y, barWidth, barHeight);
 
     // Label showing what's being mined
-    ctx.fillStyle = '#ffffff';
-    ctx.font = '10px monospace';
-    ctx.textAlign = 'center';
-    ctx.fillText('Mining: ' + targetName, screen.x, y - 4);
+    ctx.fillStyle = "#ffffff";
+    ctx.font = "10px monospace";
+    ctx.textAlign = "center";
+    ctx.fillText("Mining: " + targetName, screen.x, y - 4);
   },
 
   showMiningResult(resourceName, quantity) {
     this.miningNotification = {
       text: `+${quantity} ${resourceName}`,
       startTime: Date.now(),
-      duration: 2000
+      duration: 2000,
     };
   },
 
@@ -1144,14 +1275,14 @@ const Renderer = {
     }
 
     const ctx = this.ctx;
-    const alpha = 1 - (elapsed / this.miningNotification.duration);
-    const yOffset = -30 - (elapsed * 0.03); // Float upward
+    const alpha = 1 - elapsed / this.miningNotification.duration;
+    const yOffset = -30 - elapsed * 0.03; // Float upward
 
     ctx.save();
     ctx.globalAlpha = alpha;
-    ctx.fillStyle = '#00ff00';
-    ctx.font = 'bold 16px monospace';
-    ctx.textAlign = 'center';
+    ctx.fillStyle = "#00ff00";
+    ctx.font = "bold 16px monospace";
+    ctx.textAlign = "center";
     ctx.fillText(
       this.miningNotification.text,
       this.canvas.width / 2,
@@ -1162,16 +1293,26 @@ const Renderer = {
 
   drawUI() {
     // Draw heat overlay when near stars
-    if (typeof StarEffects !== 'undefined') {
-      StarEffects.drawHeatOverlay(this.ctx, this.canvas.width, this.canvas.height);
-      StarEffects.drawZoneWarning(this.ctx, this.canvas.width, this.canvas.height);
+    if (typeof StarEffects !== "undefined") {
+      StarEffects.drawHeatOverlay(
+        this.ctx,
+        this.canvas.width,
+        this.canvas.height
+      );
+      StarEffects.drawZoneWarning(
+        this.ctx,
+        this.canvas.width,
+        this.canvas.height
+      );
     }
 
-    // Draw mining result notification
-    this.drawMiningNotification();
+    // Draw reward display (above player ship)
+    if (typeof RewardDisplay !== "undefined") {
+      RewardDisplay.draw(this.ctx, this.camera);
+    }
 
     // Draw player death effect overlay (on top of everything)
-    if (typeof PlayerDeathEffect !== 'undefined') {
+    if (typeof PlayerDeathEffect !== "undefined") {
       PlayerDeathEffect.draw(this.ctx, this.canvas.width, this.canvas.height);
     }
   },
@@ -1183,24 +1324,24 @@ const Renderer = {
 
   drawEffects() {
     const now = Date.now();
-    this.effects = this.effects.filter(effect => {
+    this.effects = this.effects.filter((effect) => {
       const elapsed = now - effect.startTime;
       if (elapsed > effect.duration) return false;
 
       const screen = this.worldToScreen(effect.x, effect.y);
       const ctx = this.ctx;
 
-      if (effect.type === 'damage_number') {
+      if (effect.type === "damage_number") {
         // Floating damage number
         const alpha = 1 - elapsed / effect.duration;
-        const yOffset = -30 - (elapsed * 0.05); // Float upward
+        const yOffset = -30 - elapsed * 0.05; // Float upward
         ctx.save();
         ctx.globalAlpha = alpha;
-        ctx.fillStyle = '#ff4444';
-        ctx.strokeStyle = '#000000';
+        ctx.fillStyle = "#ff4444";
+        ctx.strokeStyle = "#000000";
         ctx.lineWidth = 2;
-        ctx.font = 'bold 16px monospace';
-        ctx.textAlign = 'center';
+        ctx.font = "bold 16px monospace";
+        ctx.textAlign = "center";
         const text = `-${Math.round(effect.damage)}`;
         ctx.strokeText(text, screen.x, screen.y + yOffset);
         ctx.fillText(text, screen.x, screen.y + yOffset);
@@ -1209,12 +1350,12 @@ const Renderer = {
 
       return true;
     });
-  }
+  },
 };
 
 // Global callback for PlayerDeathEffect to complete respawn after death sequence
-window.handleRespawnComplete = function(respawnData) {
-  if (typeof Player !== 'undefined') {
+window.handleRespawnComplete = function (respawnData) {
+  if (typeof Player !== "undefined") {
     Player.onRespawn(respawnData);
   }
 };

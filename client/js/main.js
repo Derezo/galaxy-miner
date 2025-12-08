@@ -22,6 +22,7 @@ const GalaxyMiner = {
     UpgradesUI.init();
     TerminalUI.init();
     Toast.init();
+    NotificationManager.init();
     EmoteWheel.init();
 
     Logger.log('Galaxy Miner ready');

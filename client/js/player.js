@@ -401,8 +401,12 @@ const Player = {
   },
 
   onMiningComplete(data) {
-    // Show notification of what was mined
-    Renderer.showMiningResult(data.resourceName, data.quantity);
+    // Show reward pop-up
+    if (typeof NotificationManager !== 'undefined') {
+      NotificationManager.queueReward({
+        resources: [{ type: data.resourceType, name: data.resourceName, quantity: data.quantity }]
+      });
+    }
 
     // Clear mining state
     this.miningTarget = null;
@@ -438,7 +442,7 @@ const Player = {
     this.miningTarget = null;
     this.miningProgress = 0;
     this.miningConfirmed = false;
-    Toast.error(data.message);
+    NotificationManager.error(data.message);
   },
 
   onDamaged(data) {
@@ -523,26 +527,9 @@ const Player = {
   onLootCollectionComplete(data) {
     Logger.log('Loot collected:', data.contents);
 
-    // Show loot notification
-    if (data.results) {
-      let message = '';
-      if (data.results.credits > 0) {
-        message += `+${data.results.credits} credits `;
-      }
-      if (data.results.resources.length > 0) {
-        const resourceText = data.results.resources.map(r => `+${r.quantity} ${r.type}`).join(', ');
-        message += resourceText;
-      }
-      if (data.results.components.length > 0) {
-        message += ` +${data.results.components.length} component(s)`;
-      }
-      if (data.results.relics.length > 0) {
-        message += ` +${data.results.relics.length} relic(s)!`;
-      }
-
-      if (message && typeof Toast !== 'undefined') {
-        Toast.success(message.trim());
-      }
+    // Show reward pop-ups
+    if (data.results && typeof NotificationManager !== 'undefined') {
+      NotificationManager.queueReward(data.results);
     }
 
     this.collectingWreckage = null;
@@ -767,17 +754,17 @@ const Player = {
     Logger.log('[Wormhole] tryEnterWormhole called, nearestWormhole:', this._nearestWormhole);
 
     if (!this._nearestWormhole) {
-      Toast.error('No wormhole nearby');
+      NotificationManager.error('No wormhole nearby');
       return;
     }
 
     if (!this.hasRelic('WORMHOLE_GEM')) {
-      Toast.error('You need the Wormhole Gem to enter wormholes');
+      NotificationManager.error('You need the Wormhole Gem to enter wormholes');
       return;
     }
 
     if (this.inWormholeTransit) {
-      Toast.error('Already in wormhole transit');
+      NotificationManager.error('Already in wormhole transit');
       return;
     }
 
@@ -865,7 +852,7 @@ const Player = {
       WormholeTransitUI.hide();
     }
 
-    Toast.success('Wormhole transit complete!');
+    NotificationManager.success('Wormhole transit complete!');
     Logger.log('[Wormhole] Exited at', data.position);
   },
 
@@ -896,7 +883,7 @@ const Player = {
     }
 
     if (data.reason) {
-      Toast.info('Transit cancelled: ' + data.reason);
+      NotificationManager.info('Transit cancelled: ' + data.reason);
     }
 
     Logger.log('[Wormhole] Transit cancelled:', data.reason);
@@ -907,7 +894,7 @@ const Player = {
    * @param {Object} data - { error }
    */
   onWormholeError(data) {
-    Toast.error(data.error || 'Wormhole error');
+    NotificationManager.error(data.error || 'Wormhole error');
     console.error('[Wormhole] Error:', data.error);
   }
 };

@@ -55,8 +55,8 @@ const Network = {
 
     this.socket.on('ship:colorError', (data) => {
       console.error('Color change error:', data.message);
-      if (typeof Toast !== 'undefined') {
-        Toast.error(data.message);
+      if (typeof NotificationManager !== 'undefined') {
+        NotificationManager.error(data.message);
       }
     });
 
@@ -71,8 +71,8 @@ const Network = {
 
     this.socket.on('ship:profileError', (data) => {
       console.error('Profile change error:', data.message);
-      if (typeof Toast !== 'undefined') {
-        Toast.error(data.message);
+      if (typeof NotificationManager !== 'undefined') {
+        NotificationManager.error(data.message);
       }
     });
 
@@ -134,7 +134,7 @@ const Network = {
           'hull': 'Hull'
         };
         const displayName = componentNames[data.component] || data.component;
-        Toast.success(`${displayName} upgraded to tier ${data.newTier}!`);
+        NotificationManager.success(`${displayName} upgraded to tier ${data.newTier}!`);
       }
     });
 
@@ -143,8 +143,8 @@ const Network = {
       if (typeof ShipUpgradePanel !== 'undefined') {
         ShipUpgradePanel.onUpgradeError(data.message);
       }
-      if (typeof Toast !== 'undefined') {
-        Toast.error(data.message);
+      if (typeof NotificationManager !== 'undefined') {
+        NotificationManager.error(data.message);
       } else {
         alert(data.message);
       }
@@ -153,8 +153,8 @@ const Network = {
     // Generic error handler for server-side errors
     this.socket.on('error:generic', (data) => {
       console.error('Server error:', data.message);
-      if (typeof Toast !== 'undefined') {
-        Toast.error(data.message);
+      if (typeof NotificationManager !== 'undefined') {
+        NotificationManager.error(data.message);
       }
     });
 
@@ -335,6 +335,233 @@ const Network = {
       }
     });
 
+    // ============================================
+    // SWARM ASSIMILATION EVENTS
+    // ============================================
+
+    // Drone sacrifice visual effect
+    this.socket.on('swarm:droneSacrifice', (data) => {
+      Logger.log('Swarm drone sacrifice at', data.position);
+
+      // Visual effect: organic burst at sacrifice location
+      if (typeof ParticleSystem !== 'undefined') {
+        // Red organic burst
+        for (let i = 0; i < 15; i++) {
+          const angle = (Math.PI * 2 * i) / 15 + Math.random() * 0.3;
+          const speed = 30 + Math.random() * 60;
+          ParticleSystem.spawn({
+            x: data.position.x,
+            y: data.position.y,
+            vx: Math.cos(angle) * speed,
+            vy: Math.sin(angle) * speed,
+            life: 300 + Math.random() * 200,
+            color: '#8b0000',
+            size: 3 + Math.random() * 3,
+            type: 'glow',
+            drag: 0.94,
+            decay: 1
+          });
+        }
+
+        // Organic tendrils toward base
+        for (let i = 0; i < 8; i++) {
+          const angle = Math.random() * Math.PI * 2;
+          ParticleSystem.spawn({
+            x: data.position.x,
+            y: data.position.y,
+            vx: Math.cos(angle) * 15,
+            vy: Math.sin(angle) * 15,
+            life: 500 + Math.random() * 300,
+            color: '#990000',
+            size: 2 + Math.random() * 2,
+            type: 'trail',
+            drag: 0.99,
+            decay: 0.8
+          });
+        }
+      }
+    });
+
+    // Assimilation progress indicator
+    this.socket.on('swarm:assimilationProgress', (data) => {
+      Logger.log('Assimilation progress:', data.baseId, data.progress + '/' + data.threshold);
+
+      // Update base state with assimilation progress
+      if (typeof Entities !== 'undefined') {
+        const base = Entities.bases.get(data.baseId);
+        if (base) {
+          base.assimilationProgress = data.progress;
+          base.assimilationThreshold = data.threshold;
+        }
+      }
+
+      // Pulsing effect on base being assimilated
+      if (typeof ParticleSystem !== 'undefined') {
+        // Red pulse ring around base
+        for (let i = 0; i < 12; i++) {
+          const angle = (Math.PI * 2 * i) / 12;
+          const radius = 60 + Math.random() * 20;
+          ParticleSystem.spawn({
+            x: data.position.x + Math.cos(angle) * radius,
+            y: data.position.y + Math.sin(angle) * radius,
+            vx: Math.cos(angle) * 5,
+            vy: Math.sin(angle) * 5,
+            life: 400,
+            color: '#ff0000',
+            size: 2 + Math.random() * 2,
+            type: 'glow',
+            drag: 0.98,
+            decay: 1
+          });
+        }
+      }
+    });
+
+    // Base assimilated - update base type for rendering
+    this.socket.on('swarm:baseAssimilated', (data) => {
+      Logger.log('Base assimilated!', data.baseId, '-> type:', data.newType);
+
+      // Update base in Entities.bases to use new assimilated type
+      if (typeof Entities !== 'undefined') {
+        const base = Entities.bases.get(data.baseId);
+        if (base) {
+          base.type = data.newType;
+          base.faction = 'swarm';
+          base.assimilationProgress = null; // Clear progress
+        }
+      }
+
+      // Major visual effect: assimilation complete burst
+      if (typeof ParticleSystem !== 'undefined' && data.position) {
+        // Massive red shockwave
+        for (let i = 0; i < 30; i++) {
+          const angle = (Math.PI * 2 * i) / 30;
+          const speed = 80 + Math.random() * 120;
+          ParticleSystem.spawn({
+            x: data.position.x,
+            y: data.position.y,
+            vx: Math.cos(angle) * speed,
+            vy: Math.sin(angle) * speed,
+            life: 600 + Math.random() * 400,
+            color: '#8b0000',
+            size: 5 + Math.random() * 5,
+            type: 'glow',
+            drag: 0.92,
+            decay: 1
+          });
+        }
+
+        // Organic veins spreading outward
+        for (let i = 0; i < 20; i++) {
+          const angle = Math.random() * Math.PI * 2;
+          const dist = Math.random() * 100;
+          ParticleSystem.spawn({
+            x: data.position.x + Math.cos(angle) * dist,
+            y: data.position.y + Math.sin(angle) * dist,
+            vx: Math.cos(angle) * 20,
+            vy: Math.sin(angle) * 20,
+            life: 800 + Math.random() * 400,
+            color: '#990000',
+            size: 3 + Math.random() * 3,
+            type: 'trail',
+            drag: 0.96,
+            decay: 0.9
+          });
+        }
+      }
+
+      // Show notification
+      if (typeof NotificationManager !== 'undefined') {
+        NotificationManager.warning('The Swarm has assimilated a base!');
+      }
+    });
+
+    // Queen spawned - faction-wide event
+    this.socket.on('swarm:queenSpawn', (data) => {
+      Logger.log('Swarm Queen has emerged at', data.x, data.y);
+
+      // Massive visual effect for queen emergence
+      if (typeof ParticleSystem !== 'undefined') {
+        // Crimson vortex effect
+        for (let i = 0; i < 50; i++) {
+          const angle = (Math.PI * 2 * i) / 50;
+          const radius = 50 + Math.random() * 100;
+          const speed = 100 + Math.random() * 150;
+          ParticleSystem.spawn({
+            x: data.x + Math.cos(angle) * radius,
+            y: data.y + Math.sin(angle) * radius,
+            vx: -Math.cos(angle) * speed * 0.3, // Spiral inward
+            vy: -Math.sin(angle) * speed * 0.3,
+            life: 800 + Math.random() * 500,
+            color: i % 2 === 0 ? '#8b0000' : '#ff0000',
+            size: 4 + Math.random() * 6,
+            type: 'glow',
+            drag: 0.94,
+            decay: 1
+          });
+        }
+
+        // Bio-electric discharge
+        for (let i = 0; i < 25; i++) {
+          const angle = Math.random() * Math.PI * 2;
+          const speed = 150 + Math.random() * 100;
+          ParticleSystem.spawn({
+            x: data.x,
+            y: data.y,
+            vx: Math.cos(angle) * speed,
+            vy: Math.sin(angle) * speed,
+            life: 400 + Math.random() * 300,
+            color: '#ff4444',
+            size: 2 + Math.random() * 3,
+            type: 'spark',
+            drag: 0.9,
+            decay: 1.2
+          });
+        }
+      }
+
+      // Global warning notification
+      if (typeof NotificationManager !== 'undefined') {
+        NotificationManager.error('⚠ THE SWARM QUEEN HAS EMERGED!');
+      }
+    });
+
+    // Queen death
+    this.socket.on('swarm:queenDeath', (data) => {
+      Logger.log('Swarm Queen destroyed!');
+
+      // Notification
+      if (typeof NotificationManager !== 'undefined') {
+        NotificationManager.success('The Swarm Queen has been destroyed!');
+      }
+    });
+
+    // Queen aura regeneration effect
+    this.socket.on('swarm:queenAura', (data) => {
+      // Visual effect showing aura on affected bases
+      if (typeof ParticleSystem !== 'undefined' && data.affectedBases) {
+        for (const baseData of data.affectedBases) {
+          // Subtle healing particles around regenerating bases
+          for (let i = 0; i < 3; i++) {
+            const angle = Math.random() * Math.PI * 2;
+            const radius = 30 + Math.random() * 30;
+            ParticleSystem.spawn({
+              x: baseData.x + Math.cos(angle) * radius,
+              y: baseData.y + Math.sin(angle) * radius,
+              vx: 0,
+              vy: -10 - Math.random() * 10, // Float upward
+              life: 300 + Math.random() * 200,
+              color: '#990000',
+              size: 2 + Math.random() * 2,
+              type: 'glow',
+              drag: 0.99,
+              decay: 0.8
+            });
+          }
+        }
+      }
+    });
+
     // Formation leader succession (Void faction)
     this.socket.on('formation:leaderChange', (data) => {
       Logger.log('Formation leader changed:', data);
@@ -385,6 +612,13 @@ const Network = {
       // Mark base as destroyed for rendering
       if (typeof Entities !== 'undefined') {
         Entities.destroyBase(data.id);
+
+        // Remove any attached assimilation drones (worm visuals) that died with the base
+        if (data.destroyedDrones && data.destroyedDrones.length > 0) {
+          for (const droneId of data.destroyedDrones) {
+            Entities.npcs.delete(droneId);
+          }
+        }
       }
 
       // Trigger faction-specific multi-phase destruction sequence
@@ -532,9 +766,9 @@ const Network = {
       if (typeof PlayerDeathEffect !== 'undefined') {
         PlayerDeathEffect.trigger(deathData);
       } else {
-        // Fallback to toast notification if effect module not loaded
-        if (typeof Toast !== 'undefined' && data.message) {
-          Toast.error(data.message);
+        // Fallback to notification if effect module not loaded
+        if (typeof NotificationManager !== 'undefined' && data.message) {
+          NotificationManager.error(data.message);
         }
       }
     });
@@ -646,6 +880,285 @@ const Network = {
       }
 
       // NPC destroyed notification removed - rewards are now shown when collecting scrap
+    });
+
+    // ============================================
+    // SWARM QUEEN SPECIAL ATTACKS
+    // ============================================
+
+    // Queen web snare attack visual
+    this.socket.on('queen:webSnare', (data) => {
+      Logger.log('Queen web snare fired!', data);
+
+      // Trigger projectile visual via NPCWeaponEffects
+      if (typeof NPCWeaponEffects !== 'undefined') {
+        NPCWeaponEffects.fire(
+          { x: data.sourceX, y: data.sourceY },
+          { x: data.targetX, y: data.targetY },
+          'web_snare',
+          'swarm',
+          {
+            radius: data.radius,
+            duration: data.duration,
+            chargeTime: data.chargeTime
+          }
+        );
+      }
+
+      // Schedule area effect at impact location after projectile travel
+      const dx = data.targetX - data.sourceX;
+      const dy = data.targetY - data.sourceY;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      const travelTime = dist / (data.projectileSpeed || 200) * 1000;
+
+      setTimeout(() => {
+        // Create web area effect at target location
+        if (typeof ParticleSystem !== 'undefined') {
+          // Expanding web ring
+          for (let i = 0; i < 24; i++) {
+            const angle = (Math.PI * 2 * i) / 24;
+            const radius = data.radius || 150;
+            ParticleSystem.spawn({
+              x: data.targetX + Math.cos(angle) * radius * 0.3,
+              y: data.targetY + Math.sin(angle) * radius * 0.3,
+              vx: Math.cos(angle) * 30,
+              vy: Math.sin(angle) * 30,
+              life: data.duration || 4000,
+              color: '#660022',
+              size: 3,
+              type: 'trail',
+              drag: 0.99,
+              decay: 0.3
+            });
+          }
+
+          // Central web strands
+          for (let i = 0; i < 12; i++) {
+            const angle = (Math.PI * 2 * i) / 12;
+            ParticleSystem.spawn({
+              x: data.targetX,
+              y: data.targetY,
+              vx: Math.cos(angle) * 15,
+              vy: Math.sin(angle) * 15,
+              life: data.duration || 4000,
+              color: '#440011',
+              size: 2,
+              type: 'trail',
+              drag: 0.995,
+              decay: 0.2
+            });
+          }
+        }
+      }, travelTime);
+    });
+
+    // Queen acid burst attack visual
+    this.socket.on('queen:acidBurst', (data) => {
+      Logger.log('Queen acid burst fired!', data);
+
+      // Trigger projectile visual via NPCWeaponEffects
+      if (typeof NPCWeaponEffects !== 'undefined') {
+        NPCWeaponEffects.fire(
+          { x: data.sourceX, y: data.sourceY },
+          { x: data.targetX, y: data.targetY },
+          'acid_burst',
+          'swarm',
+          {
+            radius: data.radius,
+            dotDuration: data.dotDuration
+          }
+        );
+      }
+
+      // Schedule acid puddle at impact location after projectile travel
+      const dx = data.targetX - data.sourceX;
+      const dy = data.targetY - data.sourceY;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      const travelTime = dist / (data.projectileSpeed || 180) * 1000;
+
+      setTimeout(() => {
+        // Create acid puddle effect at target location
+        if (typeof ParticleSystem !== 'undefined') {
+          // Acid splash
+          for (let i = 0; i < 20; i++) {
+            const angle = Math.random() * Math.PI * 2;
+            const speed = 20 + Math.random() * 40;
+            ParticleSystem.spawn({
+              x: data.targetX,
+              y: data.targetY,
+              vx: Math.cos(angle) * speed,
+              vy: Math.sin(angle) * speed,
+              life: 600 + Math.random() * 400,
+              color: '#44ff44',
+              size: 3 + Math.random() * 3,
+              type: 'glow',
+              drag: 0.92,
+              decay: 1
+            });
+          }
+
+          // Create persistent puddle indicator
+          const puddleStart = Date.now();
+          const puddleDuration = data.dotDuration || 5000;
+          const puddleInterval = setInterval(() => {
+            if (Date.now() - puddleStart > puddleDuration) {
+              clearInterval(puddleInterval);
+              return;
+            }
+
+            // Bubbling acid particles
+            for (let i = 0; i < 3; i++) {
+              const offsetX = (Math.random() - 0.5) * (data.radius || 100);
+              const offsetY = (Math.random() - 0.5) * (data.radius || 100);
+              ParticleSystem.spawn({
+                x: data.targetX + offsetX,
+                y: data.targetY + offsetY,
+                vx: 0,
+                vy: -5 - Math.random() * 10,
+                life: 300 + Math.random() * 200,
+                color: Math.random() > 0.5 ? '#33ff33' : '#22cc22',
+                size: 2 + Math.random() * 2,
+                type: 'glow',
+                drag: 0.99,
+                decay: 1
+              });
+            }
+          }, 200);
+        }
+      }, travelTime);
+    });
+
+    // Player debuff applied (slow from web snare)
+    this.socket.on('player:debuff', (data) => {
+      Logger.log('Debuff applied:', data.type, 'for', data.duration, 'ms');
+
+      // Store debuff state on player for movement/UI
+      if (typeof Player !== 'undefined') {
+        if (!Player.debuffs) Player.debuffs = {};
+        Player.debuffs[data.type] = {
+          expiresAt: Date.now() + data.duration,
+          percent: data.slowPercent || 0
+        };
+
+        // Clear debuff when it expires
+        setTimeout(() => {
+          if (Player.debuffs && Player.debuffs[data.type]) {
+            delete Player.debuffs[data.type];
+            Logger.log('Debuff expired:', data.type);
+          }
+        }, data.duration);
+      }
+
+      // Show debuff notification
+      if (typeof NotificationManager !== 'undefined') {
+        if (data.type === 'slow') {
+          NotificationManager.warning('Ensnared! Movement slowed for ' + (data.duration / 1000) + 's');
+        }
+      }
+    });
+
+    // Player DoT tick damage
+    this.socket.on('player:dot', (data) => {
+      Logger.log('DoT tick:', data.type, data.damage, 'damage');
+
+      // Visual effect at player position
+      if (typeof Player !== 'undefined' && typeof ParticleSystem !== 'undefined') {
+        // Acid drip effect
+        for (let i = 0; i < 5; i++) {
+          const angle = Math.random() * Math.PI * 2;
+          const speed = 10 + Math.random() * 20;
+          ParticleSystem.spawn({
+            x: Player.position.x + (Math.random() - 0.5) * 20,
+            y: Player.position.y + (Math.random() - 0.5) * 20,
+            vx: Math.cos(angle) * speed,
+            vy: Math.sin(angle) * speed,
+            life: 300 + Math.random() * 200,
+            color: '#44ff44',
+            size: 2 + Math.random() * 2,
+            type: 'glow',
+            drag: 0.95,
+            decay: 1.2
+          });
+        }
+      }
+
+      // Show damage number
+      if (typeof Renderer !== 'undefined' && typeof Player !== 'undefined') {
+        Renderer.addEffect({
+          type: 'damage_number',
+          x: Player.position.x,
+          y: Player.position.y - 20,
+          damage: data.damage,
+          duration: 800,
+          color: '#44ff44'  // Green for acid damage
+        });
+      }
+    });
+
+    // Queen phase transition visual
+    this.socket.on('queen:phaseChange', (data) => {
+      Logger.log('Queen phase changed to:', data.phase);
+
+      // Trigger phase transition visual at queen location
+      if (typeof QueenVisuals !== 'undefined' && QueenVisuals.triggerPhaseTransition) {
+        QueenVisuals.triggerPhaseTransition(data.x, data.y, data.phase);
+      } else if (typeof ParticleSystem !== 'undefined') {
+        // Fallback shockwave effect
+        const phaseColors = {
+          HUNT: '#ff4444',
+          SIEGE: '#ff8800',
+          SWARM: '#ff0044',
+          DESPERATION: '#ff0000'
+        };
+        const color = phaseColors[data.phase] || '#ff0000';
+
+        // Expanding shockwave
+        for (let i = 0; i < 40; i++) {
+          const angle = (Math.PI * 2 * i) / 40;
+          const speed = 150 + Math.random() * 100;
+          ParticleSystem.spawn({
+            x: data.x,
+            y: data.y,
+            vx: Math.cos(angle) * speed,
+            vy: Math.sin(angle) * speed,
+            life: 600 + Math.random() * 400,
+            color: color,
+            size: 4 + Math.random() * 4,
+            type: 'glow',
+            drag: 0.94,
+            decay: 1
+          });
+        }
+
+        // Inner flash
+        for (let i = 0; i < 20; i++) {
+          const angle = Math.random() * Math.PI * 2;
+          const speed = 50 + Math.random() * 80;
+          ParticleSystem.spawn({
+            x: data.x,
+            y: data.y,
+            vx: Math.cos(angle) * speed,
+            vy: Math.sin(angle) * speed,
+            life: 300 + Math.random() * 200,
+            color: '#ffffff',
+            size: 3 + Math.random() * 3,
+            type: 'spark',
+            drag: 0.9,
+            decay: 1.5
+          });
+        }
+      }
+
+      // Show notification
+      if (typeof NotificationManager !== 'undefined') {
+        const phaseMessages = {
+          HUNT: 'The Queen enters hunting mode!',
+          SIEGE: 'The Queen retreats behind her swarm!',
+          SWARM: 'The Queen summons endless reinforcements!',
+          DESPERATION: '⚠ THE QUEEN IS ENRAGED!'
+        };
+        NotificationManager.warning(phaseMessages[data.phase] || 'Queen phase: ' + data.phase);
+      }
     });
 
     this.socket.on('chat:message', (data) => {
@@ -784,9 +1297,9 @@ const Network = {
     this.socket.on('team:creditReward', (data) => {
       Logger.log('[TEAM] Received credit share:', data.credits, 'from team kill');
 
-      // Show toast notification
-      if (typeof Toast !== 'undefined') {
-        Toast.success(`Team bonus! +${data.credits} credits`);
+      // Show reward pop-up
+      if (typeof NotificationManager !== 'undefined') {
+        NotificationManager.queueReward({ credits: data.credits });
       }
 
       // Animate credit counter if available
@@ -795,24 +1308,46 @@ const Network = {
       }
     });
 
+    // Team resource share - when another player collects scrap with shared resources
+    this.socket.on('team:lootShare', (data) => {
+      Logger.log('[TEAM] Received resource share from team kill');
+
+      // Show resources received
+      if (data.resources && data.resources.length > 0 && typeof NotificationManager !== 'undefined') {
+        NotificationManager.queueReward({ resources: data.resources });
+      }
+
+      // Notify about rare drops that went to collector
+      if (data.rareDropNotification && data.rareDropNotification.length > 0) {
+        for (const rareDrop of data.rareDropNotification) {
+          Logger.log('[TEAM] Teammate collected rare:', rareDrop.resourceType, '(' + rareDrop.rarity + ')');
+          if (typeof NotificationManager !== 'undefined') {
+            NotificationManager.info(
+              'Teammate collected ' + rareDrop.quantity + 'x ' + rareDrop.resourceType.replace(/_/g, ' ')
+            );
+          }
+        }
+      }
+    });
+
     this.socket.on('loot:error', (data) => {
       console.error('Loot error:', data.message);
-      if (typeof Toast !== 'undefined') {
-        Toast.error(data.message);
+      if (typeof NotificationManager !== 'undefined') {
+        NotificationManager.error(data.message);
       }
     });
 
     // Buff events
     this.socket.on('buff:applied', (data) => {
       Player.onBuffApplied(data);
-      if (typeof Toast !== 'undefined') {
+      if (typeof NotificationManager !== 'undefined') {
         const buffNames = {
           SHIELD_BOOST: 'Shield Boost',
           SPEED_BURST: 'Speed Burst',
           DAMAGE_AMP: 'Damage Amplifier',
           RADAR_PULSE: 'Radar Pulse'
         };
-        Toast.success(`Buff activated: ${buffNames[data.buffType] || data.buffType}`);
+        NotificationManager.queueReward({ buffs: [{ type: data.buffType, name: buffNames[data.buffType] || data.buffType }] });
       }
     });
 
@@ -842,11 +1377,9 @@ const Network = {
         }]);
       }
 
-      // Show notification
-      if (typeof Toast !== 'undefined') {
-        const relicInfo = CONSTANTS.RELIC_TYPES[data.relicType];
-        const relicName = relicInfo ? relicInfo.name : data.relicType;
-        Toast.success(`Relic discovered: ${relicName}!`, 5000);
+      // Show reward pop-up
+      if (typeof NotificationManager !== 'undefined') {
+        NotificationManager.queueReward({ relics: [data.relicType] });
       }
 
       // Refresh RelicsPanel if open

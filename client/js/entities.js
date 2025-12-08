@@ -116,6 +116,8 @@ const Entities = {
 
   updateNPC(data) {
     if (!this.npcs.has(data.id)) {
+      // New NPC - track spawn time for swarm egg hatching animation
+      const isSwarm = (data.faction === 'swarm');
       this.npcs.set(data.id, {
         id: data.id,
         type: data.type,
@@ -129,7 +131,10 @@ const Entities = {
         hullMax: data.hullMax || data.hull || 100,
         shield: data.shield,
         shieldMax: data.shieldMax || data.shield || 0,
-        state: data.state || 'patrol'
+        state: data.state || 'patrol',
+        // Swarm egg hatching - track spawn time for 2.5 second hatch animation
+        spawnTime: isSwarm ? Date.now() : null,
+        hatchDuration: isSwarm ? (data.type === 'swarm_queen' ? 4000 : 2500) : 0
       });
     } else {
       const npc = this.npcs.get(data.id);
