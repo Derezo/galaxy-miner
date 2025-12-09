@@ -96,6 +96,17 @@ See `/client/js/ui/README.md` for detailed API documentation.
 - **Icons** (`icons/`): Parameterized SVG generator for 26 resource types (Crystal/Orbital/Material shapes)
 - **Panels** (`panels/`): CargoPanel, MarketPanel, ShipCustomizationPanel
 
+### Audio System (`/client/js/audio/`)
+
+Web Audio API engine with spatial audio support. See `/client/js/audio/README.md` for detailed API.
+
+- `AudioManager.js` - Central API: `play(soundId)`, `playAt(soundId, x, y)`, `startLoop()`, `stopLoop()`
+- `SpatialAudio.js` - Distance-based volume/pan (range: 0-1000 units)
+- `SoundPool.js` - Buffer pooling, max 32 concurrent sounds with priority culling
+- `config/SoundConfig.js` - Sound definitions with categories: `sfx`, `ambient`, `ui`
+
+Audio assets in `/client/assets/audio/` organized by category (weapons, destruction, rewards, etc.).
+
 ### Shared Constants
 `/shared/constants.js` is used by both client and server - contains world generation params, resource types/values, NPC factions, weapon definitions, upgrade costs, physics settings. Changes here affect both sides.
 
@@ -114,6 +125,16 @@ SQLite tables in `/server/schema.sql`:
 ### Proximity System
 Updates only broadcast to players within radar range (base 500 units, scales with tier). Broadcast range = 2x radar range. Positions persist to DB every 5 seconds.
 
+### Data Storage
+
+- Database: `/data/galaxy-miner.db` (SQLite, auto-created on first run)
+- Schema: `/server/schema.sql` (auto-applied on startup)
+- To reset: delete `data/*.db*` files and restart server
+
+### Tools
+
+- `/tools/audio-generator/` - ElevenLabs-based sound effect generation scripts
+
 ## Game Systems Reference
 
 **Resources**: 26 types across 4 rarities (common/uncommon/rare/ultrarare) and 4 categories (metal/gas/crystal/exotic)
@@ -128,4 +149,4 @@ Updates only broadcast to players within radar range (base 500 units, scales wit
 
 ## Node Version
 
-Requires Node.js >=18.0.0
+Requires Node.js >=18.0.0 (18.11+ for `--watch` flag used by `npm run dev`)

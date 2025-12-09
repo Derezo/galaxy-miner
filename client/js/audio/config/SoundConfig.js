@@ -279,11 +279,42 @@ const SoundConfig = {
   },
 
   // ============================================
-  // DESTRUCTION - Faction Bases
+  // DESTRUCTION - Faction Bases (8-second sequences)
   // ============================================
   base_destruction: {
     file: "destruction/death_pirate_large.mp3",
     baseVolume: 1.0,
+    priority: 100,
+    category: "sfx",
+  },
+  // Faction-specific base destruction sounds
+  base_destruction_pirate: {
+    file: "destruction/base_pirate.mp3",
+    baseVolume: 0.9,
+    priority: 100,
+    category: "sfx",
+  },
+  base_destruction_scavenger: {
+    file: "destruction/base_scavenger.mp3",
+    baseVolume: 0.9,
+    priority: 100,
+    category: "sfx",
+  },
+  base_destruction_swarm: {
+    file: "destruction/base_swarm.mp3",
+    baseVolume: 0.9,
+    priority: 100,
+    category: "sfx",
+  },
+  base_destruction_void: {
+    file: "destruction/base_void.mp3",
+    baseVolume: 0.95,
+    priority: 100,
+    category: "sfx",
+  },
+  base_destruction_mining: {
+    file: "destruction/base_mining.mp3",
+    baseVolume: 0.9,
     priority: 100,
     category: "sfx",
   },
@@ -426,6 +457,111 @@ const SoundConfig = {
   },
 
   // ============================================
+  // REWARDS - Popup Notification Sounds
+  // ============================================
+  // Credits
+  reward_credits: {
+    file: "rewards/credits.mp3",
+    baseVolume: 0.6,
+    priority: 50,
+    category: "sfx",
+  },
+  reward_credits_large: {
+    file: "rewards/credits_large.mp3",
+    baseVolume: 0.7,
+    priority: 75,
+    category: "sfx",
+  },
+  // Resources by rarity
+  reward_common: {
+    file: "rewards/loot_common.mp3",
+    baseVolume: 0.5,
+    priority: 40,
+    category: "sfx",
+  },
+  reward_uncommon: {
+    file: "rewards/loot_uncommon.mp3",
+    baseVolume: 0.55,
+    priority: 45,
+    category: "sfx",
+  },
+  reward_rare: {
+    file: "rewards/loot_rare.mp3",
+    baseVolume: 0.65,
+    priority: 60,
+    category: "sfx",
+  },
+  reward_ultrarare: {
+    file: "rewards/loot_ultrarare.mp3",
+    baseVolume: 0.75,
+    priority: 80,
+    category: "sfx",
+  },
+  // Buffs
+  reward_buff_shield: {
+    file: "rewards/buff_shield.mp3",
+    baseVolume: 0.6,
+    priority: 60,
+    category: "sfx",
+  },
+  reward_buff_speed: {
+    file: "rewards/buff_speed.mp3",
+    baseVolume: 0.6,
+    priority: 60,
+    category: "sfx",
+  },
+  reward_buff_damage: {
+    file: "rewards/buff_damage.mp3",
+    baseVolume: 0.6,
+    priority: 60,
+    category: "sfx",
+  },
+  reward_buff_radar: {
+    file: "rewards/buff_radar.mp3",
+    baseVolume: 0.6,
+    priority: 60,
+    category: "sfx",
+  },
+  // Components
+  reward_component: {
+    file: "rewards/component.mp3",
+    baseVolume: 0.65,
+    priority: 70,
+    category: "sfx",
+  },
+  // Relics
+  reward_relic_starmap: {
+    file: "rewards/relic_starmap.mp3",
+    baseVolume: 0.8,
+    priority: 90,
+    category: "sfx",
+  },
+  reward_relic_void: {
+    file: "rewards/relic_void.mp3",
+    baseVolume: 0.8,
+    priority: 90,
+    category: "sfx",
+  },
+  reward_relic_swarm: {
+    file: "rewards/relic_swarm.mp3",
+    baseVolume: 0.8,
+    priority: 90,
+    category: "sfx",
+  },
+  reward_relic_pirate: {
+    file: "rewards/relic_pirate.mp3",
+    baseVolume: 0.8,
+    priority: 90,
+    category: "sfx",
+  },
+  reward_relic_wormhole: {
+    file: "rewards/relic_wormhole.mp3",
+    baseVolume: 0.85,
+    priority: 95,
+    category: "sfx",
+  },
+
+  // ============================================
   // MOVEMENT - Engine Sounds (Tiered)
   // ============================================
   engine_1: {
@@ -478,13 +614,13 @@ const SoundConfig = {
   },
   thrust_start: {
     file: "movement/thrust_start.mp3",
-    baseVolume: 0.4,
+    baseVolume: 0.15,
     priority: 50,
     category: "sfx",
   },
   thrust_stop: {
     file: "movement/thrust_stop.mp3",
-    baseVolume: 0.3,
+    baseVolume: 0.1,
     priority: 25,
     category: "sfx",
   },

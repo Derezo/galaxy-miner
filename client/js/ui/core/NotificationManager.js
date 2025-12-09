@@ -110,6 +110,7 @@ const NotificationManager = {
   queueReward(rewards) {
     if (!rewards) return;
 
+    // Sounds are played in RewardDisplay.update() when each reward is actually displayed
     if (typeof RewardDisplay !== 'undefined') {
       RewardDisplay.queue(rewards);
     } else {

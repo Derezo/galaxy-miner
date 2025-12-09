@@ -390,14 +390,12 @@ const Player = {
     const isMoving = velocityMag > 0.1; // Small threshold to avoid audio flickering
 
     if (isMoving && !this._engineLoopActive) {
-      // Start engine loop
-      const engineSound = `engine_${this.ship.engineTier}`;
-      AudioManager.startLoop(engineSound);
+      // Play thrust start sound once (no loop - current engine sounds don't loop well)
+      AudioManager.play('thrust_start');
       this._engineLoopActive = true;
     } else if (!isMoving && this._engineLoopActive) {
-      // Stop engine loop
-      const engineSound = `engine_${this.ship.engineTier}`;
-      AudioManager.stopLoop(engineSound);
+      // Play thrust stop sound once
+      AudioManager.play('thrust_stop');
       this._engineLoopActive = false;
     }
   },
@@ -727,13 +725,9 @@ const Player = {
     this.isDead = true;
     // Note: Don't reset sessionStartTime here - we use it for survival time display
 
-    // Stop any active audio loops
+    // Reset audio state (engine sounds are one-shot, not loops)
     if (typeof AudioManager !== 'undefined') {
-      if (this._engineLoopActive) {
-        const engineSound = `engine_${this.ship.engineTier}`;
-        AudioManager.stopLoop(engineSound);
-        this._engineLoopActive = false;
-      }
+      this._engineLoopActive = false;
       if (this._boostLoopActive) {
         AudioManager.stopLoop('boost_sustain');
         this._boostLoopActive = false;
@@ -767,13 +761,9 @@ const Player = {
       this.shield.current = data.shield;
     }
 
-    // Stop any active audio loops
+    // Reset audio state (engine sounds are one-shot, not loops)
     if (typeof AudioManager !== 'undefined') {
-      if (this._engineLoopActive) {
-        const engineSound = `engine_${this.ship.engineTier}`;
-        AudioManager.stopLoop(engineSound);
-        this._engineLoopActive = false;
-      }
+      this._engineLoopActive = false;
       if (this._boostLoopActive) {
         AudioManager.stopLoop('boost_sustain');
         this._boostLoopActive = false;

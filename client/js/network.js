@@ -567,6 +567,11 @@ const Network = {
         }
       }
 
+      // Play queen roar sound for dramatic emergence
+      if (typeof AudioManager !== 'undefined' && AudioManager.isReady && AudioManager.isReady()) {
+        AudioManager.playAt('queen_roar', data.x, data.y);
+      }
+
       // Global warning notification
       if (typeof NotificationManager !== 'undefined') {
         NotificationManager.error('⚠ THE SWARM QUEEN HAS EMERGED!');
@@ -576,6 +581,11 @@ const Network = {
     // Queen death
     this.socket.on('swarm:queenDeath', (data) => {
       Logger.log('Swarm Queen destroyed!');
+
+      // Play epic queen death sound
+      if (typeof AudioManager !== 'undefined' && AudioManager.isReady && AudioManager.isReady()) {
+        AudioManager.playAt('queen_death', data.x, data.y);
+      }
 
       // Notification
       if (typeof NotificationManager !== 'undefined') {
@@ -656,9 +666,17 @@ const Network = {
     });
 
     this.socket.on('base:destroyed', (data) => {
-      // Play base destruction sound
+      // Play faction-specific base destruction sound (8-second sequences)
       if (typeof AudioManager !== 'undefined' && AudioManager.isReady && AudioManager.isReady()) {
-        AudioManager.playAt('base_destruction', data.x || 0, data.y || 0);
+        const baseSoundMap = {
+          'pirate_outpost': 'base_destruction_pirate',
+          'scavenger_yard': 'base_destruction_scavenger',
+          'swarm_hive': 'base_destruction_swarm',
+          'void_rift': 'base_destruction_void',
+          'mining_claim': 'base_destruction_mining'
+        };
+        const soundId = baseSoundMap[data.baseType] || 'base_destruction';
+        AudioManager.playAt(soundId, data.x || 0, data.y || 0);
       }
 
       // Mark base as destroyed for rendering
@@ -995,7 +1013,7 @@ const Network = {
 
       // Play web snare sound
       if (typeof AudioManager !== 'undefined' && AudioManager.isReady && AudioManager.isReady()) {
-        AudioManager.playAt('queen_summon', data.sourceX, data.sourceY);
+        AudioManager.playAt('queen_web_snare', data.sourceX, data.sourceY);
       }
 
       // Trigger projectile visual via NPCWeaponEffects
@@ -1066,7 +1084,7 @@ const Network = {
 
       // Play acid burst sound
       if (typeof AudioManager !== 'undefined' && AudioManager.isReady && AudioManager.isReady()) {
-        AudioManager.playAt('queen_summon', data.sourceX, data.sourceY);
+        AudioManager.playAt('queen_acid_burst', data.sourceX, data.sourceY);
       }
 
       // Trigger projectile visual via NPCWeaponEffects
@@ -1415,20 +1433,7 @@ const Network = {
     });
 
     this.socket.on('loot:complete', (data) => {
-      // Play loot pickup sound based on rarity
-      if (typeof AudioManager !== 'undefined' && AudioManager.isReady && AudioManager.isReady()) {
-        // Check for the highest rarity in the loot
-        let maxRarity = 'common';
-        if (data.rewards && data.rewards.resources) {
-          for (const r of data.rewards.resources) {
-            if (r.rarity === 'ultrarare') { maxRarity = 'ultrarare'; break; }
-            if (r.rarity === 'rare') maxRarity = 'rare';
-            else if (r.rarity === 'uncommon' && maxRarity === 'common') maxRarity = 'uncommon';
-          }
-        }
-        AudioManager.play('loot_' + maxRarity);
-      }
-
+      // Sounds are now played by RewardDisplay when each resource is displayed
       Player.onLootCollectionComplete(data);
       Entities.removeWreckage(data.wreckageId);
     });

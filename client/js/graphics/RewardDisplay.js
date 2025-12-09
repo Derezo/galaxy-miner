@@ -163,6 +163,74 @@ const RewardDisplay = {
         alpha: 1
       });
       this.lastSpawnTime = now;
+
+      // Play sound when reward is displayed
+      this._playRewardSound(reward);
+    }
+  },
+
+  /**
+   * Play the appropriate sound for a reward type
+   * @param {Object} reward - The reward being displayed
+   */
+  _playRewardSound(reward) {
+    if (typeof AudioManager === 'undefined') return;
+
+    let soundId = null;
+
+    switch (reward.type) {
+      case 'credits':
+        // Large credits sound for amounts > 500
+        soundId = (reward.value > 500) ? 'reward_credits_large' : 'reward_credits';
+        break;
+
+      case 'resource':
+        // Use reward_* sounds based on resource rarity
+        if (typeof CONSTANTS !== 'undefined' && CONSTANTS.RESOURCE_TYPES && reward.resourceType) {
+          const resourceInfo = CONSTANTS.RESOURCE_TYPES[reward.resourceType];
+          if (resourceInfo && resourceInfo.rarity) {
+            const raritySounds = {
+              'common': 'reward_common',
+              'uncommon': 'reward_uncommon',
+              'rare': 'reward_rare',
+              'ultrarare': 'reward_ultrarare'
+            };
+            soundId = raritySounds[resourceInfo.rarity] || 'reward_common';
+          }
+        }
+        if (!soundId) soundId = 'reward_common';
+        break;
+
+      case 'relic':
+        // Relic-specific sounds
+        const relicSounds = {
+          'ANCIENT_STAR_MAP': 'reward_relic_starmap',
+          'VOID_CRYSTAL': 'reward_relic_void',
+          'SWARM_HIVE_CORE': 'reward_relic_swarm',
+          'PIRATE_TREASURE': 'reward_relic_pirate',
+          'WORMHOLE_GEM': 'reward_relic_wormhole'
+        };
+        soundId = relicSounds[reward.relicType] || 'reward_relic_starmap';
+        break;
+
+      case 'component':
+        soundId = 'reward_component';
+        break;
+
+      case 'buff':
+        // Buff-specific sounds
+        const buffSounds = {
+          'SHIELD_BOOST': 'reward_buff_shield',
+          'SPEED_BURST': 'reward_buff_speed',
+          'DAMAGE_AMP': 'reward_buff_damage',
+          'RADAR_PULSE': 'reward_buff_radar'
+        };
+        soundId = buffSounds[reward.buffType] || 'reward_buff_shield';
+        break;
+    }
+
+    if (soundId) {
+      AudioManager.play(soundId);
     }
   },
 
