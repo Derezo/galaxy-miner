@@ -395,7 +395,8 @@ const NPCShipGeometry = {
   draw(ctx, position, rotation, npcType, faction, screenPos, time) {
     // Use special spider visuals for swarm queen
     if (npcType === 'swarm_queen' && typeof QueenVisuals !== 'undefined') {
-      QueenVisuals.draw(ctx, screenPos.x, screenPos.y, rotation, time || Date.now());
+      // Pass world position for eye tracking
+      QueenVisuals.draw(ctx, screenPos.x, screenPos.y, rotation, time || Date.now(), null, position);
       return;
     }
 

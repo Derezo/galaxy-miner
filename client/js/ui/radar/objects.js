@@ -95,6 +95,10 @@ const RadarObjects = {
 
       if (!RadarBaseRenderer.isInRange(distance, radarRange)) continue;
 
+      // Calculate edge fade opacity for smooth transitions
+      const edgeOpacity = RadarBaseRenderer.getEdgeOpacity(distance, radarRange);
+      if (edgeOpacity <= 0) continue;
+
       const pos = RadarBaseRenderer.worldToRadar(
         star.x, star.y,
         playerPos.x, playerPos.y,
@@ -108,7 +112,10 @@ const RadarObjects = {
       // Color based on star color or default yellow
       const color = star.color || CONSTANTS.COLORS.STAR;
 
+      // Apply fade opacity
+      ctx.globalAlpha = edgeOpacity;
       RadarBaseRenderer.drawDot(ctx, pos.x, pos.y, displaySize, color);
+      ctx.globalAlpha = 1;
     }
   },
 
@@ -124,6 +131,10 @@ const RadarObjects = {
 
       if (!RadarBaseRenderer.isInRange(distance, radarRange)) continue;
 
+      // Calculate edge fade opacity for smooth transitions
+      const edgeOpacity = RadarBaseRenderer.getEdgeOpacity(distance, radarRange);
+      if (edgeOpacity <= 0) continue;
+
       const pos = RadarBaseRenderer.worldToRadar(
         planet.x, planet.y,
         playerPos.x, playerPos.y,
@@ -134,7 +145,10 @@ const RadarObjects = {
       const sizeMultiplier = planet.size ? Math.min(planet.size / 40, 1.5) : 1;
       const displaySize = iconSize * sizeMultiplier;
 
+      // Apply fade opacity
+      ctx.globalAlpha = edgeOpacity;
       RadarBaseRenderer.drawDot(ctx, pos.x, pos.y, displaySize, CONSTANTS.COLORS.PLANET);
+      ctx.globalAlpha = 1;
     }
   },
 
@@ -150,13 +164,20 @@ const RadarObjects = {
 
       if (!RadarBaseRenderer.isInRange(distance, radarRange)) continue;
 
+      // Calculate edge fade opacity for smooth transitions
+      const edgeOpacity = RadarBaseRenderer.getEdgeOpacity(distance, radarRange);
+      if (edgeOpacity <= 0) continue;
+
       const pos = RadarBaseRenderer.worldToRadar(
         asteroid.x, asteroid.y,
         playerPos.x, playerPos.y,
         center, scale
       );
 
+      // Apply fade opacity
+      ctx.globalAlpha = edgeOpacity;
       RadarBaseRenderer.drawDot(ctx, pos.x, pos.y, iconSize, CONSTANTS.COLORS.ASTEROID);
+      ctx.globalAlpha = 1;
     }
   },
 
@@ -175,6 +196,10 @@ const RadarObjects = {
 
       if (!RadarBaseRenderer.isInRange(distance, radarRange)) continue;
 
+      // Calculate edge fade opacity for smooth transitions
+      const edgeOpacity = RadarBaseRenderer.getEdgeOpacity(distance, radarRange);
+      if (edgeOpacity <= 0) continue;
+
       anyVisible = true;
 
       const pos = RadarBaseRenderer.worldToRadar(
@@ -183,14 +208,18 @@ const RadarObjects = {
         center, scale
       );
 
+      // Apply fade opacity
+      ctx.globalAlpha = edgeOpacity;
       RadarBaseRenderer.drawWormhole(ctx, pos.x, pos.y, iconSize, CONSTANTS.COLORS.WORMHOLE);
+      ctx.globalAlpha = 1;
     }
 
     return anyVisible;
   },
 
   // Draw bases from world generation data (tier-aware visuals)
-  // Uses server-authoritative positions when available
+  // IMPORTANT: Use server-authoritative positions when available to match main renderer
+  // This ensures radar matches what's displayed in the game world
   drawBases(ctx, center, scale, radarRange, radarTier, playerPos, bases) {
     const useFactionShapes = RadarBaseRenderer.hasFeature(radarTier, 'faction_base_shapes');
     const useFactionColors = RadarBaseRenderer.hasFeature(radarTier, 'faction_colors');
@@ -205,14 +234,20 @@ const RadarObjects = {
         continue; // Don't render destroyed bases
       }
 
-      // Use server position if available
+      // Use server-authoritative position when available (matches main renderer behavior)
+      // This is critical for consistency between radar and game world display
       let baseX = base.x;
       let baseY = base.y;
+      let baseFaction = base.faction;
+
       if (typeof Entities !== 'undefined' && Entities.bases) {
         const serverBase = Entities.bases.get(base.id);
         if (serverBase && serverBase.position) {
+          // Override with server position (handles assimilated bases, etc.)
           baseX = serverBase.position.x;
           baseY = serverBase.position.y;
+          // Also use server faction for assimilated bases
+          baseFaction = serverBase.faction || base.faction;
         }
       }
 
@@ -223,6 +258,10 @@ const RadarObjects = {
 
       if (!RadarBaseRenderer.isInRange(distance, radarRange)) continue;
 
+      // Calculate edge fade opacity for smooth transitions
+      const edgeOpacity = RadarBaseRenderer.getEdgeOpacity(distance, radarRange);
+      if (edgeOpacity <= 0) continue;
+
       renderedIds.add(base.id);
 
       const pos = RadarBaseRenderer.worldToRadar(
@@ -231,17 +270,20 @@ const RadarObjects = {
         center, scale
       );
 
+      // Apply fade opacity
+      ctx.globalAlpha = edgeOpacity;
+
       // Determine visual representation based on tier
-      if (useFactionShapes && base.faction) {
+      if (useFactionShapes && baseFaction) {
         // Tier 3+: Unique faction shapes with faction colors
-        const shape = CONSTANTS.FACTION_BASE_SHAPES[base.faction] || 'circle';
-        const color = CONSTANTS.FACTION_RADAR_COLORS[base.faction] || '#ff4444';
+        const shape = CONSTANTS.FACTION_BASE_SHAPES[baseFaction] || 'circle';
+        const color = CONSTANTS.FACTION_RADAR_COLORS[baseFaction] || '#ff4444';
         const size = CONSTANTS.RADAR_ICON_SIZES.base_shape;
         RadarBaseRenderer.drawShape(ctx, pos.x, pos.y, shape, size, color);
       } else if (useCircles) {
         // Tier 2: Red circles (larger than dots)
-        const color = useFactionColors && base.faction
-          ? CONSTANTS.FACTION_RADAR_COLORS[base.faction]
+        const color = useFactionColors && baseFaction
+          ? CONSTANTS.FACTION_RADAR_COLORS[baseFaction]
           : '#ff4444';
         const size = CONSTANTS.RADAR_ICON_SIZES.base_circle;
         RadarBaseRenderer.drawDot(ctx, pos.x, pos.y, size, color);
@@ -250,6 +292,9 @@ const RadarObjects = {
         const size = CONSTANTS.RADAR_ICON_SIZES.medium_dot;
         RadarBaseRenderer.drawDot(ctx, pos.x, pos.y, size, '#ff4444');
       }
+
+      // Reset opacity
+      ctx.globalAlpha = 1;
     }
 
     // Also render server-known bases not in procedural list
@@ -266,11 +311,18 @@ const RadarObjects = {
 
         if (!RadarBaseRenderer.isInRange(distance, radarRange)) continue;
 
+        // Calculate edge fade opacity for smooth transitions
+        const edgeOpacity = RadarBaseRenderer.getEdgeOpacity(distance, radarRange);
+        if (edgeOpacity <= 0) continue;
+
         const pos = RadarBaseRenderer.worldToRadar(
           serverBase.position.x, serverBase.position.y,
           playerPos.x, playerPos.y,
           center, scale
         );
+
+        // Apply fade opacity
+        ctx.globalAlpha = edgeOpacity;
 
         // Use appropriate visual based on tier
         if (useFactionShapes && serverBase.faction) {
@@ -288,6 +340,9 @@ const RadarObjects = {
           const size = CONSTANTS.RADAR_ICON_SIZES.medium_dot;
           RadarBaseRenderer.drawDot(ctx, pos.x, pos.y, size, '#ff4444');
         }
+
+        // Reset opacity
+        ctx.globalAlpha = 1;
       }
     }
   }

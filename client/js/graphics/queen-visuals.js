@@ -33,15 +33,35 @@ const QueenVisuals = {
     { angle: 0.35, length: 1.1, phaseOffset: 0.5 }     // Rear pair
   ],
 
-  // Eye positions (relative to cephalothorax)
+  // Eye positions (relative to cephalothorax) - 12 eyes in spider pattern
   EYES: [
+    // Primary pair (largest, front-facing)
     { x: 0.35, y: -0.08, radius: 0.07, type: 'primary' },
     { x: 0.35, y: 0.08, radius: 0.07, type: 'primary' },
+    // Secondary pair (forward lateral)
     { x: 0.42, y: -0.04, radius: 0.04, type: 'secondary' },
     { x: 0.42, y: 0.04, radius: 0.04, type: 'secondary' },
+    // Tertiary pairs (6 small eyes for peripheral vision)
     { x: 0.38, y: -0.12, radius: 0.03, type: 'tertiary' },
-    { x: 0.38, y: 0.12, radius: 0.03, type: 'tertiary' }
+    { x: 0.38, y: 0.12, radius: 0.03, type: 'tertiary' },
+    { x: 0.32, y: -0.15, radius: 0.025, type: 'tertiary' },
+    { x: 0.32, y: 0.15, radius: 0.025, type: 'tertiary' },
+    { x: 0.28, y: -0.11, radius: 0.02, type: 'tertiary' },
+    { x: 0.28, y: 0.11, radius: 0.02, type: 'tertiary' },
+    { x: 0.25, y: -0.06, radius: 0.02, type: 'tertiary' },
+    { x: 0.25, y: 0.06, radius: 0.02, type: 'tertiary' }
   ],
+
+  // Eye tracking state
+  trackedTargetAngle: 0,
+  lastTargetUpdate: 0,
+
+  // Leg animation state
+  legState: {
+    combatRearUp: 0,       // Front legs raise during combat (0-1)
+    lowHealthLimp: 0,      // Limp amount when health < 30% (0-1)
+    secondaryWiggle: 0     // Secondary organic wiggle phase
+  },
 
   // State tracking
   animationTime: 0,
@@ -79,10 +99,91 @@ const QueenVisuals = {
    * @param {number} rotation - Rotation angle
    * @param {number} time - Current timestamp
    * @param {Object} npc - Optional NPC data for phase info
+   * @param {Object} worldPosition - Optional world position for eye tracking
    */
-  draw(ctx, x, y, rotation, time, npc) {
+  draw(ctx, x, y, rotation, time, npc, worldPosition) {
     const screenPos = { x, y };
-    this.drawQueen(ctx, null, rotation, screenPos, time, npc);
+
+    // Update eye tracking based on world position
+    if (worldPosition) {
+      this.updateEyeTracking(worldPosition, rotation);
+    }
+
+    this.drawQueen(ctx, worldPosition, rotation, screenPos, time, npc);
+  },
+
+  /**
+   * Find the nearest target (player or other players) to track with eyes
+   * @param {Object} queenWorldPos - Queen's world position
+   * @returns {Object|null} - Target position or null if none found
+   */
+  findNearestTarget(queenWorldPos) {
+    // Access client game state to find potential targets
+    if (typeof window === 'undefined' || !window.game) return null;
+
+    const game = window.game;
+    let nearestTarget = null;
+    let nearestDist = Infinity;
+
+    // Check local player first
+    if (game.player?.position) {
+      const px = game.player.position.x;
+      const py = game.player.position.y;
+      const dx = px - queenWorldPos.x;
+      const dy = py - queenWorldPos.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+
+      if (dist < nearestDist && dist < 800) { // 800 units eye tracking range
+        nearestDist = dist;
+        nearestTarget = { x: px, y: py };
+      }
+    }
+
+    // Check other players
+    if (game.otherPlayers) {
+      for (const [id, player] of game.otherPlayers) {
+        if (player.position) {
+          const dx = player.position.x - queenWorldPos.x;
+          const dy = player.position.y - queenWorldPos.y;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+
+          if (dist < nearestDist && dist < 800) {
+            nearestDist = dist;
+            nearestTarget = { x: player.position.x, y: player.position.y };
+          }
+        }
+      }
+    }
+
+    return nearestTarget;
+  },
+
+  /**
+   * Update eye tracking angle toward nearest target
+   * @param {Object} worldPosition - Queen's world position
+   * @param {number} queenRotation - Queen's current rotation
+   */
+  updateEyeTracking(worldPosition, queenRotation) {
+    const now = Date.now();
+
+    // Throttle target updates to 10Hz for smooth tracking
+    if (now - this.lastTargetUpdate < 100) return;
+    this.lastTargetUpdate = now;
+
+    const target = this.findNearestTarget(worldPosition);
+
+    if (target) {
+      // Calculate angle from queen to target in world space
+      const dx = target.x - worldPosition.x;
+      const dy = target.y - worldPosition.y;
+      const targetAngle = Math.atan2(dy, dx);
+
+      // Convert to local space (relative to queen's rotation)
+      this.trackedTargetAngle = targetAngle - queenRotation;
+    } else {
+      // No target - eyes slowly drift back to center with slight wander
+      this.trackedTargetAngle = Math.sin(now * 0.001) * 0.2;
+    }
   },
 
   /**
@@ -106,8 +207,8 @@ const QueenVisuals = {
     this.drawAbdomen(ctx, scale, phaseColors);
     this.drawCephalothorax(ctx, scale, phaseColors);
 
-    // Draw 8 legs
-    this.drawLegs(ctx, scale, time, npc?.velocity || 0);
+    // Draw 8 legs with enhanced animations
+    this.drawLegs(ctx, scale, time, npc?.velocity || 0, npc);
 
     // Draw mandibles
     this.drawMandibles(ctx, scale, time, npc?.state === 'combat');
@@ -207,28 +308,78 @@ const QueenVisuals = {
   },
 
   /**
-   * Draw 8 animated legs
+   * Draw 8 animated legs with enhanced combat/health effects
    */
-  drawLegs(ctx, scale, time, velocity) {
+  drawLegs(ctx, scale, time, velocity, npc) {
     const legSpeed = velocity > 10 ? 0.008 : 0.002;
+
+    // Update leg state based on NPC data
+    this.updateLegState(npc, time);
+
+    // Check if in combat and low health
+    const inCombat = npc?.state === 'combat' || npc?.state === 'attack';
+    const healthPercent = npc?.hull && npc?.maxHull ? npc.hull / npc.maxHull : 1;
+    const isLowHealth = healthPercent < 0.3;
 
     for (let pair = 0; pair < this.LEGS.length; pair++) {
       const legConfig = this.LEGS[pair];
+      const isFrontPair = pair <= 1; // First two pairs are front legs
 
-      // Calculate animation phase for this leg pair
+      // Calculate primary walk animation
       const phase = (time * legSpeed + legConfig.phaseOffset) % (Math.PI * 2);
-      const walkOffset = Math.sin(phase) * 0.15;
+      let walkOffset = Math.sin(phase) * 0.15;
+
+      // Add secondary organic wiggle (different frequency)
+      const secondaryWiggle = Math.sin(time * 0.003 + pair * 0.7) * 0.05;
+      walkOffset += secondaryWiggle;
+
+      // Combat rear-up for front legs (raise them threateningly)
+      const rearUpOffset = isFrontPair && inCombat
+        ? this.legState.combatRearUp * 0.3
+        : 0;
+
+      // Low health limp (drag rear legs)
+      const limpOffset = isLowHealth && pair >= 2
+        ? this.legState.lowHealthLimp * (pair - 1) * 0.1
+        : 0;
 
       // Draw both legs of the pair (mirror)
-      this.drawSingleLeg(ctx, scale, legConfig, walkOffset, 1);  // Top leg
-      this.drawSingleLeg(ctx, scale, legConfig, walkOffset, -1); // Bottom leg
+      this.drawSingleLeg(ctx, scale, legConfig, walkOffset, 1, rearUpOffset, limpOffset);  // Top leg
+      this.drawSingleLeg(ctx, scale, legConfig, walkOffset, -1, rearUpOffset, limpOffset); // Bottom leg
     }
   },
 
   /**
-   * Draw a single segmented leg
+   * Update leg animation state based on NPC combat/health status
    */
-  drawSingleLeg(ctx, scale, config, walkOffset, side) {
+  updateLegState(npc, time) {
+    const inCombat = npc?.state === 'combat' || npc?.state === 'attack';
+    const healthPercent = npc?.hull && npc?.maxHull ? npc.hull / npc.maxHull : 1;
+    const isLowHealth = healthPercent < 0.3;
+
+    // Smooth transition for combat rear-up
+    const targetRearUp = inCombat ? 1 : 0;
+    this.legState.combatRearUp += (targetRearUp - this.legState.combatRearUp) * 0.1;
+
+    // Smooth transition for low health limp with irregular timing
+    if (isLowHealth) {
+      // Irregular limp pattern
+      const limpCycle = Math.sin(time * 0.004) * 0.5 + Math.sin(time * 0.007) * 0.5;
+      this.legState.lowHealthLimp = 0.5 + limpCycle * 0.5;
+    } else {
+      this.legState.lowHealthLimp *= 0.95; // Fade out
+    }
+
+    // Update secondary wiggle phase
+    this.legState.secondaryWiggle = time * 0.003;
+  },
+
+  /**
+   * Draw a single segmented leg with enhanced animation effects
+   * @param {number} rearUpOffset - Combat rear-up angle offset (front legs raise in combat)
+   * @param {number} limpOffset - Limp drag amount (rear legs drag when low health)
+   */
+  drawSingleLeg(ctx, scale, config, walkOffset, side, rearUpOffset = 0, limpOffset = 0) {
     const baseAngle = config.angle * side - Math.PI / 2 * side;
     const length = config.length * scale;
 
@@ -237,10 +388,15 @@ const QueenVisuals = {
     const femur = length * 0.4;
     const tarsus = length * 0.35;
 
-    // Joint angles with animation
-    const coxaAngle = baseAngle + walkOffset * 0.3;
-    const femurAngle = 0.5 + walkOffset * 0.2;
-    const tarsusAngle = -0.3 - walkOffset * 0.1;
+    // Joint angles with animation and combat/limp effects
+    // Rear-up raises the leg upward (more negative angle pulls toward body top)
+    const coxaAngle = baseAngle + walkOffset * 0.3 - rearUpOffset * side;
+
+    // Femur angle affected by limp (dragging legs are more extended)
+    const femurAngle = 0.5 + walkOffset * 0.2 + limpOffset * 0.2;
+
+    // Tarsus affected by limp (tip drags lower)
+    const tarsusAngle = -0.3 - walkOffset * 0.1 - limpOffset * 0.15;
 
     ctx.strokeStyle = this.COLORS.hull;
     ctx.lineWidth = 3;
@@ -270,17 +426,19 @@ const QueenVisuals = {
     ctx.lineTo(tip.x, tip.y);
     ctx.stroke();
 
-    // Crimson accent on joints
+    // Crimson accent on joints - pulse when low health
+    const jointPulse = limpOffset > 0 ? 1 + Math.sin(Date.now() * 0.01) * 0.3 : 1;
     ctx.fillStyle = this.COLORS.accent;
     ctx.beginPath();
-    ctx.arc(joint1.x, joint1.y, 2, 0, Math.PI * 2);
-    ctx.arc(joint2.x, joint2.y, 2, 0, Math.PI * 2);
+    ctx.arc(joint1.x, joint1.y, 2 * jointPulse, 0, Math.PI * 2);
+    ctx.arc(joint2.x, joint2.y, 2 * jointPulse, 0, Math.PI * 2);
     ctx.fill();
 
-    // Claw tip
-    ctx.fillStyle = this.COLORS.outline;
+    // Claw tip - sharper/more prominent when in combat rear-up
+    const clawSize = 1.5 + rearUpOffset * 1.5;
+    ctx.fillStyle = rearUpOffset > 0.1 ? this.COLORS.accent : this.COLORS.outline;
     ctx.beginPath();
-    ctx.arc(tip.x, tip.y, 1.5, 0, Math.PI * 2);
+    ctx.arc(tip.x, tip.y, clawSize, 0, Math.PI * 2);
     ctx.fill();
   },
 
@@ -326,18 +484,32 @@ const QueenVisuals = {
   },
 
   /**
-   * Draw multiple glowing eyes
+   * Draw multiple glowing eyes with player tracking
    */
   drawEyes(ctx, scale, time, colors) {
     const pulsePhase = Math.sin(time * 0.003) * 0.5 + 0.5;
+
+    // Tracking intensity varies by eye type (primary eyes track most)
+    const trackingIntensity = {
+      primary: 0.4,    // 40% of eye radius
+      secondary: 0.3,  // 30%
+      tertiary: 0.2    // 20%
+    };
 
     for (const eye of this.EYES) {
       const x = eye.x * scale;
       const y = eye.y * scale;
       const radius = eye.radius * scale;
 
-      // Eye glow
-      const glowGradient = ctx.createRadialGradient(x, y, 0, x, y, radius * 2);
+      // Calculate pupil offset based on tracked target angle
+      const intensity = trackingIntensity[eye.type] || 0.2;
+      const maxOffset = radius * intensity;
+      const pupilOffsetX = Math.cos(this.trackedTargetAngle) * maxOffset;
+      const pupilOffsetY = Math.sin(this.trackedTargetAngle) * maxOffset;
+
+      // Eye glow (slightly larger for primary eyes)
+      const glowMultiplier = eye.type === 'primary' ? 2.5 : 2;
+      const glowGradient = ctx.createRadialGradient(x, y, 0, x, y, radius * glowMultiplier);
       glowGradient.addColorStop(0, this.COLORS.eyeColor);
       glowGradient.addColorStop(0.5, colors.glow);
       glowGradient.addColorStop(1, 'transparent');
@@ -345,26 +517,38 @@ const QueenVisuals = {
       ctx.fillStyle = glowGradient;
       ctx.globalAlpha = 0.5 + pulsePhase * 0.3;
       ctx.beginPath();
-      ctx.arc(x, y, radius * 2, 0, Math.PI * 2);
+      ctx.arc(x, y, radius * glowMultiplier, 0, Math.PI * 2);
       ctx.fill();
       ctx.globalAlpha = 1;
 
-      // Eye core
+      // Eye core (slightly varied by type)
+      const coreSize = eye.type === 'primary' ? 0.65 : 0.6;
       ctx.fillStyle = this.COLORS.eyeColor;
       ctx.beginPath();
-      ctx.arc(x, y, radius * 0.6, 0, Math.PI * 2);
+      ctx.arc(x, y, radius * coreSize, 0, Math.PI * 2);
       ctx.fill();
 
-      // Pupil slit
+      // Pupil slit - offset toward tracked target
+      // Rotate pupil slit to face tracked direction for extra creepiness
+      const pupilX = x + pupilOffsetX;
+      const pupilY = y + pupilOffsetY;
+      const pupilRotation = this.trackedTargetAngle;
+
       ctx.fillStyle = '#000';
+      ctx.save();
+      ctx.translate(pupilX, pupilY);
+      ctx.rotate(pupilRotation);
       ctx.beginPath();
-      ctx.ellipse(x, y, radius * 0.15, radius * 0.4, 0, 0, Math.PI * 2);
+      ctx.ellipse(0, 0, radius * 0.15, radius * 0.4, 0, 0, Math.PI * 2);
       ctx.fill();
+      ctx.restore();
 
-      // Reflection highlight
+      // Reflection highlight (offset opposite to pupil for realism)
+      const highlightOffsetX = -pupilOffsetX * 0.5 - radius * 0.2;
+      const highlightOffsetY = -pupilOffsetY * 0.5 - radius * 0.2;
       ctx.fillStyle = 'rgba(255, 255, 255, 0.3)';
       ctx.beginPath();
-      ctx.arc(x - radius * 0.2, y - radius * 0.2, radius * 0.15, 0, Math.PI * 2);
+      ctx.arc(x + highlightOffsetX, y + highlightOffsetY, radius * 0.15, 0, Math.PI * 2);
       ctx.fill();
     }
   },

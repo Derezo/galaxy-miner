@@ -99,6 +99,13 @@ const ChatUI = {
 
     if (!message) return;
 
+    // Check for local debug commands
+    if (message.startsWith('/debug')) {
+      this.handleDebugCommand(message);
+      input.value = '';
+      return;
+    }
+
     // Rate limiting
     const now = Date.now();
     if (now - this.lastMessageTime < CONSTANTS.CHAT_RATE_LIMIT) {
@@ -108,6 +115,170 @@ const ChatUI = {
     this.lastMessageTime = now;
     Network.sendChat(message);
     input.value = '';
+  },
+
+  // Handle /debug commands locally
+  handleDebugCommand(command) {
+    const parts = command.split(' ');
+    const subCommand = parts[1] || 'help';
+
+    switch (subCommand) {
+      case 'enable':
+        if (typeof debugSync !== 'undefined') {
+          debugSync.enable();
+          // Also save to localStorage for persistence
+          localStorage.setItem('DEBUG_SYNC', 'true');
+          this.addLocalMessage('Debug sync logging ENABLED');
+        } else {
+          this.addLocalMessage('Error: debugSync module not loaded');
+        }
+        break;
+
+      case 'disable':
+        if (typeof debugSync !== 'undefined') {
+          debugSync.disable();
+          localStorage.removeItem('DEBUG_SYNC');
+          this.addLocalMessage('Debug sync logging DISABLED');
+        }
+        break;
+
+      case 'sync':
+        this.showSyncStatus();
+        break;
+
+      case 'sector':
+        this.showSectorInfo();
+        break;
+
+      case 'radar':
+        this.showRadarInfo();
+        break;
+
+      case 'stats':
+        if (typeof debugSync !== 'undefined') {
+          const stats = debugSync.getStats();
+          this.addLocalMessage(`Desync Stats: ${stats.total} total events`);
+          for (const [type, count] of Object.entries(stats.byType)) {
+            this.addLocalMessage(`  ${type}: ${count}`);
+          }
+        }
+        break;
+
+      case 'clear':
+        if (typeof debugSync !== 'undefined') {
+          debugSync.clearRecent();
+          this.addLocalMessage('Cleared recent desync log');
+        }
+        break;
+
+      case 'help':
+      default:
+        this.addLocalMessage('Debug Commands:');
+        this.addLocalMessage('  /debug enable   - Enable desync logging');
+        this.addLocalMessage('  /debug disable  - Disable desync logging');
+        this.addLocalMessage('  /debug sync     - Show entity sync status');
+        this.addLocalMessage('  /debug sector   - Show current sector info');
+        this.addLocalMessage('  /debug radar    - Show radar range info');
+        this.addLocalMessage('  /debug stats    - Show desync statistics');
+        this.addLocalMessage('  /debug clear    - Clear desync log');
+        break;
+    }
+  },
+
+  // Add a local system message (not sent to server)
+  addLocalMessage(text) {
+    this.addMessage({
+      username: '[SYSTEM]',
+      message: text
+    });
+  },
+
+  // Show entity synchronization status
+  showSyncStatus() {
+    const now = Date.now();
+    this.addLocalMessage('=== Entity Sync Status ===');
+
+    // NPCs
+    let staleNpcs = 0;
+    let totalNpcs = Entities.npcs.size;
+    for (const [id, npc] of Entities.npcs) {
+      if (npc.lastUpdateTime && now - npc.lastUpdateTime > 2000) {
+        staleNpcs++;
+      }
+    }
+    this.addLocalMessage(`NPCs: ${totalNpcs} total, ${staleNpcs} stale`);
+
+    // Players
+    let stalePlayers = 0;
+    let totalPlayers = Entities.players.size;
+    for (const [id, player] of Entities.players) {
+      if (player.lastUpdateTime && now - player.lastUpdateTime > 2000) {
+        stalePlayers++;
+      }
+    }
+    this.addLocalMessage(`Players: ${totalPlayers} total, ${stalePlayers} stale`);
+
+    // Bases
+    this.addLocalMessage(`Bases: ${Entities.bases.size} tracked`);
+
+    // Wreckage
+    this.addLocalMessage(`Wreckage: ${Entities.wreckage.size} active`);
+
+    // Debug status
+    const debugEnabled = typeof debugSync !== 'undefined' && debugSync.isEnabled();
+    this.addLocalMessage(`Debug logging: ${debugEnabled ? 'ENABLED' : 'disabled'}`);
+  },
+
+  // Show current sector information
+  showSectorInfo() {
+    if (typeof Player === 'undefined' || !Player.position) {
+      this.addLocalMessage('Player position not available');
+      return;
+    }
+
+    const sectorSize = CONSTANTS.SECTOR_SIZE || 1000;
+    const sectorX = Math.floor(Player.position.x / sectorSize);
+    const sectorY = Math.floor(Player.position.y / sectorSize);
+
+    this.addLocalMessage('=== Sector Info ===');
+    this.addLocalMessage(`Position: (${Math.round(Player.position.x)}, ${Math.round(Player.position.y)})`);
+    this.addLocalMessage(`Sector: (${sectorX}, ${sectorY})`);
+
+    // Get sector data if World is available
+    if (typeof World !== 'undefined' && World.getCurrentSector) {
+      const sector = World.getCurrentSector();
+      if (sector) {
+        this.addLocalMessage(`Asteroids: ${sector.asteroids?.length || 0}`);
+        this.addLocalMessage(`Planets: ${sector.planets?.length || 0}`);
+      }
+    }
+  },
+
+  // Show radar range information
+  showRadarInfo() {
+    if (typeof Player === 'undefined') {
+      this.addLocalMessage('Player not available');
+      return;
+    }
+
+    const radarTier = Player.radarTier || 1;
+    const baseRange = CONSTANTS.BASE_RADAR_RANGE || 500;
+    const tierMult = CONSTANTS.TIER_MULTIPLIER || 1.5;
+    const radarRange = baseRange * Math.pow(tierMult, radarTier - 1);
+    const broadcastRange = radarRange * 2;
+
+    this.addLocalMessage('=== Radar Info ===');
+    this.addLocalMessage(`Radar Tier: ${radarTier}`);
+    this.addLocalMessage(`Radar Range: ${Math.round(radarRange)} units`);
+    this.addLocalMessage(`Broadcast Range: ${Math.round(broadcastRange)} units`);
+
+    // Count entities in range
+    if (typeof Player.position !== 'undefined') {
+      const npcsInRange = Entities.getNPCsInRange(Player.position, radarRange);
+      const playersInRange = Entities.getPlayersInRange(Player.position, radarRange);
+      this.addLocalMessage(`NPCs in range: ${npcsInRange.length}`);
+      this.addLocalMessage(`Players in range: ${playersInRange.length}`);
+    }
   },
 
   addMessage(data) {

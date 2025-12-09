@@ -707,7 +707,7 @@ function getStarSystemObjectById(objectId, debug = false) {
 function findStarSystemObjectInSectors(objectId, type, superX, superY, debug = false) {
   // Super-sectors are larger, convert to approximate regular sector coordinates
   // Super-sector coordinates map to multiple regular sectors
-  const superSectorSize = config.SUPER_SECTOR_SIZE || 5;
+  const superSectorSize = config.SUPER_SECTOR_SIZE || 6000;
   const baseSectorX = superX * superSectorSize;
   const baseSectorY = superY * superSectorSize;
 

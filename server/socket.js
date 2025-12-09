@@ -216,12 +216,81 @@ module.exports = function(io) {
 
           if (result) {
             // Send hit feedback to the player
+            const baseDamage = config.BASE_WEAPON_DAMAGE * Math.pow(config.TIER_MULTIPLIER, weaponTier - 1);
             socket.emit('combat:npcHit', {
               npcId: npcData.id,
-              damage: config.BASE_WEAPON_DAMAGE * Math.pow(config.TIER_MULTIPLIER, weaponTier - 1),
+              damage: baseDamage,
               destroyed: result.destroyed
               // Note: rewards are now granted only when collecting wreckage/scrap
             });
+
+            // Tesla Cannon chain lightning (tier 5 only)
+            if (weaponTier >= 5 && config.TESLA_CANNON) {
+              const teslaConfig = config.TESLA_CANNON;
+              const chainRange = teslaConfig.chainRange || 150;
+              const damageFalloff = teslaConfig.damageFalloff || [1.0, 0.5, 0.25];
+              const maxChains = (teslaConfig.chainJumps || 3) - 1; // Primary hit is first, chains are additional
+
+              // Find chain targets starting from hit NPC position
+              const sourcePos = npcData.position;
+              const hitNpcIds = new Set([npcData.id]); // Track hit NPCs to avoid repeat hits
+              const chains = [];
+              let lastPos = sourcePos;
+
+              for (let i = 0; i < maxChains; i++) {
+                // Find nearest NPC within chain range that hasn't been hit
+                const nearbyNpcs = npc.getNPCsInRange(lastPos, chainRange);
+                let bestTarget = null;
+                let bestDist = Infinity;
+
+                for (const candidate of nearbyNpcs) {
+                  if (hitNpcIds.has(candidate.id)) continue;
+                  const cdx = candidate.position.x - lastPos.x;
+                  const cdy = candidate.position.y - lastPos.y;
+                  const candDist = Math.sqrt(cdx * cdx + cdy * cdy);
+                  if (candDist < bestDist) {
+                    bestDist = candDist;
+                    bestTarget = candidate;
+                  }
+                }
+
+                if (!bestTarget) break; // No more targets in range
+
+                // Apply chain damage with falloff
+                const chainDamageMultiplier = damageFalloff[i + 1] || damageFalloff[damageFalloff.length - 1];
+                const chainDamage = Math.round(baseDamage * chainDamageMultiplier);
+
+                const chainResult = engine.playerAttackNPC(
+                  authenticatedUserId,
+                  bestTarget.id,
+                  'tesla', // Special weapon type for chain lightning
+                  weaponTier,
+                  chainDamage // Override damage
+                );
+
+                hitNpcIds.add(bestTarget.id);
+                chains.push({
+                  targetId: bestTarget.id,
+                  targetX: bestTarget.position.x,
+                  targetY: bestTarget.position.y,
+                  damage: chainDamage,
+                  destroyed: chainResult ? chainResult.destroyed : false
+                });
+
+                lastPos = bestTarget.position;
+              }
+
+              // Broadcast chain lightning if we hit any additional targets
+              if (chains.length > 0) {
+                broadcastChainLightning({
+                  playerId: authenticatedUserId,
+                  sourceNpcId: npcData.id,
+                  sourceX: sourcePos.x,
+                  sourceY: sourcePos.y,
+                  chains: chains
+                });
+              }
+            }
           }
           break; // Only hit one NPC per shot
         }
@@ -271,6 +340,32 @@ module.exports = function(io) {
               health: result.health,
               maxHealth: result.maxHealth
             });
+
+            // Tesla Cannon tesla coil effect on base hit (tier 5 only)
+            if (weaponTier >= 5 && config.TESLA_CANNON) {
+              const teslaConfig = config.TESLA_CANNON;
+              const coilRange = teslaConfig.teslaCoilRange || 200;
+              const coilDuration = teslaConfig.teslaCoilDuration || 500;
+
+              // Find nearby NPCs for visual arcing (no damage, just visual effect)
+              const nearbyNpcs = npc.getNPCsInRange({ x: baseData.x, y: baseData.y }, coilRange);
+              const coilTargets = nearbyNpcs.slice(0, 6).map(n => ({
+                npcId: n.id,
+                x: n.position.x,
+                y: n.position.y
+              }));
+
+              // Broadcast tesla coil effect (visual only)
+              broadcastTeslaCoil({
+                playerId: authenticatedUserId,
+                baseId: baseData.id,
+                impactX: baseData.x,
+                impactY: baseData.y,
+                baseSize: baseData.size || 100,
+                duration: coilDuration,
+                targets: coilTargets
+              });
+            }
 
             // If base was destroyed, give rewards to player
             if (result.destroyed) {
@@ -1595,7 +1690,7 @@ module.exports = function(io) {
 
   /**
    * Broadcast base assimilation complete
-   * @param {Object} data - { baseId, newType, originalFaction, convertedNpcs, position }
+   * @param {Object} data - { baseId, newType, originalFaction, convertedNpcs, position, consumedDroneIds }
    */
   function broadcastBaseAssimilated(data) {
     io.emit('swarm:baseAssimilated', {
@@ -1603,7 +1698,8 @@ module.exports = function(io) {
       newType: data.newType,
       originalFaction: data.originalFaction,
       convertedNpcs: data.convertedNpcs || [],
-      position: data.position // For client visual effects
+      position: data.position, // For client visual effects
+      consumedDroneIds: data.consumedDroneIds || [] // Drones consumed in conversion - client removes these
     });
   }
 
@@ -1647,6 +1743,26 @@ module.exports = function(io) {
     }
   }
 
+  // ============================================
+  // TESLA CANNON BROADCASTS
+  // ============================================
+
+  /**
+   * Broadcast chain lightning effect for tier 5 weapon
+   * @param {Object} data - { playerId, sourceNpcId, sourceX, sourceY, chains: [{ targetId, targetX, targetY, damage, destroyed }] }
+   */
+  function broadcastChainLightning(data) {
+    io.emit('combat:chainLightning', data);
+  }
+
+  /**
+   * Broadcast tesla coil effect for tier 5 weapon on base hit
+   * @param {Object} data - { playerId, baseId, impactX, impactY, baseSize, duration, targets: [{ npcId, x, y, damage }] }
+   */
+  function broadcastTeslaCoil(data) {
+    io.emit('combat:teslaCoil', data);
+  }
+
   // Export for use by other modules
   return {
     io,
@@ -1658,6 +1774,9 @@ module.exports = function(io) {
     broadcastBaseAssimilated,
     broadcastQueenSpawn,
     broadcastQueenDeath,
-    broadcastQueenAura
+    broadcastQueenAura,
+    // Tesla cannon broadcasts
+    broadcastChainLightning,
+    broadcastTeslaCoil
   };
 };

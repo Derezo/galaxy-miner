@@ -179,7 +179,7 @@ const NPC_TYPES = {
     faction: 'swarm',
     hull: 788,     // +50% (was 525, baseline 300) - BOSS TIER
     shield: 263,   // +50% (was 175, baseline 100)
-    speed: 40,     // Base speed (phase modifiers apply)
+    speed: 80,     // Base speed (was 40) - phase modifiers apply (80-200 u/s)
     weaponType: 'explosive',
     weaponTier: 4,
     weaponDamage: 37,
@@ -484,10 +484,9 @@ function attachDroneToBase(droneId, baseId) {
     const conversionResult = convertBaseToSwarm(baseId, base);
     result.conversion = conversionResult;
 
-    // Remove all attached drones - they're consumed in the conversion
-    for (const attachedDroneId of progress.attachedDrones) {
-      activeNPCs.delete(attachedDroneId);
-    }
+    // NOTE: Worms (attached drones) are NOT removed on assimilation completion.
+    // They persist on the converted base until the base is destroyed.
+    // Cleanup happens in damageBase() when the base is destroyed.
   }
 
   return result;
@@ -594,11 +593,31 @@ function convertBaseToSwarm(baseId, base) {
     }
   }
 
+  // Preserve attached drone IDs on the base before clearing assimilation progress
+  // This ensures we can still clean them up when the base is destroyed
+  const progress = assimilationProgress.get(baseId);
+  if (progress && progress.attachedDrones && progress.attachedDrones.size > 0) {
+    base.attachedDroneIds = Array.from(progress.attachedDrones);
+  }
+
   // Clear assimilation progress
   assimilationProgress.delete(baseId);
 
   // Update base spawn config to swarm
   base.spawnConfig = BASE_NPC_SPAWNS.swarm_hive;
+
+  // Initialize spawn state for the newly assimilated hive
+  // Without this, the base won't spawn any NPCs after conversion
+  base.lastSpawnTime = 0;  // Allow immediate spawning
+  base.pendingRespawns = base.pendingRespawns || [];
+  base.spawnedNPCs = base.spawnedNPCs || [];
+
+  // Queue up initial spawns so the base starts spawning swarm NPCs
+  const spawnConfig = BASE_NPC_SPAWNS.swarm_hive;
+  const neededSpawns = Math.max(0, spawnConfig.initialSpawn - base.spawnedNPCs.length);
+  for (let i = 0; i < neededSpawns; i++) {
+    base.pendingRespawns.push({ respawnAt: Date.now() + (i * 500) }); // Stagger spawns by 500ms
+  }
 
   // Check if queen should spawn (range-based: 3+ bases within 10,000 units)
   const queenCheck = checkQueenSpawnConditions({ x: base.x, y: base.y });
@@ -1458,6 +1477,30 @@ function damageBase(baseId, damage, attackerId = null) {
         destroyedDrones.push(droneId);
       }
       assimilationProgress.delete(baseId);
+    }
+
+    // Method 2: Scan for any NPCs still attached to this base (catches edge cases)
+    // Some worms may have attachedToBase set but not be tracked in assimilationProgress
+    for (const [npcId, npc] of activeNPCs) {
+      if (npc.attachedToBase === baseId) {
+        activeNPCs.delete(npcId);
+        if (!destroyedDrones.includes(npcId)) {
+          destroyedDrones.push(npcId);
+        }
+      }
+    }
+
+    // Method 3: Use stored attached drone IDs from assimilation (for assimilated bases)
+    // These were preserved in convertBaseToSwarm() before assimilationProgress was cleared
+    if (base.attachedDroneIds && base.attachedDroneIds.length > 0) {
+      for (const droneId of base.attachedDroneIds) {
+        if (activeNPCs.has(droneId)) {
+          activeNPCs.delete(droneId);
+          if (!destroyedDrones.includes(droneId)) {
+            destroyedDrones.push(droneId);
+          }
+        }
+      }
     }
 
     // Orphan all NPCs from this base - enter rage mode instead of deletion

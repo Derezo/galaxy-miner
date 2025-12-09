@@ -41,6 +41,10 @@ app.get('/shared/utils.js', (req, res) => {
   res.sendFile(path.join(__dirname, '..', 'shared', 'utils.js'));
 });
 
+app.get('/shared/debug-sync.js', (req, res) => {
+  res.sendFile(path.join(__dirname, '..', 'shared', 'debug-sync.js'));
+});
+
 // Health check endpoint
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', uptime: process.uptime() });

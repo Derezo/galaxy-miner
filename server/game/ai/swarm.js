@@ -21,6 +21,11 @@ class SwarmStrategy {
    * Main update for swarm behavior
    */
   update(npc, nearbyPlayers, nearbyAllies, deltaTime, context) {
+    // Route Swarm Queen to phase-based boss AI
+    if (npc.type === 'swarm_queen') {
+      return this.updateQueenAI(npc, nearbyPlayers, nearbyAllies, deltaTime, context);
+    }
+
     // Swarm never retreats - fight to the death
     npc.state = nearbyPlayers.length > 0 ? 'combat' : 'patrol';
 
@@ -326,9 +331,10 @@ class SwarmStrategy {
     if (queenX === undefined || queenY === undefined) return null;
 
     const guardConfig = CONSTANTS.SWARM_QUEEN_SPAWN;
-    const minOrbit = 50;  // Tight formation inner radius
-    const maxOrbit = 100; // Tight formation outer radius
-    const orbitSpeed = 1.5; // Fast orbit speed (rad/s)
+    const minOrbit = 40;  // Tight formation inner radius (was 50)
+    const maxOrbit = 80;  // Tight formation outer radius (was 100)
+    const orbitSpeed = 2.0; // Fast orbit speed (rad/s) (was 1.5)
+    const interceptThreshold = 120; // Break formation if player this close to queen
 
     // Calculate guard index for formation spacing
     let myIndex = 0;
@@ -353,13 +359,45 @@ class SwarmStrategy {
     const orbitX = queenX + Math.cos(npc.guardOrbitAngle) * npc.guardOrbitRadius;
     const orbitY = queenY + Math.sin(npc.guardOrbitAngle) * npc.guardOrbitRadius;
 
-    // Move toward orbit position
-    const dx = orbitX - npc.position.x;
-    const dy = orbitY - npc.position.y;
+    // Check if any player is dangerously close to queen - intercept them!
+    let interceptTarget = null;
+    let interceptDist = Infinity;
+    for (const player of nearbyPlayers) {
+      const pToQueenDx = player.position.x - queenX;
+      const pToQueenDy = player.position.y - queenY;
+      const pToQueenDist = Math.sqrt(pToQueenDx * pToQueenDx + pToQueenDy * pToQueenDy);
+
+      if (pToQueenDist < interceptThreshold && pToQueenDist < interceptDist) {
+        interceptDist = pToQueenDist;
+        interceptTarget = player;
+      }
+    }
+
+    // Move toward intercept target (break formation) or orbit position
+    let targetX, targetY;
+    if (interceptTarget) {
+      // Intercept! Move between player and queen
+      const pDx = interceptTarget.position.x - queenX;
+      const pDy = interceptTarget.position.y - queenY;
+      const pDist = Math.sqrt(pDx * pDx + pDy * pDy);
+      // Position ourselves between player and queen, closer to player
+      targetX = queenX + (pDx / pDist) * (pDist * 0.7);
+      targetY = queenY + (pDy / pDist) * (pDist * 0.7);
+      npc.isIntercepting = true;
+    } else {
+      targetX = orbitX;
+      targetY = orbitY;
+      npc.isIntercepting = false;
+    }
+
+    const dx = targetX - npc.position.x;
+    const dy = targetY - npc.position.y;
     const dist = Math.sqrt(dx * dx + dy * dy);
 
     if (dist > 5) {
-      const moveSpeed = npc.speed * 1.2 * (deltaTime / 1000); // Move fast to maintain formation
+      // Move faster when intercepting
+      const speedMult = npc.isIntercepting ? 1.5 : 1.2;
+      const moveSpeed = npc.speed * speedMult * (deltaTime / 1000);
       npc.position.x += (dx / dist) * moveSpeed;
       npc.position.y += (dy / dist) * moveSpeed;
     }
@@ -481,6 +519,17 @@ class SwarmStrategy {
       queen.hullMax = queen.hullMax || queen.hull;
     }
 
+    // Initialize special attack cooldowns
+    queen.lastWebSnare = queen.lastWebSnare || 0;
+    queen.lastAcidBurst = queen.lastAcidBurst || 0;
+
+    // No players nearby - patrol the domain
+    if (nearbyPlayers.length === 0) {
+      queen.state = 'patrol';
+      this.queenPatrol(queen, deltaTime, context);
+      return null;
+    }
+
     // Update phase based on health
     const phase = this.updateQueenPhase(queen);
     const modifiers = CONSTANTS.SWARM_QUEEN_PHASE_MODIFIERS[phase];
@@ -519,11 +568,12 @@ class SwarmStrategy {
 
     // Check for phase transition
     if (newPhase !== queen.phaseManager.currentPhase) {
+      const oldPhase = queen.phaseManager.currentPhase; // Capture BEFORE changing
       queen.phaseManager.lastPhaseTransition = Date.now();
       queen.phaseManager.currentPhase = newPhase;
       // Return transition event for broadcast
       queen.phaseTransitionPending = {
-        from: queen.phaseManager.currentPhase,
+        from: oldPhase,
         to: newPhase,
         timestamp: Date.now()
       };
@@ -840,6 +890,58 @@ class SwarmStrategy {
     }
 
     return { x: x / guards.length, y: y / guards.length };
+  }
+
+  /**
+   * Queen patrol behavior when no players are nearby
+   * Queen slowly roams around her spawn point/home base in a menacing pattern
+   * @param {Object} queen - The queen NPC
+   * @param {number} deltaTime - Time since last update
+   * @param {Object} context - Additional context (homeBase, etc)
+   */
+  queenPatrol(queen, deltaTime, context) {
+    const center = context.homeBase || queen.spawnPoint || queen.position;
+    if (!center) return;
+
+    const centerX = center.x ?? center.position?.x ?? 0;
+    const centerY = center.y ?? center.position?.y ?? 0;
+
+    // Queen has a large patrol radius - she's the boss of her domain
+    const patrolRadius = 300;
+    const patrolSpeed = queen.speed * 0.4 * (deltaTime / 1000); // Slow, menacing patrol
+    const orbitSpeed = 0.15; // Very slow orbit - queen is deliberate
+
+    // Initialize patrol angle if not exists
+    queen.patrolAngle = queen.patrolAngle || 0;
+
+    // Add slight variation to make movement more organic
+    const variation = Math.sin(Date.now() * 0.001 + (queen.id?.charCodeAt(0) || 0)) * 50;
+    const effectiveRadius = patrolRadius + variation;
+
+    // Update patrol angle
+    queen.patrolAngle += orbitSpeed * (deltaTime / 1000);
+
+    // Calculate target patrol position
+    const targetX = centerX + Math.cos(queen.patrolAngle) * effectiveRadius;
+    const targetY = centerY + Math.sin(queen.patrolAngle) * effectiveRadius;
+
+    // Get current queen position
+    const queenX = queen.position?.x ?? queen.x;
+    const queenY = queen.position?.y ?? queen.y;
+
+    const dx = targetX - queenX;
+    const dy = targetY - queenY;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+
+    if (dist > 10) {
+      // Face the direction of movement
+      queen.rotation = Math.atan2(dy, dx);
+      queen.position.x += (dx / dist) * patrolSpeed;
+      queen.position.y += (dy / dist) * patrolSpeed;
+    }
+
+    // Queen is in patrol state
+    queen.state = 'patrol';
   }
 }
 

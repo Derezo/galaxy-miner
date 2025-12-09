@@ -33,11 +33,11 @@ const WEAPON_CONFIG = {
     trail: { length: 60, frequency: 0.7, size: 2.5, type: 'smoke', smokeColor: '#ff660030' }
   },
   5: {
-    type: 'plasma',
-    color: { primary: '#ff44ff', secondary: '#ffffff', glow: '#ff44ff80' },
-    size: 12, speed: 1000, duration: 400, particleCount: 20, hasExplosion: true, hasSplash: true, trailWidth: 8,
-    muzzle: { size: 35, duration: 120, type: 'vortex' },
-    trail: { length: 80, frequency: 0.9, size: 3, type: 'wisps', wispCount: 3 }
+    type: 'tesla',
+    color: { primary: '#00ccff', secondary: '#44ffaa', glow: '#00ccff60', core: '#ffffff' },
+    size: 14, speed: 900, duration: 450, particleCount: 25, hasExplosion: true, trailWidth: 6,
+    muzzle: { size: 40, duration: 150, type: 'teslaArc' },
+    trail: { length: 70, frequency: 0.85, size: 3.5, type: 'electrical', sparkCount: 4 }
   }
 };
 
@@ -128,6 +128,7 @@ const WeaponRenderer = {
         break;
       case 'pulse':
       case 'plasma':
+      case 'tesla':
         this.fireProjectile(muzzleX, muzzleY, rotation, tier, config);
         break;
       case 'beam':
@@ -288,6 +289,9 @@ const WeaponRenderer = {
       case 'plasma':
         this.drawPlasmaBolt(ctx, config);
         break;
+      case 'tesla':
+        this.drawTeslaBolt(ctx, config);
+        break;
     }
 
     ctx.restore();
@@ -377,6 +381,101 @@ const WeaponRenderer = {
     ctx.fill();
   },
 
+  drawTeslaBolt(ctx, config) {
+    const size = config.size;
+    const time = Date.now();
+    const pulse = 1 + Math.sin(time * 0.04) * 0.2;
+
+    // Outer glow layer
+    const glowGradient = ctx.createRadialGradient(0, 0, 0, 0, 0, size * 2.5 * pulse);
+    glowGradient.addColorStop(0, config.color.core || '#ffffff');
+    glowGradient.addColorStop(0.2, config.color.secondary);
+    glowGradient.addColorStop(0.5, config.color.primary);
+    glowGradient.addColorStop(0.8, config.color.glow);
+    glowGradient.addColorStop(1, 'transparent');
+
+    ctx.fillStyle = glowGradient;
+    ctx.beginPath();
+    ctx.arc(0, 0, size * 2.5 * pulse, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Crackling surface lightning
+    const arcCount = 6;
+    ctx.strokeStyle = config.color.core || '#ffffff';
+    ctx.lineWidth = 1.5;
+    ctx.lineCap = 'round';
+
+    for (let i = 0; i < arcCount; i++) {
+      const baseAngle = (i / arcCount) * Math.PI * 2 + time * 0.008;
+      const arcLength = size * (0.8 + Math.random() * 0.4);
+
+      ctx.beginPath();
+      ctx.moveTo(
+        Math.cos(baseAngle) * size * 0.3,
+        Math.sin(baseAngle) * size * 0.3
+      );
+
+      // Jagged lightning path
+      const segments = 3;
+      for (let j = 1; j <= segments; j++) {
+        const progress = j / segments;
+        const jitter = (Math.random() - 0.5) * size * 0.4;
+        const angle = baseAngle + jitter * 0.1;
+        ctx.lineTo(
+          Math.cos(angle) * arcLength * progress + jitter * 0.3,
+          Math.sin(angle) * arcLength * progress + jitter * 0.3
+        );
+      }
+      ctx.stroke();
+    }
+
+    // Orbiting spark particles
+    const sparkCount = 4;
+    for (let i = 0; i < sparkCount; i++) {
+      const orbitAngle = time * 0.015 + (i / sparkCount) * Math.PI * 2;
+      const orbitRadius = size * (1.2 + Math.sin(time * 0.02 + i) * 0.3);
+      const sparkX = Math.cos(orbitAngle) * orbitRadius;
+      const sparkY = Math.sin(orbitAngle) * orbitRadius;
+      const sparkSize = 2 + Math.random() * 2;
+
+      const sparkGradient = ctx.createRadialGradient(sparkX, sparkY, 0, sparkX, sparkY, sparkSize * 2);
+      sparkGradient.addColorStop(0, config.color.core || '#ffffff');
+      sparkGradient.addColorStop(0.5, config.color.primary);
+      sparkGradient.addColorStop(1, 'transparent');
+
+      ctx.fillStyle = sparkGradient;
+      ctx.beginPath();
+      ctx.arc(sparkX, sparkY, sparkSize * 2, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // Bright core
+    const coreGradient = ctx.createRadialGradient(0, 0, 0, 0, 0, size * 0.5);
+    coreGradient.addColorStop(0, config.color.core || '#ffffff');
+    coreGradient.addColorStop(0.6, config.color.secondary);
+    coreGradient.addColorStop(1, config.color.primary + '80');
+
+    ctx.fillStyle = coreGradient;
+    ctx.beginPath();
+    ctx.arc(0, 0, size * 0.5, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Energy trail
+    const trailGradient = ctx.createLinearGradient(-size * 4, 0, 0, 0);
+    trailGradient.addColorStop(0, 'transparent');
+    trailGradient.addColorStop(0.4, config.color.glow);
+    trailGradient.addColorStop(0.8, config.color.primary);
+    trailGradient.addColorStop(1, config.color.secondary);
+
+    ctx.strokeStyle = trailGradient;
+    ctx.lineWidth = config.trailWidth || 6;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(-size * 4, 0);
+    ctx.lineTo(-size * 0.5, 0);
+    ctx.stroke();
+  },
+
   drawBeam(ctx, beam, camera) {
     const screenX = beam.x - camera.x;
     const screenY = beam.y - camera.y;
@@ -453,6 +552,10 @@ const WeaponRenderer = {
       case 'vortex':
         // Swirling plasma vortex
         this.drawVortexMuzzleFlash(ctx, size, flash, progress);
+        break;
+      case 'teslaArc':
+        // Tesla lightning branches
+        this.drawTeslaArcMuzzleFlash(ctx, size, flash, progress);
         break;
       default:
         // Simple flash (tier 1)
@@ -598,6 +701,85 @@ const WeaponRenderer = {
     ctx.fill();
   },
 
+  drawTeslaArcMuzzleFlash(ctx, size, flash, progress) {
+    const time = Date.now();
+    const branchCount = 5;
+    const maxLength = size * 1.8;
+
+    // Core glow
+    const coreGradient = ctx.createRadialGradient(0, 0, 0, 0, 0, size * 0.6);
+    coreGradient.addColorStop(0, '#ffffff');
+    coreGradient.addColorStop(0.4, flash.secondaryColor || '#44ffaa');
+    coreGradient.addColorStop(0.7, flash.color);
+    coreGradient.addColorStop(1, 'transparent');
+
+    ctx.fillStyle = coreGradient;
+    ctx.beginPath();
+    ctx.arc(0, 0, size * 0.6, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Lightning branches from barrel
+    for (let i = 0; i < branchCount; i++) {
+      const baseAngle = (i / branchCount) * Math.PI - Math.PI / 2 + (Math.random() - 0.5) * 0.3;
+      const branchLength = maxLength * (0.6 + Math.random() * 0.4) * (1 - progress * 0.5);
+
+      // Glow layer
+      ctx.strokeStyle = flash.glowColor || flash.color + '60';
+      ctx.lineWidth = 8 * (1 - progress);
+      ctx.lineCap = 'round';
+      this.drawLightningBranch(ctx, 0, 0, baseAngle, branchLength, 3);
+
+      // Primary layer
+      ctx.strokeStyle = flash.color;
+      ctx.lineWidth = 3 * (1 - progress);
+      this.drawLightningBranch(ctx, 0, 0, baseAngle, branchLength, 3);
+
+      // Core layer
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = 1.5 * (1 - progress);
+      this.drawLightningBranch(ctx, 0, 0, baseAngle, branchLength, 3);
+    }
+
+    // Spark particles
+    const sparkCount = 6;
+    for (let i = 0; i < sparkCount; i++) {
+      const angle = Math.random() * Math.PI * 2;
+      const dist = size * (0.3 + Math.random() * 0.8);
+      const sparkX = Math.cos(angle) * dist;
+      const sparkY = Math.sin(angle) * dist;
+      const sparkSize = 2 + Math.random() * 2;
+
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath();
+      ctx.arc(sparkX, sparkY, Math.max(0.1, sparkSize * (1 - progress)), 0, Math.PI * 2);
+      ctx.fill();
+    }
+  },
+
+  drawLightningBranch(ctx, startX, startY, angle, length, segments) {
+    ctx.beginPath();
+    ctx.moveTo(startX, startY);
+
+    let x = startX;
+    let y = startY;
+
+    for (let i = 0; i < segments; i++) {
+      const segLength = length / segments;
+      const jitter = (Math.random() - 0.5) * segLength * 0.8;
+      const newAngle = angle + jitter * 0.15;
+
+      x += Math.cos(newAngle) * segLength;
+      y += Math.sin(newAngle) * segLength;
+
+      // Add perpendicular jitter
+      x += Math.cos(newAngle + Math.PI / 2) * jitter;
+      y += Math.sin(newAngle + Math.PI / 2) * jitter;
+
+      ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+  },
+
   createExplosion(x, y, tier, config) {
     const count = config.hasSplash ? 30 : 15;
     const size = config.size || 8;
@@ -698,6 +880,43 @@ const WeaponRenderer = {
             size: trailConfig.size + Math.random(),
             type: 'glow',
             drag: 0.95,
+            decay: 1.2
+          });
+        }
+        break;
+
+      case 'electrical':
+        // Electrical spark particles for Tesla cannon
+        const sparkCount = trailConfig.sparkCount || 4;
+        for (let i = 0; i < sparkCount; i++) {
+          const angle = Math.random() * Math.PI * 2;
+          const speed = 40 + Math.random() * 60;
+          ParticleSystem.spawn({
+            x: proj.x + (Math.random() - 0.5) * 10,
+            y: proj.y + (Math.random() - 0.5) * 10,
+            vx: -proj.vx * 0.15 + Math.cos(angle) * speed,
+            vy: -proj.vy * 0.15 + Math.sin(angle) * speed,
+            life: 80 + Math.random() * 60,
+            color: config.color.core || '#ffffff',
+            secondaryColor: config.color.primary,
+            size: trailConfig.size * 0.8 + Math.random(),
+            type: 'spark',
+            drag: 0.92,
+            decay: 1.5
+          });
+        }
+        // Also spawn a glow particle
+        if (Math.random() > 0.5) {
+          ParticleSystem.spawn({
+            x: proj.x + (Math.random() - 0.5) * 6,
+            y: proj.y + (Math.random() - 0.5) * 6,
+            vx: -proj.vx * 0.2,
+            vy: -proj.vy * 0.2,
+            life: 100 + Math.random() * 50,
+            color: config.color.primary,
+            size: trailConfig.size * 1.5,
+            type: 'glow',
+            drag: 0.96,
             decay: 1.2
           });
         }

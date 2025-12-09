@@ -14,6 +14,12 @@ const HitEffectRenderer = {
     hull: {
       primary: '#ff6600',
       secondary: '#ff3300'
+    },
+    tesla: {
+      primary: '#00ccff',
+      secondary: '#44ffaa',
+      core: '#ffffff',
+      glow: '#00ccff60'
     }
   },
 
@@ -57,16 +63,17 @@ const HitEffectRenderer = {
       hasFlame: true,
       flameCount: 4
     },
-    5: { // Massive explosion
+    5: { // Tesla electrical discharge
       particleMultiplier: 2.5,
       sizeMultiplier: 1.6,
       speedMultiplier: 1.5,
       hasRing: true,
       ringCount: 3,
       hasDebris: true,
-      debrisCount: 8,
-      hasFlame: true,
-      flameCount: 8,
+      debrisCount: 6,
+      hasFlame: false,
+      hasElectrical: true,
+      electricalArcs: 6,
       hasShockwave: true
     }
   },
@@ -133,9 +140,15 @@ const HitEffectRenderer = {
       this.addFlameParticles(x, y, config.flameCount);
     }
 
-    // Tier 5: Add shockwave
+    // Tier 5 Tesla: Add electrical discharge
+    if (config.hasElectrical) {
+      this.addElectricalDischarge(x, y, config.electricalArcs);
+    }
+
+    // Tier 5: Add shockwave (use tesla colors for electrical)
     if (config.hasShockwave) {
-      this.addShockwave(x, y, colors.primary);
+      const shockwaveColor = config.hasElectrical ? this.COLORS.tesla.primary : colors.primary;
+      this.addShockwave(x, y, shockwaveColor, config.hasElectrical);
     }
   },
 
@@ -221,9 +234,105 @@ const HitEffectRenderer = {
   },
 
   /**
+   * Add electrical discharge for Tesla weapon impacts
+   */
+  addElectricalDischarge(x, y, arcCount) {
+    const teslaColors = this.COLORS.tesla;
+
+    // Central bright flash
+    ParticleSystem.spawn({
+      x,
+      y,
+      vx: 0,
+      vy: 0,
+      color: teslaColors.core,
+      secondaryColor: teslaColors.primary,
+      size: 20,
+      life: 200,
+      decay: 1.5,
+      drag: 1,
+      type: 'glow'
+    });
+
+    // Electrical arc particles shooting outward
+    for (let i = 0; i < arcCount; i++) {
+      const angle = (i / arcCount) * Math.PI * 2 + (Math.random() - 0.5) * 0.3;
+      const speed = 150 + Math.random() * 100;
+
+      // Main arc spark
+      ParticleSystem.spawn({
+        x: x + (Math.random() - 0.5) * 8,
+        y: y + (Math.random() - 0.5) * 8,
+        vx: Math.cos(angle) * speed,
+        vy: Math.sin(angle) * speed,
+        color: teslaColors.core,
+        secondaryColor: teslaColors.primary,
+        size: 3 + Math.random() * 2,
+        life: 300 + Math.random() * 150,
+        decay: 1.1,
+        drag: 0.94,
+        type: 'spark',
+        pulse: true,
+        pulseSpeed: 20
+      });
+
+      // Secondary glow trail
+      ParticleSystem.spawn({
+        x: x + (Math.random() - 0.5) * 6,
+        y: y + (Math.random() - 0.5) * 6,
+        vx: Math.cos(angle) * speed * 0.8,
+        vy: Math.sin(angle) * speed * 0.8,
+        color: teslaColors.primary,
+        secondaryColor: teslaColors.secondary,
+        size: 5 + Math.random() * 3,
+        life: 250,
+        decay: 1.2,
+        drag: 0.96,
+        type: 'glow'
+      });
+    }
+
+    // Expanding electrical ring
+    ParticleSystem.spawn({
+      x,
+      y,
+      vx: 0,
+      vy: 0,
+      color: teslaColors.primary,
+      secondaryColor: teslaColors.glow,
+      size: 15,
+      life: 300,
+      decay: 1,
+      drag: 1,
+      type: 'ring'
+    });
+
+    // Small crackling sparks around impact point
+    const sparkCount = arcCount * 2;
+    for (let i = 0; i < sparkCount; i++) {
+      const angle = Math.random() * Math.PI * 2;
+      const dist = 5 + Math.random() * 15;
+      const speed = 50 + Math.random() * 80;
+
+      ParticleSystem.spawn({
+        x: x + Math.cos(angle) * dist,
+        y: y + Math.sin(angle) * dist,
+        vx: (Math.random() - 0.5) * speed,
+        vy: (Math.random() - 0.5) * speed,
+        color: teslaColors.secondary,
+        size: 1.5 + Math.random() * 1.5,
+        life: 150 + Math.random() * 100,
+        decay: 1.3,
+        drag: 0.92,
+        type: 'spark'
+      });
+    }
+  },
+
+  /**
    * Add shockwave effect for tier 5 impacts
    */
-  addShockwave(x, y, color) {
+  addShockwave(x, y, color, isElectrical = false) {
     // Large expanding ring
     ParticleSystem.spawn({
       x,
@@ -231,7 +340,7 @@ const HitEffectRenderer = {
       vx: 0,
       vy: 0,
       color: color,
-      secondaryColor: '#ffffff',
+      secondaryColor: isElectrical ? this.COLORS.tesla.secondary : '#ffffff',
       size: 30,
       life: 400,
       decay: 1,
@@ -240,24 +349,25 @@ const HitEffectRenderer = {
     });
 
     // Energy pulse particles moving outward
-    const pulseCount = 16;
+    const pulseCount = isElectrical ? 20 : 16;
     for (let i = 0; i < pulseCount; i++) {
       const angle = (i / pulseCount) * Math.PI * 2;
-      const speed = 200;
+      const speed = isElectrical ? 250 : 200;
 
       ParticleSystem.spawn({
         x,
         y,
         vx: Math.cos(angle) * speed,
         vy: Math.sin(angle) * speed,
-        color: '#ffffff',
-        size: 3,
-        life: 300,
+        color: isElectrical ? this.COLORS.tesla.core : '#ffffff',
+        secondaryColor: isElectrical ? this.COLORS.tesla.primary : null,
+        size: isElectrical ? 4 : 3,
+        life: isElectrical ? 350 : 300,
         decay: 1.2,
         drag: 0.96,
-        type: 'energy',
+        type: isElectrical ? 'spark' : 'energy',
         pulse: true,
-        pulseSpeed: 10
+        pulseSpeed: isElectrical ? 15 : 10
       });
     }
   },

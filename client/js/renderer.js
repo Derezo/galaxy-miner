@@ -9,6 +9,14 @@ const Renderer = {
   miningNotification: null,
   lastDt: 0,
 
+  // Screen shake system
+  screenShake: {
+    intensity: 0, // Current shake intensity (pixels)
+    duration: 0, // Total shake duration (ms)
+    startTime: 0, // When shake started
+    offset: { x: 0, y: 0 }, // Current shake offset
+  },
+
   init() {
     this.canvas = document.getElementById("gameCanvas");
     this.ctx = this.canvas.getContext("2d");
@@ -72,6 +80,11 @@ const Renderer = {
       BoostIndicator.init();
     }
 
+    // Initialize celestial texture renderer
+    if (typeof CelestialRenderer !== "undefined") {
+      CelestialRenderer.init();
+    }
+
     Logger.log("Renderer initialized with advanced graphics");
   },
 
@@ -80,11 +93,85 @@ const Renderer = {
     this.canvas.height = window.innerHeight;
   },
 
+  // ============================================
+  // SCREEN SHAKE SYSTEM
+  // ============================================
+
+  /**
+   * Trigger a screen shake effect
+   * @param {number} intensity - Maximum shake offset in pixels
+   * @param {number} duration - Duration of shake in milliseconds
+   */
+  triggerScreenShake(intensity, duration) {
+    this.screenShake.intensity = intensity;
+    this.screenShake.duration = duration;
+    this.screenShake.startTime = Date.now();
+  },
+
+  /**
+   * Set screen shake intensity directly (for continuous effects like queen death)
+   * @param {number} intensity - Current shake intensity in pixels
+   */
+  setScreenShake(intensity) {
+    this.screenShake.intensity = intensity;
+    this.screenShake.duration = 100; // Short duration, updated continuously
+    this.screenShake.startTime = Date.now();
+  },
+
+  /**
+   * Update screen shake offset
+   */
+  updateScreenShake() {
+    if (this.screenShake.intensity <= 0) {
+      this.screenShake.offset.x = 0;
+      this.screenShake.offset.y = 0;
+      return;
+    }
+
+    const elapsed = Date.now() - this.screenShake.startTime;
+    const progress = elapsed / this.screenShake.duration;
+
+    if (progress >= 1) {
+      // Shake finished
+      this.screenShake.intensity = 0;
+      this.screenShake.offset.x = 0;
+      this.screenShake.offset.y = 0;
+      return;
+    }
+
+    // Calculate current shake intensity with falloff
+    const currentIntensity = this.screenShake.intensity * (1 - progress * 0.3);
+
+    // Random shake offset with perlin-like smoothness
+    const time = Date.now() * 0.015;
+    this.screenShake.offset.x =
+      Math.sin(time * 1.3) * currentIntensity +
+      Math.sin(time * 2.7) * currentIntensity * 0.5;
+    this.screenShake.offset.y =
+      Math.cos(time * 1.1) * currentIntensity +
+      Math.cos(time * 2.3) * currentIntensity * 0.5;
+  },
+
+  /**
+   * Get camera position with shake offset applied
+   * @returns {{ x: number, y: number }} Camera position with shake
+   */
+  getCameraWithShake() {
+    return {
+      x: this.camera.x + this.screenShake.offset.x,
+      y: this.camera.y + this.screenShake.offset.y,
+    };
+  },
+
   /**
    * Update graphics systems (call once per frame before drawing)
    */
   update(dt) {
     this.lastDt = dt;
+
+    // Update screen shake
+    this.updateScreenShake();
+
     ParticleSystem.update(dt);
     WeaponRenderer.update(dt);
 
@@ -118,6 +205,11 @@ const Renderer = {
       FactionBases.update(dt);
     }
 
+    // Update celestial textures (asteroid rotations)
+    if (typeof CelestialRenderer !== "undefined") {
+      CelestialRenderer.update(dt);
+    }
+
     // Update star effects (corona flares, heat overlay)
     if (typeof StarEffects !== "undefined" && typeof Player !== "undefined") {
       const objects = World.getVisibleObjects(
@@ -130,6 +222,14 @@ const Renderer = {
     // Update player death effect sequence
     if (typeof PlayerDeathEffect !== "undefined") {
       PlayerDeathEffect.update(dt);
+    }
+
+    // Update Tesla cannon effects
+    if (typeof ChainLightningEffect !== "undefined") {
+      ChainLightningEffect.update(dt);
+    }
+    if (typeof TeslaCoilEffect !== "undefined") {
+      TeslaCoilEffect.update(dt);
     }
 
     // Update new HUD visual modules
@@ -243,6 +343,32 @@ const Renderer = {
     for (const asteroid of objects.asteroids) {
       if (!this.isOnScreen(asteroid.x, asteroid.y, asteroid.size)) continue;
       this.drawAsteroid(asteroid);
+    }
+
+    // Draw comets (if any visible)
+    if (
+      objects.comets &&
+      typeof CelestialRenderer !== "undefined" &&
+      typeof Physics !== "undefined"
+    ) {
+      const camera = {
+        x: this.camera.x,
+        y: this.camera.y,
+        zoom: 1, // Adjust if game has zoom
+        width: this.canvas.width,
+        height: this.canvas.height,
+      };
+      const orbitTime = Physics.getOrbitTime();
+      for (const comet of objects.comets) {
+        const cometState = Physics.computeCometPosition(comet, orbitTime);
+        if (cometState.visible) {
+          // Check if comet is on screen (comet has long tail, use larger check)
+          const tailSize = comet.size * (comet.tailLengthFactor || 8);
+          if (this.isOnScreen(cometState.x, cometState.y, tailSize)) {
+            CelestialRenderer.drawComet(this.ctx, comet, cometState, camera);
+          }
+        }
+      }
     }
 
     // Draw faction bases (skip destroyed ones)
@@ -425,7 +551,13 @@ const Renderer = {
     const ctx = this.ctx;
     const depleted = World.isObjectDepleted(planet.id);
 
-    // Planet body
+    // Use CelestialRenderer if available for enhanced visuals
+    if (typeof CelestialRenderer !== "undefined") {
+      CelestialRenderer.drawPlanet(ctx, planet, screen, depleted);
+      return;
+    }
+
+    // Fallback: simple rendering
     const colors = {
       rocky: "#8B4513",
       gas: "#DEB887",
@@ -452,6 +584,13 @@ const Renderer = {
     const ctx = this.ctx;
     const depleted = World.isObjectDepleted(asteroid.id);
 
+    // Use CelestialRenderer if available for enhanced visuals
+    if (typeof CelestialRenderer !== "undefined") {
+      CelestialRenderer.drawAsteroid(ctx, asteroid, screen, depleted);
+      return;
+    }
+
+    // Fallback: simple rendering
     ctx.fillStyle = depleted ? "#333333" : CONSTANTS.COLORS.ASTEROID;
     ctx.beginPath();
     ctx.arc(screen.x, screen.y, asteroid.size, 0, Math.PI * 2);
@@ -790,7 +929,7 @@ const Renderer = {
     ctx.fillStyle = "#ffffff";
     ctx.font = "10px monospace";
     ctx.textAlign = "center";
-    ctx.fillText("Collecting...", screen.x, y - 8);
+    ctx.fillText("Collecting...", screen.x, y - 13);
   },
 
   drawEntities() {
@@ -985,6 +1124,14 @@ const Renderer = {
     // Draw formation succession effects (void)
     if (typeof FormationSuccessionEffect !== "undefined") {
       FormationSuccessionEffect.draw(ctx, this.camera);
+    }
+
+    // Draw Tesla cannon effects
+    if (typeof ChainLightningEffect !== "undefined") {
+      ChainLightningEffect.draw(ctx, this.camera);
+    }
+    if (typeof TeslaCoilEffect !== "undefined") {
+      TeslaCoilEffect.draw(ctx, this.camera);
     }
 
     // Draw emotes
@@ -1254,7 +1401,7 @@ const Renderer = {
     ctx.fillStyle = "#ffffff";
     ctx.font = "10px monospace";
     ctx.textAlign = "center";
-    ctx.fillText("Mining: " + targetName, screen.x, y - 4);
+    ctx.fillText("Mining: " + targetName, screen.x, y - 13);
   },
 
   showMiningResult(resourceName, quantity) {

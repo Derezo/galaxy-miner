@@ -1,5 +1,13 @@
 // Galaxy Miner - Other Entities (Players, NPCs)
 
+// Debug sync module (loaded via script tag or available globally)
+const getDebugSync = () => typeof debugSync !== 'undefined' ? debugSync : null;
+
+// Desync detection thresholds
+const TELEPORT_THRESHOLD = 500;     // Units - log if entity jumps more than this
+const STALE_THRESHOLD = 2000;       // Ms - log if no update for this long
+const STALE_CHECK_INTERVAL = 1000;  // Ms - how often to check for stale entities
+
 const Entities = {
   players: new Map(),
   npcs: new Map(),
@@ -8,6 +16,7 @@ const Entities = {
   baseStates: new Map(), // Track destroyed/damaged base states
   bases: new Map(),      // Track active bases for radar display
   projectileTrails: [],  // Track recent weapon fire for radar (Tier 4+)
+  _lastStaleCheck: 0,    // Timestamp of last staleness check
 
   init() {
     this.players.clear();
@@ -41,6 +50,46 @@ const Entities = {
 
     // Update wreckage (rotation animation)
     this.updateWreckageRotation(dt);
+
+    // Periodically check for stale entities (desync detection)
+    this._checkStaleEntities();
+  },
+
+  // Check for entities that haven't received updates in too long
+  _checkStaleEntities() {
+    const now = Date.now();
+    if (now - this._lastStaleCheck < STALE_CHECK_INTERVAL) return;
+    this._lastStaleCheck = now;
+
+    const ds = getDebugSync();
+    if (!ds || !ds.isEnabled()) return;
+
+    // Check NPCs for staleness
+    for (const [id, npc] of this.npcs) {
+      if (npc.lastUpdateTime && now - npc.lastUpdateTime > STALE_THRESHOLD) {
+        ds.log('ENTITY_STALE', {
+          entityId: id,
+          type: npc.type,
+          faction: npc.faction,
+          staleDuration: now - npc.lastUpdateTime,
+          state: npc.state,
+          position: npc.position
+        });
+      }
+    }
+
+    // Check other players for staleness
+    for (const [id, player] of this.players) {
+      if (player.lastUpdateTime && now - player.lastUpdateTime > STALE_THRESHOLD) {
+        ds.log('ENTITY_STALE', {
+          entityId: id,
+          type: 'player',
+          username: player.username,
+          staleDuration: now - player.lastUpdateTime,
+          position: player.position
+        });
+      }
+    }
   },
 
   interpolateEntity(entity, dt) {
@@ -61,6 +110,8 @@ const Entities = {
   updatePlayer(data) {
     if (data.id === Player.id) return; // Don't update local player
 
+    const now = Date.now();
+
     if (!this.players.has(data.id)) {
       // New player
       this.players.set(data.id, {
@@ -72,16 +123,38 @@ const Entities = {
         targetRotation: data.rotation,
         hull: data.hull,
         shield: data.shield,
-        colorId: data.colorId || 'green'
+        colorId: data.colorId || 'green',
+        lastUpdateTime: now
       });
     } else {
       // Update existing player
       const player = this.players.get(data.id);
+
+      // Teleport detection - check if position jumped significantly
+      const dx = data.x - player.position.x;
+      const dy = data.y - player.position.y;
+      const jumpDistance = Math.sqrt(dx * dx + dy * dy);
+
+      if (jumpDistance > TELEPORT_THRESHOLD) {
+        const ds = getDebugSync();
+        if (ds && ds.isEnabled()) {
+          ds.log('ENTITY_TELEPORT', {
+            entityId: data.id,
+            type: 'player',
+            username: player.username,
+            jumpDistance: Math.round(jumpDistance),
+            previousPos: { x: player.position.x, y: player.position.y },
+            newPos: { x: data.x, y: data.y }
+          });
+        }
+      }
+
       player.targetPosition = { x: data.x, y: data.y };
       player.targetRotation = data.rotation;
       player.hull = data.hull;
       player.shield = data.shield;
       player.status = data.status || 'idle';
+      player.lastUpdateTime = now;
       // Update color if provided
       if (data.colorId) {
         player.colorId = data.colorId;
@@ -115,6 +188,8 @@ const Entities = {
   },
 
   updateNPC(data) {
+    const now = Date.now();
+
     if (!this.npcs.has(data.id)) {
       // New NPC - track spawn time for swarm egg hatching animation
       const isSwarm = (data.faction === 'swarm');
@@ -133,16 +208,38 @@ const Entities = {
         shieldMax: data.shieldMax || data.shield || 0,
         state: data.state || 'patrol',
         // Swarm egg hatching - track spawn time for 2.5 second hatch animation
-        spawnTime: isSwarm ? Date.now() : null,
-        hatchDuration: isSwarm ? (data.type === 'swarm_queen' ? 4000 : 2500) : 0
+        spawnTime: isSwarm ? now : null,
+        hatchDuration: isSwarm ? (data.type === 'swarm_queen' ? 4000 : 2500) : 0,
+        lastUpdateTime: now
       });
     } else {
       const npc = this.npcs.get(data.id);
+
+      // Teleport detection - check if position jumped significantly
+      const dx = data.x - npc.position.x;
+      const dy = data.y - npc.position.y;
+      const jumpDistance = Math.sqrt(dx * dx + dy * dy);
+
+      if (jumpDistance > TELEPORT_THRESHOLD) {
+        const ds = getDebugSync();
+        if (ds && ds.isEnabled()) {
+          ds.log('ENTITY_TELEPORT', {
+            entityId: data.id,
+            type: npc.type,
+            faction: npc.faction,
+            jumpDistance: Math.round(jumpDistance),
+            previousPos: { x: npc.position.x, y: npc.position.y },
+            newPos: { x: data.x, y: data.y }
+          });
+        }
+      }
+
       npc.targetPosition = { x: data.x, y: data.y };
       npc.targetRotation = data.rotation || npc.targetRotation;
       npc.hull = data.hull;
       npc.shield = data.shield;
       npc.state = data.state || npc.state;
+      npc.lastUpdateTime = now;
       // Update max values if provided
       if (data.hullMax !== undefined) npc.hullMax = data.hullMax;
       if (data.shieldMax !== undefined) npc.shieldMax = data.shieldMax;

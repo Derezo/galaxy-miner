@@ -19,9 +19,26 @@ const RadarBaseRenderer = {
     return Math.sqrt(dx * dx + dy * dy);
   },
 
-  // Check if distance is within range
-  isInRange(distance, range) {
-    return distance <= range;
+  // Hysteresis buffer (10% extra range for exit threshold)
+  HYSTERESIS_FACTOR: 1.1,
+  // Fade zone starts at 90% of range
+  FADE_ZONE_START: 0.9,
+
+  // Check if distance is within range (with hysteresis for smooth transitions)
+  // Use exitCheck=true when checking if already-visible entities should disappear
+  isInRange(distance, range, exitCheck = false) {
+    const threshold = exitCheck ? range * this.HYSTERESIS_FACTOR : range;
+    return distance <= threshold;
+  },
+
+  // Calculate opacity for fade zone (items near edge fade out)
+  // Returns 1.0 for items well inside range, 0.0-1.0 for items in fade zone
+  getEdgeOpacity(distance, range) {
+    const fadeStart = range * this.FADE_ZONE_START;
+    if (distance <= fadeStart) return 1.0;
+    if (distance > range) return 0.0;
+    // Linear fade from fadeStart to range
+    return 1.0 - (distance - fadeStart) / (range - fadeStart);
   },
 
   // Draw a filled dot

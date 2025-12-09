@@ -267,10 +267,21 @@ const Network = {
       // Get NPC data BEFORE removing it
       const npc = Entities.npcs.get(data.id);
 
-      // Trigger faction-specific death effect
+      // Trigger death effect
       if (npc && typeof DeathEffects !== 'undefined') {
-        const effectType = DeathEffects.getEffectForFaction(npc.faction);
-        DeathEffects.trigger(npc.position.x, npc.position.y, effectType, npc.faction);
+        // Queen gets special extended death sequence
+        if (npc.type === 'swarm_queen') {
+          DeathEffects.triggerQueenDeath(
+            npc.position.x,
+            npc.position.y,
+            npc.phase || 'HUNT',
+            npc.rotation || 0
+          );
+        } else {
+          // Standard faction-specific death effect
+          const effectType = DeathEffects.getEffectForFaction(npc.faction);
+          DeathEffects.trigger(npc.position.x, npc.position.y, effectType, npc.faction);
+        }
       }
 
       // Now remove the NPC
@@ -468,6 +479,15 @@ const Network = {
             decay: 0.9
           });
         }
+      }
+
+      // Remove consumed drones from client-side entities
+      // These drones were absorbed into the base during conversion
+      if (data.consumedDroneIds && data.consumedDroneIds.length > 0) {
+        for (const droneId of data.consumedDroneIds) {
+          Entities.npcs.delete(droneId);
+        }
+        Logger.log('Removed', data.consumedDroneIds.length, 'consumed drones from assimilation');
       }
 
       // Show notification
@@ -880,6 +900,26 @@ const Network = {
       }
 
       // NPC destroyed notification removed - rewards are now shown when collecting scrap
+    });
+
+    // ============================================
+    // TESLA CANNON EFFECTS (TIER 5 WEAPON)
+    // ============================================
+
+    // Chain lightning effect when Tesla Cannon hits NPCs
+    this.socket.on('combat:chainLightning', (data) => {
+      Logger.log('Chain lightning triggered!', data);
+      if (typeof ChainLightningEffect !== 'undefined') {
+        ChainLightningEffect.triggerFromEvent(data);
+      }
+    });
+
+    // Tesla coil effect when Tesla Cannon hits bases
+    this.socket.on('combat:teslaCoil', (data) => {
+      Logger.log('Tesla coil triggered!', data);
+      if (typeof TeslaCoilEffect !== 'undefined') {
+        TeslaCoilEffect.triggerFromEvent(data);
+      }
     });
 
     // ============================================

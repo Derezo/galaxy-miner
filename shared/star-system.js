@@ -165,21 +165,34 @@ Object.assign(StarSystem, {
     const config = getConfig();
     const id = `ss_${superX}_${superY}_${index}`;
 
-    // Star size (4x larger than before)
-    const starSizeMin = config.STAR_SIZE_MIN || 320;
-    const starSizeMax = config.STAR_SIZE_MAX || 800;
-    const size = starSizeMin + rng() * (starSizeMax - starSizeMin);
+    // Select spectral class using weighted random based on rarity
+    const spectralClass = this.selectSpectralClass(rng);
+    const spectralData = config.STAR_SPECTRAL_CLASSES?.[spectralClass] || {
+      sizeRange: [400, 450],
+      massMultiplier: 1.0,
+      color: '#fff4ea',
+      coronaColor: '#ffeecc',
+      coreColor: '#ffffee'
+    };
 
-    // Star properties
+    // Star size based on spectral class range
+    const [sizeMin, sizeMax] = spectralData.sizeRange;
+    const size = sizeMin + rng() * (sizeMax - sizeMin);
+
+    // Star properties with spectral class data
     const primaryStar = {
       id: `${id}_star`,
       x,
       y,
       size,
-      color: this.getStarColor(rng),
-      mass: size * (config.STAR_MASS_FACTOR || 0.5),
+      color: spectralData.color,
+      coronaColor: spectralData.coronaColor,
+      coreColor: spectralData.coreColor,
+      mass: size * (config.STAR_MASS_FACTOR || 0.5) * spectralData.massMultiplier,
       gravityRadius: size * (config.STAR_GRAVITY?.INFLUENCE_RADIUS_FACTOR || 3),
-      spectralClass: this.getSpectralClass(size)
+      spectralClass,
+      spectralName: spectralData.name,
+      tempK: spectralData.tempK
     };
 
     // Calculate influence radius based on star size
@@ -206,6 +219,9 @@ Object.assign(StarSystem, {
     // Generate wormholes
     const wormholes = this.generateWormholes(primaryStar, binaryInfo, influenceRadius, rng, id);
 
+    // Generate comets (rare hazards)
+    const comets = this.generateComets(primaryStar, influenceRadius, rng, id);
+
     return {
       id,
       primaryStar,
@@ -215,13 +231,15 @@ Object.assign(StarSystem, {
       asteroidBelts,
       planets,
       bases,
-      wormholes
+      wormholes,
+      comets
     };
   },
 
   // Create binary star companion
   createBinarySystem(primaryStar, rng) {
     const config = getConfig();
+    const binaryConfig = config.BINARY_STAR_CONFIG || {};
 
     // Secondary star is 30-80% of primary size
     const secondarySize = primaryStar.size * (0.3 + rng() * 0.5);
@@ -230,10 +248,12 @@ Object.assign(StarSystem, {
     // Orbit separation: 1.5-3x primary size
     const separation = primaryStar.size * (1.5 + rng() * 1.5);
 
-    // Barycenter divides separation inversely by mass
-    const baryOffset = separation * massRatio / (1 + massRatio);
+    // Eccentricity for elliptical orbits (0 = circular, 0.5 = quite elliptical)
+    const eccMin = binaryConfig.ECCENTRICITY_MIN ?? 0.0;
+    const eccMax = binaryConfig.ECCENTRICITY_MAX ?? 0.5;
+    const eccentricity = eccMin + rng() * (eccMax - eccMin);
 
-    // Initial position angle
+    // Initial position angle (mean anomaly at t=0)
     const phase = rng() * Math.PI * 2;
 
     // Position barycenter near primary
@@ -242,9 +262,24 @@ Object.assign(StarSystem, {
       y: primaryStar.y
     };
 
-    // Calculate initial positions
+    // Semi-major axes (average orbital radius)
     const r1 = separation * massRatio / (1 + massRatio);
     const r2 = separation - r1;
+
+    // Orbit period based on separation
+    const basePeriod = binaryConfig.ORBIT_PERIOD_BASE || 120;
+    const orbitPeriod = basePeriod + rng() * basePeriod;
+
+    // Secondary star color - can be shifted from primary
+    let secondaryColor;
+    if (binaryConfig.SECONDARY_COLOR_SHIFT) {
+      // Pick a different spectral class for visual distinction
+      const secondaryClass = this.selectSpectralClass(rng);
+      const spectralData = config.STAR_SPECTRAL_CLASSES?.[secondaryClass];
+      secondaryColor = spectralData?.color || this.getStarColor(rng);
+    } else {
+      secondaryColor = this.getStarColor(rng);
+    }
 
     return {
       secondaryStar: {
@@ -252,12 +287,13 @@ Object.assign(StarSystem, {
         x: baryCenter.x + Math.cos(phase + Math.PI) * r2,
         y: baryCenter.y + Math.sin(phase + Math.PI) * r2,
         size: secondarySize,
-        color: this.getStarColor(rng),
+        color: secondaryColor,
         mass: secondarySize * (config.STAR_MASS_FACTOR || 0.5)
       },
       baryCenter,
       separation,
-      orbitPeriod: 60 + rng() * 180, // 60-240 seconds for full orbit
+      eccentricity,  // NEW: for elliptical orbits
+      orbitPeriod,
       orbitPhase: phase,
       primaryOrbitRadius: r1,
       secondaryOrbitRadius: r2
@@ -350,8 +386,11 @@ Object.assign(StarSystem, {
     if (centerDist > belt.outerRadius + sectorSize * 0.7) return [];
     if (centerDist < belt.innerRadius - sectorSize * 0.7) return [];
 
+    // Apply density multiplier (10% boost)
+    const densityMultiplier = config.ASTEROID_BELT_DENSITY_MULTIPLIER || 1.0;
+
     // Approximate asteroids for this sector
-    const asteroidCount = Math.max(1, Math.floor(belt.density * 3 * rng() + 1));
+    const asteroidCount = Math.max(1, Math.floor(belt.density * 3 * densityMultiplier * rng() + 1));
 
     for (let i = 0; i < asteroidCount; i++) {
       // Random position within belt annulus
@@ -365,8 +404,27 @@ Object.assign(StarSystem, {
 
       // Only include if within this sector
       if (ax >= sectorMinX && ax < sectorMaxX && ay >= sectorMinY && ay < sectorMaxY) {
-        const size = (config.ASTEROID_SIZE_MIN || 10) +
-                     rng() * ((config.ASTEROID_SIZE_MAX || 30) - (config.ASTEROID_SIZE_MIN || 10));
+        // Select asteroid type and size class
+        const asteroidType = this.selectAsteroidType(rng);
+        const sizeClass = this.selectAsteroidSizeClass(rng);
+        const sizeClassData = config.ASTEROID_SIZE_CLASSES?.[sizeClass] || {
+          sizeRange: [10, 30],
+          rotationSpeed: [0.2, 0.8],
+          vertices: [6, 9],
+          irregularity: 0.25
+        };
+
+        // Size from size class range
+        const [sizeMin, sizeMax] = sizeClassData.sizeRange;
+        const size = sizeMin + rng() * (sizeMax - sizeMin);
+
+        // Rotation speed from size class (smaller = faster)
+        const [rotMin, rotMax] = sizeClassData.rotationSpeed;
+        const rotationSpeed = (rotMin + rng() * (rotMax - rotMin)) * (rng() > 0.5 ? 1 : -1);
+
+        // Generate irregular polygon shape (deterministic based on seed)
+        const shapeSeed = this.hash(`${sectorX}_${sectorY}_asteroid_${i}`, belt.index, 0);
+        const shape = this.generateAsteroidShape(shapeSeed, sizeClassData);
 
         asteroids.push({
           id: `${sectorX}_${sectorY}_asteroid_belt${belt.index}_${i}`,
@@ -374,6 +432,10 @@ Object.assign(StarSystem, {
           orbitAngle: theta,
           orbitSpeed: belt.orbitSpeed * (1 + (rng() - 0.5) * 0.2), // Slight variation
           size,
+          type: asteroidType,       // NEW: metallic, carbonaceous, silicate
+          sizeClass,                 // NEW: small, medium, large
+          rotationSpeed,             // NEW: radians/second
+          shape,                     // NEW: array of vertex offsets for irregular polygon
           resources: this.getAsteroidResources(rng, belt.resourceType),
           starId: star.id,
           beltIndex: belt.index
@@ -390,19 +452,30 @@ Object.assign(StarSystem, {
     const planets = [];
 
     const minPlanets = config.PLANETS_PER_STAR_MIN || 2;
-    const maxPlanets = config.PLANETS_PER_STAR_MAX || 8;
+    const maxPlanets = config.PLANETS_PER_STAR_MAX || 9;  // Updated to 9
     const planetCount = minPlanets + Math.floor(rng() * (maxPlanets - minPlanets + 1));
 
     // Create orbital slots that avoid asteroid belts
     const slots = this.generatePlanetSlots(star, belts, planetCount, rng);
 
     slots.forEach((slot, index) => {
-      const planetSize = (config.PLANET_SIZE_MIN || 20) +
-                         rng() * ((config.PLANET_SIZE_MAX || 60) - (config.PLANET_SIZE_MIN || 20));
+      // Select planet type using weighted random
+      const planetType = this.selectPlanetType(rng);
+      const typeData = config.PLANET_TYPES?.[planetType] || {
+        colors: ['#8B4513', '#A0522D'],
+        sizeRange: [20, 40]
+      };
+
+      // Size from type's range
+      const [sizeMin, sizeMax] = typeData.sizeRange;
+      const planetSize = sizeMin + rng() * (sizeMax - sizeMin);
 
       // Kepler orbit speed
       const orbitSpeed = (config.PLANET_ORBIT_SPEED_BASE || 0.0003) *
                          Math.sqrt(star.mass / slot.radius);
+
+      // Generate seed for deterministic texture rendering
+      const textureSeed = this.hash(`${systemId}_planet_${index}`, slot.radius, 0);
 
       planets.push({
         id: `${systemId}_planet_${index}`,
@@ -410,7 +483,23 @@ Object.assign(StarSystem, {
         orbitAngle: rng() * Math.PI * 2,
         orbitSpeed,
         size: planetSize,
-        type: this.getPlanetType(rng),
+        type: planetType,
+        typeName: typeData.name,
+        // Visual properties from type
+        colors: typeData.colors,
+        hasBands: typeData.hasBands || false,
+        hasRings: typeData.hasRings || false,
+        hasCraters: typeData.hasCraters || false,
+        hasClouds: typeData.hasClouds || false,
+        hasLavaGlow: typeData.hasLavaGlow || false,
+        hasHeatGlow: typeData.hasHeatGlow || false,
+        hasPolarCaps: typeData.hasPolarCaps || false,
+        hasDunes: typeData.hasDunes || false,
+        hasAtmosphere: typeData.hasAtmosphere || false,
+        hasToxicClouds: typeData.hasToxicClouds || false,
+        hasVolcanoes: typeData.hasVolcanoes || false,
+        hasOceans: typeData.hasOceans || false,
+        textureSeed,
         resources: this.getPlanetResources(rng),
         starId: star.id
       });
@@ -676,9 +765,181 @@ Object.assign(StarSystem, {
     return 'M';                       // Red dwarf
   },
 
+  // Select spectral class using weighted random based on rarity
+  selectSpectralClass(rng) {
+    const config = getConfig();
+    const classes = config.STAR_SPECTRAL_CLASSES;
+    if (!classes) return 'G';  // Default to sun-like
+
+    // Build cumulative probability array
+    const entries = Object.entries(classes);
+    let total = 0;
+    const cumulative = entries.map(([key, data]) => {
+      total += data.rarity || 0.14;  // Default equal weight
+      return { key, cumulative: total };
+    });
+
+    // Roll and find matching class
+    const roll = rng() * total;
+    for (const { key, cumulative: threshold } of cumulative) {
+      if (roll <= threshold) return key;
+    }
+    return entries[entries.length - 1][0];  // Fallback
+  },
+
+  // Select planet type using weighted random based on rarity (15 types)
+  selectPlanetType(rng) {
+    const config = getConfig();
+    const types = config.PLANET_TYPES;
+    if (!types) return 'rocky';  // Fallback
+
+    // Build cumulative probability array
+    const entries = Object.entries(types);
+    let total = 0;
+    const cumulative = entries.map(([key, data]) => {
+      total += data.rarity || 0.07;  // Default equal weight
+      return { key, cumulative: total };
+    });
+
+    // Roll and find matching type
+    const roll = rng() * total;
+    for (const { key, cumulative: threshold } of cumulative) {
+      if (roll <= threshold) return key;
+    }
+    return entries[entries.length - 1][0];  // Fallback
+  },
+
+  // Legacy compatibility - uses weighted selection now
   getPlanetType(rng) {
-    const types = ['rocky', 'gas', 'ice', 'lava', 'ocean', 'desert', 'jungle'];
-    return types[Math.floor(rng() * types.length)];
+    return this.selectPlanetType(rng);
+  },
+
+  // Select asteroid type (metallic, carbonaceous, silicate)
+  selectAsteroidType(rng) {
+    const config = getConfig();
+    const types = config.ASTEROID_TYPES;
+    if (!types) return 'silicate';  // Fallback
+
+    const entries = Object.entries(types);
+    let total = 0;
+    const cumulative = entries.map(([key, data]) => {
+      total += data.rarity || 0.33;
+      return { key, cumulative: total };
+    });
+
+    const roll = rng() * total;
+    for (const { key, cumulative: threshold } of cumulative) {
+      if (roll <= threshold) return key;
+    }
+    return entries[entries.length - 1][0];
+  },
+
+  // Select asteroid size class (small 40%, medium 40%, large 20%)
+  selectAsteroidSizeClass(rng) {
+    const roll = rng();
+    if (roll < 0.4) return 'small';
+    if (roll < 0.8) return 'medium';
+    return 'large';
+  },
+
+  // Generate irregular asteroid shape (array of vertex offsets)
+  generateAsteroidShape(seed, sizeClassData) {
+    const shapeRng = this.seededRandom(seed);
+    const [minVerts, maxVerts] = sizeClassData.vertices || [6, 9];
+    const irregularity = sizeClassData.irregularity || 0.25;
+
+    const vertexCount = minVerts + Math.floor(shapeRng() * (maxVerts - minVerts + 1));
+    const vertices = [];
+
+    for (let i = 0; i < vertexCount; i++) {
+      const angle = (i / vertexCount) * Math.PI * 2;
+      // Radius varies from 0.7 to 1.3 based on irregularity
+      const radiusOffset = 1 + (shapeRng() - 0.5) * 2 * irregularity;
+      vertices.push({
+        angle,
+        radiusOffset
+      });
+    }
+
+    return vertices;
+  },
+
+  // Generate comets for a star system (rare hazards)
+  generateComets(star, influenceRadius, rng, systemId) {
+    const config = getConfig();
+    const cometConfig = config.COMET_CONFIG || {};
+    const comets = [];
+
+    // Very rare spawn chance
+    if (rng() > (cometConfig.SPAWN_CHANCE || 0.005)) {
+      return comets;
+    }
+
+    // Generate 1-2 comets if spawning
+    const cometCount = 1 + (rng() < 0.3 ? 1 : 0);
+
+    for (let i = 0; i < cometCount; i++) {
+      // Comet size
+      const [sizeMin, sizeMax] = cometConfig.SIZE_RANGE || [30, 60];
+      const size = sizeMin + rng() * (sizeMax - sizeMin);
+
+      // Trajectory type
+      const trajectoryTypes = cometConfig.TRAJECTORY_TYPES || ['flyby', 'perihelion'];
+      const trajectoryType = trajectoryTypes[Math.floor(rng() * trajectoryTypes.length)];
+
+      // Entry and exit points at system boundary
+      const entryAngle = rng() * Math.PI * 2;
+      const exitAngle = entryAngle + Math.PI * (0.5 + rng());  // Exit roughly opposite side
+
+      // Perihelion distance (closest approach to star)
+      const perihelionDist = star.size * (1.5 + rng() * 2);
+
+      // Entry/exit at influence boundary
+      const entryX = star.x + Math.cos(entryAngle) * influenceRadius;
+      const entryY = star.y + Math.sin(entryAngle) * influenceRadius;
+      const exitX = star.x + Math.cos(exitAngle) * influenceRadius;
+      const exitY = star.y + Math.sin(exitAngle) * influenceRadius;
+
+      // Perihelion point
+      const perihelionAngle = (entryAngle + exitAngle) / 2 + Math.PI;
+      const perihelionX = star.x + Math.cos(perihelionAngle) * perihelionDist;
+      const perihelionY = star.y + Math.sin(perihelionAngle) * perihelionDist;
+
+      // Calculate total path length for timing
+      const leg1 = Math.sqrt((perihelionX - entryX)**2 + (perihelionY - entryY)**2);
+      const leg2 = Math.sqrt((exitX - perihelionX)**2 + (exitY - perihelionY)**2);
+      const totalPath = leg1 + leg2;
+
+      // Traversal time based on speed
+      const speed = cometConfig.TRAVERSAL_SPEED || 500;
+      const traversalTime = (totalPath / speed) * 1000;  // ms
+
+      // Spawn offset (when comet becomes active relative to system generation)
+      // Comets cycle through on long intervals
+      const orbitPeriod = 300000 + rng() * 600000;  // 5-15 minutes between passes
+      const phaseOffset = rng() * orbitPeriod;
+
+      comets.push({
+        id: `${systemId}_comet_${i}`,
+        size,
+        trajectoryType,
+        // Path control points (Bezier curve)
+        entryPoint: { x: entryX, y: entryY },
+        perihelion: { x: perihelionX, y: perihelionY },
+        exitPoint: { x: exitX, y: exitY },
+        // Timing
+        speed,
+        traversalTime,
+        orbitPeriod,
+        phaseOffset,
+        warningTime: cometConfig.WARNING_TIME || 10000,
+        // Visuals
+        tailLengthFactor: cometConfig.TAIL_LENGTH_FACTOR || 8,
+        starId: star.id
+      });
+    }
+
+    return comets;
   },
 
   getPlanetResources(rng) {

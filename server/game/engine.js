@@ -8,6 +8,7 @@ const loot = require('./loot');
 const world = require('../world');
 const starDamage = require('./star-damage');
 const logger = require('../../shared/logger');
+const Physics = require('../../shared/physics');
 
 let io = null;
 let connectedPlayers = null;
@@ -148,10 +149,20 @@ const NPC_ACCURACY = {
 let lastBaseBroadcastTime = 0;
 const BASE_BROADCAST_INTERVAL = 500;
 
-// Base activation and broadcast ranges (should match for consistency)
-// Using sector-based range for smooth transitions across sector boundaries
-const BASE_ACTIVATION_RANGE = config.SECTOR_SIZE * 3;  // 3000 units
-const BASE_BROADCAST_RANGE = BASE_ACTIVATION_RANGE;    // Match activation range
+// === ACTIVATION AND BROADCAST RANGES ===
+// Max tier 5 radar broadcast range: BASE_RADAR_RANGE * 1.5^4 * 2 = 500 * 5.0625 * 2 = ~5062
+const MAX_TIER_BROADCAST_RANGE = config.BASE_RADAR_RANGE *
+  Math.pow(config.TIER_MULTIPLIER, (config.MAX_TIER || 5) - 1) * 2;
+// Add margin for sector boundary smoothing
+const BASE_ACTIVATION_RANGE = Math.max(config.SECTOR_SIZE * 3, MAX_TIER_BROADCAST_RANGE + 500);
+const BASE_BROADCAST_RANGE = BASE_ACTIVATION_RANGE;
+
+// Calculate broadcast range for a player based on their radar tier
+function getPlayerBroadcastRange(player) {
+  const radarTier = player.radarTier || 1;
+  const radarRange = config.BASE_RADAR_RANGE * Math.pow(config.TIER_MULTIPLIER, radarTier - 1);
+  return radarRange * 2;
+}
 
 function init(socketIo, players, sockModule) {
   io = socketIo;
@@ -186,6 +197,7 @@ function tick() {
   updateMining(deltaTime);
   updateWreckage(deltaTime);
   updateStarDamage(deltaTime);  // Apply star heat damage
+  updateComets(deltaTime);  // Comet hazard collision detection
   broadcastNearbyBasesToPlayers(now);  // Send base positions for radar
 
   // Schedule next tick
@@ -485,6 +497,23 @@ function updateNPCs(deltaTime) {
       continue; // Skip all AI processing for hatching eggs
     }
 
+    // Check for rage expiration (from queen death)
+    if (npcEntity.rageExpires && Date.now() >= npcEntity.rageExpires) {
+      // Rage has worn off - restore original stats
+      if (npcEntity.originalAggroRange) {
+        npcEntity.aggroRange = npcEntity.originalAggroRange;
+        delete npcEntity.originalAggroRange;
+      }
+      if (npcEntity.originalSpeed) {
+        npcEntity.speed = npcEntity.originalSpeed;
+        delete npcEntity.originalSpeed;
+      }
+      if (npcEntity.state === 'rage') {
+        npcEntity.state = 'patrol';
+      }
+      delete npcEntity.rageExpires;
+    }
+
     // Get players in NPC's aggro range for AI
     const nearbyPlayers = players.filter(p => {
       const dx = p.position.x - npcEntity.position.x;
@@ -549,7 +578,8 @@ function updateNPCs(deltaTime) {
                   newType: result.conversion.newType,
                   originalFaction: result.conversion.originalFaction,
                   convertedNpcs: result.conversion.convertedNpcs,
-                  position: assimAction.position // For client visual effects
+                  position: assimAction.position, // For client visual effects
+                  consumedDroneIds: result.consumedDroneIds || [] // Drones consumed in conversion - client removes these
                 });
 
                 // Check for queen spawn - queen is now spawned directly in convertBaseToSwarm
@@ -1012,6 +1042,147 @@ function updateStarDamage(deltaTime) {
   starDamage.update(connectedPlayers, io, deltaTime);
 }
 
+// Track comet warnings to avoid spamming
+const cometWarningsSent = new Map(); // cometId -> lastWarningTime
+
+function updateComets(deltaTime) {
+  if (!connectedPlayers || connectedPlayers.size === 0) return;
+
+  const players = [...connectedPlayers.values()];
+  const now = Date.now();
+  const orbitTime = Physics.getOrbitTime();
+
+  // Comet config
+  const cometConfig = config.COMET_CONFIG || {};
+  const collisionDamage = cometConfig.PLAYER_COLLISION_DAMAGE || 50;
+  const knockbackForce = cometConfig.KNOCKBACK_FORCE || 200;
+  const warningInterval = 5000; // Don't spam warnings - once per 5 seconds per comet
+
+  // Find active sectors (same approach as updateBases/updateNPCs)
+  const activeSectors = new Map();
+  for (const player of players) {
+    const sectorX = Math.floor(player.position.x / config.SECTOR_SIZE);
+    const sectorY = Math.floor(player.position.y / config.SECTOR_SIZE);
+
+    // Include adjacent sectors for comet detection
+    for (let dx = -1; dx <= 1; dx++) {
+      for (let dy = -1; dy <= 1; dy++) {
+        const sx = sectorX + dx;
+        const sy = sectorY + dy;
+        const key = `${sx}_${sy}`;
+        if (!activeSectors.has(key)) {
+          activeSectors.set(key, { x: sx, y: sy });
+        }
+      }
+    }
+  }
+
+  // Check each active sector for comets
+  for (const [sectorKey, coords] of activeSectors) {
+    const sector = world.generateSector(coords.x, coords.y);
+    if (!sector.comets || sector.comets.length === 0) continue;
+
+    for (const comet of sector.comets) {
+      // Compute comet position using physics
+      const cometState = Physics.computeCometPosition(comet, orbitTime);
+
+      if (!cometState.visible) continue;
+
+      // Check for warning phase - broadcast to nearby players
+      if (cometState.isWarning && cometState.timeUntilArrival > 0) {
+        const lastWarning = cometWarningsSent.get(comet.id) || 0;
+        if (now - lastWarning >= warningInterval) {
+          cometWarningsSent.set(comet.id, now);
+
+          // Broadcast warning to players near the comet's trajectory
+          for (const [socketId, player] of connectedPlayers) {
+            const dx = player.position.x - cometState.x;
+            const dy = player.position.y - cometState.y;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+
+            // Warn players within 1500 units of comet's current position
+            if (dist <= 1500) {
+              io.to(socketId).emit('comet:warning', {
+                cometId: comet.id,
+                x: cometState.x,
+                y: cometState.y,
+                angle: cometState.angle,
+                size: comet.size,
+                timeUntilArrival: cometState.timeUntilArrival,
+                speed: comet.speed
+              });
+            }
+          }
+        }
+      }
+
+      // Check for player collisions (only during active traversal, not warning)
+      if (!cometState.isWarning) {
+        const cometRadius = comet.size * 0.5; // Collision radius is half the visual size
+
+        for (const [socketId, player] of connectedPlayers) {
+          const dx = player.position.x - cometState.x;
+          const dy = player.position.y - cometState.y;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+
+          // Check if player collides with comet (ship radius ~15 + comet radius)
+          const collisionRadius = cometRadius + 15;
+          if (dist <= collisionRadius) {
+            // Apply damage
+            const damage = { shieldDamage: collisionDamage * 0.3, hullDamage: collisionDamage * 0.7 };
+            const result = combat.applyDamage(player.id, damage);
+
+            if (result) {
+              player.hull = result.hull;
+              player.shield = result.shield;
+
+              // Calculate knockback direction (away from comet trajectory)
+              const knockbackAngle = Math.atan2(dy, dx);
+              const knockbackX = Math.cos(knockbackAngle) * knockbackForce;
+              const knockbackY = Math.sin(knockbackAngle) * knockbackForce;
+
+              // Notify player of collision
+              io.to(socketId).emit('comet:collision', {
+                cometId: comet.id,
+                damage: collisionDamage,
+                hull: result.hull,
+                shield: result.shield,
+                knockbackX: knockbackX,
+                knockbackY: knockbackY,
+                cometX: cometState.x,
+                cometY: cometState.y
+              });
+
+              // Handle death from comet collision
+              if (result.isDead) {
+                const deathResult = combat.handleDeath(player.id);
+                io.to(socketId).emit('player:death', {
+                  killedBy: 'Comet impact',
+                  respawnPosition: deathResult.respawnPosition,
+                  droppedCargo: deathResult.droppedCargo
+                });
+                player.position = deathResult.respawnPosition;
+                player.hull = player.hullMax;
+                player.shield = player.shieldMax;
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  // Periodic cleanup of old warning entries (every ~30 seconds)
+  if (Math.random() < 0.001) {
+    const cutoff = now - 60000; // Remove entries older than 1 minute
+    for (const [cometId, timestamp] of cometWarningsSent) {
+      if (timestamp < cutoff) {
+        cometWarningsSent.delete(cometId);
+      }
+    }
+  }
+}
+
 // Broadcast nearby bases to each player for radar display
 function broadcastNearbyBasesToPlayers(now) {
   if (!connectedPlayers || connectedPlayers.size === 0) return;
@@ -1039,13 +1210,13 @@ function broadcastNearbyBasesToPlayers(now) {
 function broadcastWreckageNear(wreckage, event, data) {
   if (!connectedPlayers) return;
 
-  const broadcastRange = config.BASE_RADAR_RANGE * 2;
-
   for (const [socketId, player] of connectedPlayers) {
     const dx = player.position.x - wreckage.position.x;
     const dy = player.position.y - wreckage.position.y;
     const dist = Math.sqrt(dx * dx + dy * dy);
 
+    // Use player's tier-based broadcast range
+    const broadcastRange = getPlayerBroadcastRange(player);
     if (dist <= broadcastRange) {
       io.to(socketId).emit(event, data);
     }
@@ -1055,13 +1226,13 @@ function broadcastWreckageNear(wreckage, event, data) {
 function broadcastNearNpc(npcEntity, event, data) {
   if (!connectedPlayers) return;
 
-  const broadcastRange = BASE_BROADCAST_RANGE;  // Use consistent module-level constant
-
   for (const [socketId, player] of connectedPlayers) {
     const dx = player.position.x - npcEntity.position.x;
     const dy = player.position.y - npcEntity.position.y;
     const dist = Math.sqrt(dx * dx + dy * dy);
 
+    // Use player's tier-based broadcast range
+    const broadcastRange = getPlayerBroadcastRange(player);
     if (dist <= broadcastRange) {
       io.to(socketId).emit(event, data);
     }
@@ -1069,13 +1240,19 @@ function broadcastNearNpc(npcEntity, event, data) {
 }
 
 // Handle player attacking NPC
-function playerAttackNPC(attackerId, npcId, weaponType, weaponTier) {
+// damageOverride: optional parameter to override damage calculation (used for chain lightning falloff)
+function playerAttackNPC(attackerId, npcId, weaponType, weaponTier, damageOverride) {
   const npcEntity = npc.getNPC(npcId);
   if (!npcEntity) return null;
 
-  // Calculate damage using proper damage calculation
-  const damage = combat.calculateDamage(weaponType, weaponTier, 1);
-  const totalDamage = damage.shieldDamage + damage.hullDamage;
+  // Calculate damage using proper damage calculation, or use override if provided
+  let totalDamage;
+  if (typeof damageOverride === 'number' && damageOverride > 0) {
+    totalDamage = damageOverride;
+  } else {
+    const damage = combat.calculateDamage(weaponType, weaponTier, 1);
+    totalDamage = damage.shieldDamage + damage.hullDamage;
+  }
 
   // Apply damage to NPC with attacker tracking
   const result = npc.damageNPC(npcId, totalDamage, attackerId);
@@ -1152,6 +1329,55 @@ function playerAttackNPC(attackerId, npcId, weaponType, weaponTier) {
             reformationDuration: 2000  // 2 seconds to reform
           });
         }
+      }
+    }
+
+    // Swarm Queen death - all nearby guards enter rage mode!
+    if (npcEntity.type === 'swarm_queen') {
+      const queenX = npcEntity.position?.x ?? npcEntity.x;
+      const queenY = npcEntity.position?.y ?? npcEntity.y;
+      const rageRange = 500; // Guards within 500 units enter rage
+      const rageDuration = 30000; // 30 seconds of rage
+      const ragingGuards = [];
+
+      for (const [guardId, guard] of npc.activeNPCs) {
+        if (guard.faction !== 'swarm') continue;
+        if (guard.type === 'swarm_queen') continue; // Skip the dying queen
+
+        const guardX = guard.position?.x ?? guard.x;
+        const guardY = guard.position?.y ?? guard.y;
+        const dx = guardX - queenX;
+        const dy = guardY - queenY;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+
+        if (dist <= rageRange) {
+          // Enter rage mode!
+          guard.state = 'rage';
+          guard.originalAggroRange = guard.originalAggroRange || guard.aggroRange || 200;
+          guard.originalSpeed = guard.originalSpeed || guard.speed;
+          guard.aggroRange = guard.originalAggroRange * 2; // Double aggro range
+          guard.speed = guard.originalSpeed * 1.3; // 30% faster
+          guard.rageExpires = Date.now() + rageDuration;
+          guard.isGuarding = false; // No longer guarding dead queen
+
+          ragingGuards.push({
+            id: guardId,
+            type: guard.type,
+            x: guardX,
+            y: guardY
+          });
+        }
+      }
+
+      // Broadcast rage event for visual feedback
+      if (ragingGuards.length > 0) {
+        broadcastNearNpc(npcEntity, 'swarm:queenDeathRage', {
+          queenId: npcId,
+          queenX: queenX,
+          queenY: queenY,
+          ragingGuards: ragingGuards,
+          rageDuration: rageDuration
+        });
       }
     }
 
@@ -1327,14 +1553,16 @@ function playerAttackBase(attackerId, baseId, weaponType, weaponTier) {
 function broadcastNearBase(base, event, data) {
   if (!connectedPlayers) return;
 
-  const broadcastRange = BASE_BROADCAST_RANGE;  // Use consistent module-level constant
+  const baseSize = base.size || 100;
 
   for (const [socketId, player] of connectedPlayers) {
     const dx = player.position.x - base.x;
     const dy = player.position.y - base.y;
     const dist = Math.sqrt(dx * dx + dy * dy);
 
-    if (dist <= broadcastRange) {
+    // Use player's tier-based broadcast range, accounting for base size
+    const broadcastRange = getPlayerBroadcastRange(player);
+    if (dist - baseSize <= broadcastRange) {
       io.to(socketId).emit(event, data);
     }
   }

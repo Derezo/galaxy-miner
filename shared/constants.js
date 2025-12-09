@@ -9,6 +9,15 @@ const CONSTANTS = {
   SUPER_SECTOR_SIZE: 6000,        // 6x6 normal sectors = 1 super-sector
   MIN_STAR_SEPARATION: 3000,      // Minimum 3 sectors between stars (won't overlap on screen)
   BINARY_SYSTEM_CHANCE: 0.05,     // 5% of systems are binary
+
+  // Binary star orbital configuration
+  BINARY_STAR_CONFIG: {
+    ECCENTRICITY_MIN: 0.0,        // Circular orbit minimum
+    ECCENTRICITY_MAX: 0.5,        // Maximum orbital eccentricity
+    SECONDARY_COLOR_SHIFT: true,  // Visual distinction for secondary star
+    ORBIT_PERIOD_BASE: 120        // Base seconds for one complete orbit
+  },
+
   SYSTEMS_PER_SUPER_SECTOR_MIN: 1, // At least 1 star per super-sector
   SYSTEMS_PER_SUPER_SECTOR_MAX: 2, // Occasionally 2 systems per super-sector
 
@@ -21,7 +30,7 @@ const CONSTANTS = {
   STARS_PER_SECTOR_MIN: 0,
   STARS_PER_SECTOR_MAX: 2,
   PLANETS_PER_STAR_MIN: 2,
-  PLANETS_PER_STAR_MAX: 8,
+  PLANETS_PER_STAR_MAX: 9,  // Increased from 8 for 10% boost
   ASTEROIDS_PER_SECTOR_MIN: 3,
   ASTEROIDS_PER_SECTOR_MAX: 15,
   WORMHOLE_CHANCE: 0.08,  // 8% of star systems have wormholes (spawn area guaranteed)
@@ -499,6 +508,80 @@ const CONSTANTS = {
     ENGINE_TIER_REDUCTION: 0.20   // 20% gravity reduction per engine tier above 1 (buffed)
   },
 
+  // Star Spectral Classes - astronomically accurate star types
+  STAR_SPECTRAL_CLASSES: {
+    O: {
+      name: 'Blue Giant',
+      tempK: 30000,
+      color: '#9bb0ff',
+      coronaColor: '#aaddff',
+      coreColor: '#ffffff',
+      sizeRange: [700, 800],
+      massMultiplier: 2.0,
+      rarity: 0.03  // 3% - Very rare
+    },
+    B: {
+      name: 'Blue-White',
+      tempK: 20000,
+      color: '#aabfff',
+      coronaColor: '#bbccff',
+      coreColor: '#ffffff',
+      sizeRange: [600, 700],
+      massMultiplier: 1.6,
+      rarity: 0.08  // 8%
+    },
+    A: {
+      name: 'White',
+      tempK: 10000,
+      color: '#cad7ff',
+      coronaColor: '#ddeeff',
+      coreColor: '#ffffff',
+      sizeRange: [500, 600],
+      massMultiplier: 1.4,
+      rarity: 0.12  // 12%
+    },
+    F: {
+      name: 'Yellow-White',
+      tempK: 7500,
+      color: '#f8f7ff',
+      coronaColor: '#ffffee',
+      coreColor: '#ffffff',
+      sizeRange: [450, 500],
+      massMultiplier: 1.2,
+      rarity: 0.15  // 15%
+    },
+    G: {
+      name: 'Yellow',
+      tempK: 6000,
+      color: '#fff4ea',
+      coronaColor: '#ffeecc',
+      coreColor: '#ffffee',
+      sizeRange: [400, 450],
+      massMultiplier: 1.0,
+      rarity: 0.20  // 20% - Most common sun-like
+    },
+    K: {
+      name: 'Orange',
+      tempK: 4500,
+      color: '#ffd2a1',
+      coronaColor: '#ffcc88',
+      coreColor: '#ffeecc',
+      sizeRange: [350, 400],
+      massMultiplier: 0.8,
+      rarity: 0.22  // 22%
+    },
+    M: {
+      name: 'Red Dwarf',
+      tempK: 3000,
+      color: '#ffcc6f',
+      coronaColor: '#ff9944',
+      coreColor: '#ffddaa',
+      sizeRange: [320, 350],
+      massMultiplier: 0.5,
+      rarity: 0.20  // 20% - Common small stars
+    }
+  },
+
   // Star exclusion zone (prevents object spawning)
   STAR_EXCLUSION_MARGIN: 30,      // Minimum distance from star surface
 
@@ -523,6 +606,203 @@ const CONSTANTS = {
         { radiusMin: 5.0, radiusMax: 6.0, density: 0.3, resourceType: 'rare' }
       ]
     }
+  },
+
+  // Asteroid belt density multiplier (10% increase)
+  ASTEROID_BELT_DENSITY_MULTIPLIER: 1.1,
+
+  // Expanded Planet Types (15 types total)
+  PLANET_TYPES: {
+    // Original 7 types
+    rocky: {
+      name: 'Rocky Planet',
+      colors: ['#8B4513', '#A0522D', '#6B4423'],
+      sizeRange: [20, 40],
+      hasCraters: true,
+      hasAtmosphere: false,
+      rarity: 0.15
+    },
+    gas: {
+      name: 'Gas Giant',
+      colors: ['#DEB887', '#D2B48C', '#C4A066'],
+      sizeRange: [50, 60],
+      hasBands: true,
+      hasAtmosphere: true,
+      rarity: 0.10
+    },
+    ice: {
+      name: 'Ice World',
+      colors: ['#ADD8E6', '#B0E0E6', '#87CEEB'],
+      sizeRange: [25, 45],
+      hasPolarCaps: true,
+      hasAtmosphere: false,
+      rarity: 0.08
+    },
+    lava: {
+      name: 'Lava Planet',
+      colors: ['#FF4500', '#FF6347', '#DC143C'],
+      sizeRange: [20, 35],
+      hasLavaGlow: true,
+      hasAtmosphere: false,
+      rarity: 0.06
+    },
+    ocean: {
+      name: 'Ocean World',
+      colors: ['#4169E1', '#1E90FF', '#00CED1'],
+      sizeRange: [30, 50],
+      hasClouds: true,
+      hasAtmosphere: true,
+      rarity: 0.08
+    },
+    desert: {
+      name: 'Desert Planet',
+      colors: ['#DAA520', '#CD853F', '#D2691E'],
+      sizeRange: [25, 45],
+      hasDunes: true,
+      hasAtmosphere: false,
+      rarity: 0.10
+    },
+    jungle: {
+      name: 'Jungle World',
+      colors: ['#228B22', '#32CD32', '#006400'],
+      sizeRange: [30, 50],
+      hasClouds: true,
+      hasAtmosphere: true,
+      rarity: 0.06
+    },
+    // NEW 8 types
+    hot_jupiter: {
+      name: 'Hot Jupiter',
+      colors: ['#FF8C00', '#FF7F50', '#FF6600'],
+      sizeRange: [55, 60],
+      hasBands: true,
+      hasHeatGlow: true,
+      hasAtmosphere: true,
+      rarity: 0.05
+    },
+    super_earth: {
+      name: 'Super Earth',
+      colors: ['#708090', '#778899', '#5F6A6A'],
+      sizeRange: [35, 50],
+      hasAtmosphere: true,
+      hasClouds: true,
+      rarity: 0.07
+    },
+    dwarf: {
+      name: 'Dwarf Planet',
+      colors: ['#A9A9A9', '#808080', '#696969'],
+      sizeRange: [10, 20],
+      hasCraters: true,
+      hasAtmosphere: false,
+      rarity: 0.08
+    },
+    ringed_giant: {
+      name: 'Ringed Giant',
+      colors: ['#F4A460', '#DEB887', '#D2B48C'],
+      sizeRange: [50, 60],
+      hasBands: true,
+      hasRings: true,
+      hasAtmosphere: true,
+      rarity: 0.04
+    },
+    volcanic: {
+      name: 'Volcanic World',
+      colors: ['#B22222', '#8B0000', '#660000'],
+      sizeRange: [15, 25],
+      hasLavaGlow: true,
+      hasVolcanoes: true,
+      hasAtmosphere: false,
+      rarity: 0.05
+    },
+    barren: {
+      name: 'Barren World',
+      colors: ['#696969', '#808080', '#5A5A5A'],
+      sizeRange: [20, 40],
+      hasCraters: true,
+      hasAtmosphere: false,
+      rarity: 0.08
+    },
+    temperate: {
+      name: 'Temperate World',
+      colors: ['#4682B4', '#5F9EA0', '#3CB371'],
+      sizeRange: [30, 50],
+      hasClouds: true,
+      hasAtmosphere: true,
+      hasOceans: true,
+      rarity: 0.05
+    },
+    toxic: {
+      name: 'Toxic World',
+      colors: ['#9ACD32', '#6B8E23', '#556B2F'],
+      sizeRange: [25, 45],
+      hasToxicClouds: true,
+      hasAtmosphere: true,
+      rarity: 0.05
+    }
+  },
+
+  // Asteroid Types (composition-based)
+  ASTEROID_TYPES: {
+    metallic: {
+      name: 'Metallic Asteroid',
+      colors: ['#C0C0C0', '#A8A8A8', '#909090'],
+      highlightColor: '#D8D8D8',
+      surfacePattern: 'smooth',
+      rarity: 0.30
+    },
+    carbonaceous: {
+      name: 'Carbonaceous Asteroid',
+      colors: ['#2F2F2F', '#3D3D3D', '#4A4A4A'],
+      highlightColor: '#5A5A5A',
+      surfacePattern: 'porous',
+      rarity: 0.40
+    },
+    silicate: {
+      name: 'Silicate Asteroid',
+      colors: ['#8B7355', '#6B5344', '#7A6450'],
+      highlightColor: '#A08060',
+      surfacePattern: 'rocky',
+      rarity: 0.30
+    }
+  },
+
+  // Asteroid Size Classes (determines rotation speed and vertex count)
+  ASTEROID_SIZE_CLASSES: {
+    small: {
+      sizeRange: [5, 12],
+      rotationSpeed: [0.5, 2.0],  // radians per second
+      vertices: [5, 7],
+      irregularity: 0.3          // Shape irregularity factor
+    },
+    medium: {
+      sizeRange: [12, 20],
+      rotationSpeed: [0.2, 0.8],
+      vertices: [6, 9],
+      irregularity: 0.25
+    },
+    large: {
+      sizeRange: [20, 35],
+      rotationSpeed: [0.05, 0.3],
+      vertices: [8, 12],
+      irregularity: 0.2
+    }
+  },
+
+  // Comet Configuration (rare hazards)
+  COMET_CONFIG: {
+    SPAWN_CHANCE: 0.005,          // 0.5% per system
+    WARNING_TIME: 10000,          // 10 second warning before comet arrives
+    TRAVERSAL_SPEED: 500,         // units/second (very fast)
+    SIZE_RANGE: [30, 60],         // Comet nucleus size
+    PLAYER_COLLISION_DAMAGE: 50,  // Damage to player on collision
+    KNOCKBACK_FORCE: 200,         // Force applied on collision
+    TAIL_LENGTH_FACTOR: 8,        // Tail length = size * factor
+    CORE_COLOR: '#88CCFF',        // Icy blue core
+    COMA_COLOR: '#AADDFF',        // Fuzzy coma around nucleus
+    ION_TAIL_COLORS: ['#88CCFF', '#AADDFF', '#FFFFFF'],  // Blue ion tail
+    DUST_TAIL_COLORS: ['#FFE4B5', '#F5DEB3', '#DEB887'], // Yellowish dust tail
+    DUST_TAIL_CURVE: 0.3,         // How much dust tail curves away from ion tail
+    TRAJECTORY_TYPES: ['flyby', 'perihelion', 'hyperbolic']
   },
 
   // Corona flare particle effects
@@ -1115,6 +1395,21 @@ const CONSTANTS = {
       dotDuration: 5000,               // 5 seconds DoT
       dotInterval: 1000,               // Tick every second
       projectileSpeed: 250
+    }
+  },
+
+  // Tesla Cannon - Tier 5 Player Weapon with Chain Lightning
+  TESLA_CANNON: {
+    chainJumps: 3,                    // Max targets (primary + 2 chains)
+    chainRange: 150,                  // Units per jump to find next target
+    damageFalloff: [1.0, 0.5, 0.25], // Damage multiplier per jump
+    teslaCoilDuration: 500,           // ms for base impact tesla effect
+    teslaCoilRange: 200,              // Range to find NPCs for tesla coil arcs
+    colors: {
+      primary: '#00ccff',             // Electric blue
+      secondary: '#44ffaa',           // Cyan-green
+      core: '#ffffff',                // White core
+      glow: '#00ccff60'               // Blue glow 40% opacity
     }
   },
 

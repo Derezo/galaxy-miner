@@ -34,11 +34,18 @@ const RadarEntities = {
 
       if (!RadarBaseRenderer.isInRange(distance, radarRange)) continue;
 
+      // Calculate edge fade opacity for smooth transitions
+      const edgeOpacity = RadarBaseRenderer.getEdgeOpacity(distance, radarRange);
+      if (edgeOpacity <= 0) continue;
+
       const pos = RadarBaseRenderer.worldToRadar(
         base.position.x, base.position.y,
         playerPos.x, playerPos.y,
         center, scale
       );
+
+      // Apply fade opacity
+      ctx.globalAlpha = edgeOpacity;
 
       // Determine visual representation based on tier
       if (useFactionShapes && base.faction) {
@@ -59,6 +66,9 @@ const RadarEntities = {
         const size = CONSTANTS.RADAR_ICON_SIZES.medium_dot;
         RadarBaseRenderer.drawDot(ctx, pos.x, pos.y, size, '#ff4444');
       }
+
+      // Reset opacity
+      ctx.globalAlpha = 1;
     }
   },
 
@@ -78,15 +88,23 @@ const RadarEntities = {
 
       if (!RadarBaseRenderer.isInRange(distance, radarRange)) continue;
 
+      // Calculate edge fade opacity for smooth transitions
+      const edgeOpacity = RadarBaseRenderer.getEdgeOpacity(distance, radarRange);
+      if (edgeOpacity <= 0) continue;
+
       const pos = RadarBaseRenderer.worldToRadar(
         npc.position.x, npc.position.y,
         playerPos.x, playerPos.y,
         center, scale
       );
 
+      // Apply fade opacity
+      ctx.globalAlpha = edgeOpacity;
+
       // SWARM QUEEN - Always prominent with special rendering
       if (npc.type === 'swarm_queen' || npc.isQueen) {
         this.drawSwarmQueen(ctx, pos.x, pos.y, npc.rotation || 0);
+        ctx.globalAlpha = 1;
         continue;
       }
 
@@ -106,6 +124,9 @@ const RadarEntities = {
         const size = CONSTANTS.RADAR_ICON_SIZES.medium_dot;
         RadarBaseRenderer.drawDot(ctx, pos.x, pos.y, size, color);
       }
+
+      // Reset opacity
+      ctx.globalAlpha = 1;
     }
   },
 
@@ -233,11 +254,18 @@ const RadarEntities = {
 
       if (!RadarBaseRenderer.isInRange(distance, radarRange)) continue;
 
+      // Calculate edge fade opacity for smooth transitions
+      const edgeOpacity = RadarBaseRenderer.getEdgeOpacity(distance, radarRange);
+      if (edgeOpacity <= 0) continue;
+
       const pos = RadarBaseRenderer.worldToRadar(
         player.position.x, player.position.y,
         playerPos.x, playerPos.y,
         center, scale
       );
+
+      // Apply fade opacity
+      ctx.globalAlpha = edgeOpacity;
 
       if (useTriangles) {
         // Tier 2+: Green triangles showing heading
@@ -249,6 +277,9 @@ const RadarEntities = {
         const size = CONSTANTS.RADAR_ICON_SIZES.medium_dot;
         RadarBaseRenderer.drawDot(ctx, pos.x, pos.y, size, '#ff4444');
       }
+
+      // Reset opacity
+      ctx.globalAlpha = 1;
     }
   },
 

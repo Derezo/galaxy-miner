@@ -61,7 +61,37 @@
     };
   }
 
-  // Compute binary star positions at given time
+  // Solve Kepler's equation for eccentric anomaly using Newton-Raphson iteration
+  // M = E - e*sin(E), solve for E given M and e
+  function solveKeplerEquation(meanAnomaly, eccentricity, maxIterations = 10) {
+    if (eccentricity < 0.001) {
+      // Circular orbit, E = M
+      return meanAnomaly;
+    }
+
+    // Initial guess
+    let E = meanAnomaly;
+
+    for (let i = 0; i < maxIterations; i++) {
+      const delta = (E - eccentricity * Math.sin(E) - meanAnomaly) /
+                    (1 - eccentricity * Math.cos(E));
+      E -= delta;
+      if (Math.abs(delta) < 1e-8) break;
+    }
+
+    return E;
+  }
+
+  // Convert eccentric anomaly to true anomaly
+  function eccentricToTrueAnomaly(E, eccentricity) {
+    if (eccentricity < 0.001) {
+      return E;
+    }
+    const beta = eccentricity / (1 + Math.sqrt(1 - eccentricity * eccentricity));
+    return E + 2 * Math.atan2(beta * Math.sin(E), 1 - beta * Math.cos(E));
+  }
+
+  // Compute binary star positions at given time with elliptical orbits
   // Both stars orbit around their common barycenter
   function computeBinaryStarPositions(system, time) {
     if (!system.binaryInfo) {
@@ -75,17 +105,31 @@
     const orbitTime = time !== undefined ? time : getOrbitTime();
     const elapsedSeconds = orbitTime / 1000;
 
-    // Calculate current orbital phase
-    const phase = bi.orbitPhase + (elapsedSeconds / bi.orbitPeriod) * Math.PI * 2;
+    // Calculate mean anomaly (linear with time)
+    const meanAnomaly = bi.orbitPhase + (elapsedSeconds / bi.orbitPeriod) * Math.PI * 2;
+
+    // Get eccentricity (0 = circular, >0 = elliptical)
+    const e = bi.eccentricity || 0;
+
+    // Solve for eccentric anomaly and convert to true anomaly
+    const E = solveKeplerEquation(meanAnomaly, e);
+    const trueAnomaly = eccentricToTrueAnomaly(E, e);
+
+    // Calculate radius at current position (r = a(1-e²)/(1+e*cos(θ)))
+    const primaryRadiusFactor = (1 - e * e) / (1 + e * Math.cos(trueAnomaly));
+    const secondaryRadiusFactor = (1 - e * e) / (1 + e * Math.cos(trueAnomaly + Math.PI));
+
+    const r1 = bi.primaryOrbitRadius * primaryRadiusFactor;
+    const r2 = bi.secondaryOrbitRadius * secondaryRadiusFactor;
 
     return {
       primary: {
-        x: bi.baryCenter.x + Math.cos(phase) * bi.primaryOrbitRadius,
-        y: bi.baryCenter.y + Math.sin(phase) * bi.primaryOrbitRadius
+        x: bi.baryCenter.x + Math.cos(trueAnomaly) * r1,
+        y: bi.baryCenter.y + Math.sin(trueAnomaly) * r1
       },
       secondary: {
-        x: bi.baryCenter.x + Math.cos(phase + Math.PI) * bi.secondaryOrbitRadius,
-        y: bi.baryCenter.y + Math.sin(phase + Math.PI) * bi.secondaryOrbitRadius
+        x: bi.baryCenter.x + Math.cos(trueAnomaly + Math.PI) * r2,
+        y: bi.baryCenter.y + Math.sin(trueAnomaly + Math.PI) * r2
       }
     };
   }
@@ -313,6 +357,74 @@
     // No-op - no cache with analytical solution
   }
 
+  // Compute comet position along its trajectory at given time
+  // Uses quadratic Bezier curve: entry -> perihelion -> exit
+  // Returns { visible, x, y, angle, isWarning, progress }
+  function computeCometPosition(comet, time) {
+    if (!comet || !comet.entryPoint || !comet.perihelion || !comet.exitPoint) {
+      return { visible: false, x: 0, y: 0, angle: 0, isWarning: false, progress: 0 };
+    }
+
+    const orbitTime = time !== undefined ? time : getOrbitTime();
+
+    // Calculate where we are in the comet's cycle
+    // phaseOffset determines when in the cycle the comet first appears
+    const cycleTime = ((orbitTime - comet.phaseOffset) % comet.orbitPeriod + comet.orbitPeriod) % comet.orbitPeriod;
+
+    // Total active time = warning + traversal
+    const warningTime = comet.warningTime || 10000;
+    const traversalTime = comet.traversalTime || 30000;
+    const totalActiveTime = warningTime + traversalTime;
+
+    // Check if comet is currently active (warning or visible)
+    if (cycleTime > totalActiveTime) {
+      return { visible: false, x: 0, y: 0, angle: 0, isWarning: false, progress: 0 };
+    }
+
+    // Warning phase (comet not yet visible but approaching)
+    const isWarning = cycleTime < warningTime;
+
+    // Progress through the trajectory (0 to 1)
+    let progress;
+    if (isWarning) {
+      // During warning, position at entry point
+      progress = 0;
+    } else {
+      // During traversal, move from 0 to 1
+      progress = (cycleTime - warningTime) / traversalTime;
+    }
+
+    // Clamp progress
+    progress = Math.max(0, Math.min(1, progress));
+
+    // Quadratic Bezier curve: B(t) = (1-t)²P0 + 2(1-t)tP1 + t²P2
+    const t = progress;
+    const mt = 1 - t;
+    const mt2 = mt * mt;
+    const t2 = t * t;
+    const tmt2 = 2 * mt * t;
+
+    const x = mt2 * comet.entryPoint.x + tmt2 * comet.perihelion.x + t2 * comet.exitPoint.x;
+    const y = mt2 * comet.entryPoint.y + tmt2 * comet.perihelion.y + t2 * comet.exitPoint.y;
+
+    // Calculate angle (tangent to curve)
+    // Derivative: B'(t) = 2(1-t)(P1-P0) + 2t(P2-P1)
+    const dx = 2 * mt * (comet.perihelion.x - comet.entryPoint.x) + 2 * t * (comet.exitPoint.x - comet.perihelion.x);
+    const dy = 2 * mt * (comet.perihelion.y - comet.entryPoint.y) + 2 * t * (comet.exitPoint.y - comet.perihelion.y);
+    const angle = Math.atan2(dy, dx);
+
+    return {
+      visible: !isWarning,
+      x,
+      y,
+      angle,
+      isWarning,
+      progress,
+      // Time until comet reaches this system (useful for warnings)
+      timeUntilArrival: isWarning ? warningTime - cycleTime : 0
+    };
+  }
+
   // Export for both Node.js and browser
   exports.getPhysicsTime = getPhysicsTime;
   exports.getOrbitTime = getOrbitTime;
@@ -329,5 +441,8 @@
   exports.computeStarGravity = computeStarGravity;
   exports.getStarZone = getStarZone;
   exports.getZoneDamage = getZoneDamage;
+
+  // Comet trajectory
+  exports.computeCometPosition = computeCometPosition;
 
 })(typeof module !== 'undefined' && module.exports ? module.exports : (window.Physics = {}));
