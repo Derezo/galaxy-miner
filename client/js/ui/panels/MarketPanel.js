@@ -242,6 +242,10 @@ const MarketPanel = {
     const tabs = container.querySelectorAll('.market-tab');
     tabs.forEach(tab => {
       tab.addEventListener('click', () => {
+        // Play tab switch sound
+        if (typeof AudioManager !== 'undefined') {
+          AudioManager.play('ui_click');
+        }
         this.currentTab = tab.dataset.tab;
         this.render();
 
@@ -455,6 +459,10 @@ const MarketPanel = {
       const total = quantity * listing.price_per_unit;
 
       if (quantity > 0 && total <= playerCredits) {
+        // Play buy sound
+        if (typeof AudioManager !== 'undefined') {
+          AudioManager.play('market_buy');
+        }
         // Send to server
         if (typeof Network !== 'undefined' && Network.sendMarketBuy) {
           Network.sendMarketBuy(listing.id, quantity);
@@ -556,6 +564,10 @@ const MarketPanel = {
     });
 
     if (confirmed && typeof Network !== 'undefined' && Network.sendMarketCancel) {
+      // Play cancel sound
+      if (typeof AudioManager !== 'undefined') {
+        AudioManager.play('market_cancel');
+      }
       Network.sendMarketCancel(listingId);
     }
   },

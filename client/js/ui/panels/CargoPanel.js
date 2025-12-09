@@ -312,6 +312,10 @@ const CargoPanel = {
       const price = parseInt(priceInput.value);
 
       if (quantity > 0 && price > 0) {
+        // Play listing sound
+        if (typeof AudioManager !== 'undefined') {
+          AudioManager.play('market_list');
+        }
         // Send to server
         if (typeof Network !== 'undefined' && Network.sendMarketList) {
           Network.sendMarketList(this.selectedItem.resource_type, quantity, price);

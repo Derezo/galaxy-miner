@@ -194,14 +194,36 @@ const Network = {
     });
 
     this.socket.on('mining:started', (data) => {
+      // Start mining drill loop
+      if (typeof AudioManager !== 'undefined' && AudioManager.isReady && AudioManager.isReady()) {
+        const tier = data.miningTier || 1;
+        this._activeMiningDrillTier = tier;
+        AudioManager.startLoop('mining_drill_' + tier);
+      }
+
       Player.onMiningStarted(data);
     });
 
     this.socket.on('mining:complete', (data) => {
+      // Stop mining drill loop and play completion sound
+      if (typeof AudioManager !== 'undefined' && AudioManager.isReady && AudioManager.isReady()) {
+        const tier = this._activeMiningDrillTier || 1;
+        AudioManager.stopLoop('mining_drill_' + tier);
+        this._activeMiningDrillTier = null;
+        AudioManager.play('mining_complete');
+      }
+
       Player.onMiningComplete(data);
     });
 
     this.socket.on('mining:cancelled', (data) => {
+      // Stop mining drill loop
+      if (typeof AudioManager !== 'undefined' && AudioManager.isReady && AudioManager.isReady()) {
+        const tier = this._activeMiningDrillTier || 1;
+        AudioManager.stopLoop('mining_drill_' + tier);
+        this._activeMiningDrillTier = null;
+      }
+
       Player.onMiningCancelled(data);
     });
 
@@ -266,6 +288,11 @@ const Network = {
     this.socket.on('npc:destroyed', (data) => {
       // Get NPC data BEFORE removing it
       const npc = Entities.npcs.get(data.id);
+
+      // Play death sound based on faction
+      if (npc && typeof AudioManager !== 'undefined' && AudioManager.isReady && AudioManager.isReady()) {
+        AudioManager.playAt('death_' + npc.faction, npc.position.x, npc.position.y);
+      }
 
       // Trigger death effect
       if (npc && typeof DeathEffects !== 'undefined') {
@@ -629,6 +656,11 @@ const Network = {
     });
 
     this.socket.on('base:destroyed', (data) => {
+      // Play base destruction sound
+      if (typeof AudioManager !== 'undefined' && AudioManager.isReady && AudioManager.isReady()) {
+        AudioManager.playAt('base_destruction', data.x || 0, data.y || 0);
+      }
+
       // Mark base as destroyed for rendering
       if (typeof Entities !== 'undefined') {
         Entities.destroyBase(data.id);
@@ -702,6 +734,14 @@ const Network = {
         return; // Hit effect will be triggered by projectile/beam arrival
       }
 
+      // Play hit sound
+      if (typeof AudioManager !== 'undefined' && AudioManager.isReady && AudioManager.isReady()) {
+        const isShieldHit = data.shieldDamage > 0 || data.hitShield;
+        const tier = data.targetTier || 1;
+        const soundId = isShieldHit ? 'hit_shield_' + tier : 'hit_hull_' + tier;
+        AudioManager.playAt(soundId, data.targetX || data.x, data.targetY || data.y);
+      }
+
       // Visual feedback for player-to-player hits
       if (typeof HitEffectRenderer !== 'undefined') {
         const isShieldHit = data.shieldDamage > 0 || data.hitShield;
@@ -745,6 +785,11 @@ const Network = {
     // Player death events (including from star damage)
     this.socket.on('player:death', (data) => {
       Logger.log('Player died:', data.cause, data.message);
+
+      // Play player death sound (non-spatial, always audible)
+      if (typeof AudioManager !== 'undefined' && AudioManager.isReady && AudioManager.isReady()) {
+        AudioManager.play('death_player');
+      }
 
       // Calculate survival time before death
       const survivalTime = Player.getSurvivalTime();
@@ -818,6 +863,12 @@ const Network = {
       // Skip if it's our own fire event
       if (data.playerId === Player.id) return;
 
+      // Play weapon fire sound
+      if (typeof AudioManager !== 'undefined' && AudioManager.isReady && AudioManager.isReady()) {
+        const tier = data.weaponTier || 1;
+        AudioManager.playAt('weapon_fire_' + tier, data.x, data.y);
+      }
+
       // Render weapon fire from other player
       if (typeof WeaponRenderer !== 'undefined') {
         WeaponRenderer.fire(
@@ -842,6 +893,12 @@ const Network = {
 
     // NPC weapon fire visualization
     this.socket.on('combat:npcFire', (data) => {
+      // Play NPC weapon sound based on faction
+      if (typeof AudioManager !== 'undefined' && AudioManager.isReady && AudioManager.isReady()) {
+        const faction = data.faction || 'pirate';
+        AudioManager.playAt('npc_weapon_' + faction, data.sourceX, data.sourceY);
+      }
+
       if (typeof NPCWeaponEffects !== 'undefined') {
         // Use faction to get proper visual weapon type
         const visualWeaponType = NPCWeaponEffects.getWeaponForFaction(data.faction) || 'cannon';
@@ -909,6 +966,12 @@ const Network = {
     // Chain lightning effect when Tesla Cannon hits NPCs
     this.socket.on('combat:chainLightning', (data) => {
       Logger.log('Chain lightning triggered!', data);
+
+      // Play tesla chain sound (using generic weapon sound as placeholder)
+      if (typeof AudioManager !== 'undefined' && AudioManager.isReady && AudioManager.isReady() && data.sourceX && data.sourceY) {
+        AudioManager.playAt('weapon_fire_5', data.sourceX, data.sourceY);
+      }
+
       if (typeof ChainLightningEffect !== 'undefined') {
         ChainLightningEffect.triggerFromEvent(data);
       }
@@ -929,6 +992,11 @@ const Network = {
     // Queen web snare attack visual
     this.socket.on('queen:webSnare', (data) => {
       Logger.log('Queen web snare fired!', data);
+
+      // Play web snare sound
+      if (typeof AudioManager !== 'undefined' && AudioManager.isReady && AudioManager.isReady()) {
+        AudioManager.playAt('queen_summon', data.sourceX, data.sourceY);
+      }
 
       // Trigger projectile visual via NPCWeaponEffects
       if (typeof NPCWeaponEffects !== 'undefined') {
@@ -995,6 +1063,11 @@ const Network = {
     // Queen acid burst attack visual
     this.socket.on('queen:acidBurst', (data) => {
       Logger.log('Queen acid burst fired!', data);
+
+      // Play acid burst sound
+      if (typeof AudioManager !== 'undefined' && AudioManager.isReady && AudioManager.isReady()) {
+        AudioManager.playAt('queen_summon', data.sourceX, data.sourceY);
+      }
 
       // Trigger projectile visual via NPCWeaponEffects
       if (typeof NPCWeaponEffects !== 'undefined') {
@@ -1139,6 +1212,18 @@ const Network = {
     this.socket.on('queen:phaseChange', (data) => {
       Logger.log('Queen phase changed to:', data.phase);
 
+      // Play phase change sound
+      if (typeof AudioManager !== 'undefined' && AudioManager.isReady && AudioManager.isReady()) {
+        const phaseMap = {
+          'HUNT': 1,
+          'SIEGE': 2,
+          'SWARM': 2,
+          'DESPERATION': 3
+        };
+        const phaseNum = phaseMap[data.phase] || 1;
+        AudioManager.playAt('queen_phase_' + phaseNum, data.x, data.y);
+      }
+
       // Trigger phase transition visual at queen location
       if (typeof QueenVisuals !== 'undefined' && QueenVisuals.triggerPhaseTransition) {
         QueenVisuals.triggerPhaseTransition(data.x, data.y, data.phase);
@@ -1202,6 +1287,11 @@ const Network = {
     });
 
     this.socket.on('chat:message', (data) => {
+      // Play chat receive sound (non-spatial)
+      if (typeof AudioManager !== 'undefined' && AudioManager.isReady && AudioManager.isReady()) {
+        AudioManager.play('chat_receive');
+      }
+
       ChatUI.addMessage(data);
     });
 
@@ -1325,6 +1415,20 @@ const Network = {
     });
 
     this.socket.on('loot:complete', (data) => {
+      // Play loot pickup sound based on rarity
+      if (typeof AudioManager !== 'undefined' && AudioManager.isReady && AudioManager.isReady()) {
+        // Check for the highest rarity in the loot
+        let maxRarity = 'common';
+        if (data.rewards && data.rewards.resources) {
+          for (const r of data.rewards.resources) {
+            if (r.rarity === 'ultrarare') { maxRarity = 'ultrarare'; break; }
+            if (r.rarity === 'rare') maxRarity = 'rare';
+            else if (r.rarity === 'uncommon' && maxRarity === 'common') maxRarity = 'uncommon';
+          }
+        }
+        AudioManager.play('loot_' + maxRarity);
+      }
+
       Player.onLootCollectionComplete(data);
       Entities.removeWreckage(data.wreckageId);
     });

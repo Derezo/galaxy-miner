@@ -1,0 +1,5 @@
+# 8-Bit Procedural Audio Generator Dependencies
+# Python 3.12+ required
+
+numpy>=1.26.0
+scipy>=1.11.0

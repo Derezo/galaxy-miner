@@ -47,6 +47,11 @@ const TerminalUI = {
       RelicsPanel.init();
     }
 
+    // Initialize SettingsPanel
+    if (typeof SettingsPanel !== 'undefined') {
+      SettingsPanel.init();
+    }
+
     Logger.log('Terminal UI initialized');
   },
 
@@ -61,6 +66,11 @@ const TerminalUI = {
   show() {
     this.visible = true;
     document.getElementById('terminal-panel').classList.remove('hidden');
+
+    // Play panel open sound
+    if (typeof AudioManager !== 'undefined') {
+      AudioManager.play('ui_open_panel');
+    }
 
     // Sync current inventory to UIState
     if (typeof UIState !== 'undefined' && typeof Player !== 'undefined') {
@@ -77,6 +87,11 @@ const TerminalUI = {
     this.visible = false;
     document.getElementById('terminal-panel').classList.add('hidden');
 
+    // Play panel close sound
+    if (typeof AudioManager !== 'undefined') {
+      AudioManager.play('ui_close_panel');
+    }
+
     // Clear selection when closing
     if (typeof CargoPanel !== 'undefined') {
       CargoPanel.clearSelection();
@@ -84,6 +99,11 @@ const TerminalUI = {
   },
 
   switchTab(tab) {
+    // Play tab switch sound
+    if (typeof AudioManager !== 'undefined') {
+      AudioManager.play('ui_click');
+    }
+
     this.currentTab = tab;
 
     // Update tab buttons
@@ -111,6 +131,9 @@ const TerminalUI = {
         break;
       case 'relics':
         document.getElementById('relics-content').classList.add('active');
+        break;
+      case 'settings':
+        document.getElementById('settings-content').classList.add('active');
         break;
     }
 
@@ -165,6 +188,11 @@ const TerminalUI = {
       case 'relics':
         if (typeof RelicsPanel !== 'undefined') {
           RelicsPanel.refresh();
+        }
+        break;
+      case 'settings':
+        if (typeof SettingsPanel !== 'undefined') {
+          SettingsPanel.refresh();
         }
         break;
     }

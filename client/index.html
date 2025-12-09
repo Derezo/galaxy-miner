@@ -189,6 +189,13 @@
           </svg>
           Relics
         </button>
+        <button class="terminal-tab" data-tab="settings">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="3"></circle>
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+          </svg>
+          Settings
+        </button>
       </div>
       <div class="panel-content">
         <!-- Cargo tab content -->
@@ -216,6 +223,11 @@
         <div id="relics-content" class="terminal-content">
           <!-- Content rendered by RelicsPanel -->
         </div>
+
+        <!-- Settings tab content -->
+        <div id="settings-content" class="terminal-content">
+          <!-- Content rendered by SettingsPanel -->
+        </div>
       </div>
     </div>
   </div>
@@ -228,6 +240,12 @@
   <script src="/shared/logger.js?v=9"></script>
   <script src="/shared/utils.js?v=9"></script>
   <script src="/shared/debug-sync.js?v=1"></script>
+  <!-- Audio system -->
+  <script src="js/audio/AudioContext.js"></script>
+  <script src="js/audio/SpatialAudio.js"></script>
+  <script src="js/audio/SoundPool.js"></script>
+  <script src="js/audio/config/SoundConfig.js"></script>
+  <script src="js/audio/AudioManager.js"></script>
   <script src="js/network.js?v=8"></script>
   <script src="js/world.js?v=8"></script>
   <script src="js/input.js"></script>
@@ -303,6 +321,7 @@
   <script src="js/ui/panels/ShipCustomizationPanel.js"></script>
   <script src="js/ui/panels/ShipUpgradePanel.js"></script>
   <script src="js/ui/panels/RelicsPanel.js"></script>
+  <script src="js/ui/panels/SettingsPanel.js"></script>
   <script src="js/ui/WormholeTransitUI.js"></script>
   <script src="js/ui/credit-animation.js"></script>
   <script src="js/ui/profile-modal.js"></script>

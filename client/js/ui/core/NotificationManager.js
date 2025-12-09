@@ -38,6 +38,18 @@ const NotificationManager = {
    * @returns {number|null} Message ID or null if MessageStack unavailable
    */
   showMessage(message, type = 'info', duration) {
+    // Play notification sound based on type
+    if (typeof AudioManager !== 'undefined') {
+      const soundMap = {
+        'error': 'notification_error',
+        'warning': 'notification_warning',
+        'success': 'notification_success',
+        'info': 'notification_info'
+      };
+      const soundId = soundMap[type] || 'notification_info';
+      AudioManager.play(soundId);
+    }
+
     if (typeof MessageStack !== 'undefined') {
       return MessageStack.show(message, type, duration);
     }

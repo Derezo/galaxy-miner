@@ -1,0 +1,36 @@
+{
+  "name": "galaxy-miner-sound-generator",
+  "version": "1.0.0",
+  "description": "ElevenLabs sound effects generator for Galaxy Miner",
+  "main": "generate.js",
+  "type": "commonjs",
+  "scripts": {
+    "generate": "node generate.js",
+    "generate:tier1": "node generate.js --tier 1",
+    "generate:tier2": "node generate.js --tier 2",
+    "generate:weapons": "node generate.js --category weapons",
+    "generate:impacts": "node generate.js --category impacts",
+    "generate:destruction": "node generate.js --category destruction",
+    "generate:bosses": "node generate.js --category bosses",
+    "generate:mining": "node generate.js --category mining",
+    "generate:movement": "node generate.js --category movement",
+    "generate:ui": "node generate.js --category ui",
+    "generate:loot": "node generate.js --category loot",
+    "generate:environment": "node generate.js --category environment",
+    "generate:rewards": "node generate.js --category rewards",
+    "generate:base-destruction": "node generate.js --category base_destruction",
+    "list": "node generate.js --list",
+    "count": "node generate.js --count"
+  },
+  "keywords": [
+    "elevenlabs",
+    "sound-effects",
+    "game-audio",
+    "procedural-audio"
+  ],
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "author": "Galaxy Miner Team",
+  "license": "MIT"
+}

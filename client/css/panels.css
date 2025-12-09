@@ -946,3 +946,111 @@
   background: linear-gradient(135deg, #4488ff 0%, #2266cc 100%);
   color: #ffffff;
 }
+
+/* ===== Settings Panel ===== */
+
+.settings-panel {
+  padding: 16px;
+}
+
+.settings-section {
+  margin-bottom: 24px;
+}
+
+.settings-section-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-primary-lighter);
+  margin-bottom: 16px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.settings-row {
+  margin-bottom: 16px;
+}
+
+.settings-label {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.settings-label-text {
+  font-size: 13px;
+  color: var(--color-text);
+}
+
+.settings-value {
+  font-size: 12px;
+  color: var(--color-primary);
+  font-weight: 600;
+  min-width: 40px;
+  text-align: right;
+}
+
+/* Volume slider styling */
+.settings-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--color-bg-darker);
+  outline: none;
+  cursor: pointer;
+}
+
+.settings-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--color-primary);
+  cursor: pointer;
+  border: 2px solid var(--color-primary-lighter);
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.settings-slider::-webkit-slider-thumb:hover {
+  transform: scale(1.15);
+  box-shadow: 0 0 8px var(--color-primary);
+}
+
+.settings-slider::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--color-primary);
+  cursor: pointer;
+  border: 2px solid var(--color-primary-lighter);
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.settings-slider::-moz-range-thumb:hover {
+  transform: scale(1.15);
+  box-shadow: 0 0 8px var(--color-primary);
+}
+
+.settings-slider::-moz-range-track {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--color-bg-darker);
+}
+
+.settings-slider:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.settings-slider:disabled::-webkit-slider-thumb {
+  background: var(--color-text-muted);
+  border-color: var(--color-text-muted);
+}
+
+.settings-slider:disabled::-moz-range-thumb {
+  background: var(--color-text-muted);
+  border-color: var(--color-text-muted);
+}

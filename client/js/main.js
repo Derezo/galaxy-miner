@@ -24,6 +24,7 @@ const GalaxyMiner = {
     Toast.init();
     NotificationManager.init();
     EmoteWheel.init();
+    AudioManager.init();
 
     Logger.log('Galaxy Miner ready');
   },

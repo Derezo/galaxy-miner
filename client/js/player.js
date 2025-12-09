@@ -56,6 +56,11 @@ const Player = {
   wormholeDestination: null,
   _nearestWormhole: null,
 
+  // Audio state tracking
+  _engineLoopActive: false,
+  _boostLoopActive: false,
+  _lastShieldState: 'damaged',  // 'damaged' | 'full'
+
   init(data) {
     this.id = data.id;
     this.username = data.username;
@@ -99,6 +104,11 @@ const Player = {
     this.boostCooldownEnd = 0;
     this.lastThrustKeyTime = 0;
 
+    // Reset audio state
+    this._engineLoopActive = false;
+    this._boostLoopActive = false;
+    this._lastShieldState = 'damaged';
+
     // Initialize survival tracking
     this.isDead = false;
     this.sessionStartTime = Date.now();
@@ -140,6 +150,11 @@ const Player = {
     // Check for boost end
     if (this.boostActive && now >= this.boostEndTime) {
       this.boostActive = false;
+      // Stop boost sustain loop
+      if (this._boostLoopActive && typeof AudioManager !== 'undefined') {
+        AudioManager.stopLoop('boost_sustain');
+        this._boostLoopActive = false;
+      }
     }
 
     // Apply boost speed multiplier if active
@@ -186,6 +201,9 @@ const Player = {
     const drag = 0.98;
     this.velocity.x *= drag;
     this.velocity.y *= drag;
+
+    // Update engine audio based on velocity
+    this.updateEngineAudio();
 
     // Apply star gravity wells
     this.applyStarGravity(dt);
@@ -241,6 +259,12 @@ const Player = {
 
     this.lastFireTime = now;
     Network.sendFire(this.rotation);
+
+    // Play local weapon fire sound immediately for responsiveness
+    if (typeof AudioManager !== 'undefined') {
+      const weaponSound = `weapon_fire_${this.ship.weaponTier}`;
+      AudioManager.play(weaponSound);
+    }
 
     // Trigger weapon visual effect with tier-based rendering
     Renderer.fireWeapon();
@@ -328,7 +352,9 @@ const Player = {
   },
 
   regenShield(dt) {
-    if (this.shield.current < this.shield.max) {
+    const wasDamaged = this.shield.current < this.shield.max;
+
+    if (wasDamaged) {
       // Base recharge rate + energy core bonus
       const baseRate = CONSTANTS.SHIELD_RECHARGE_RATE;
       const bonusRate = CONSTANTS.ENERGY_CORE?.SHIELD_REGEN_BONUS?.[this.ship.energyCoreTier] || 0;
@@ -338,6 +364,41 @@ const Player = {
         this.shield.max,
         this.shield.current + effectiveRate * dt
       );
+
+      // Check if shield just became fully charged
+      const isNowFull = this.shield.current >= this.shield.max;
+      if (isNowFull && this._lastShieldState === 'damaged') {
+        // Shield fully recharged - play sound
+        if (typeof AudioManager !== 'undefined') {
+          AudioManager.play('shield_recharge');
+        }
+        this._lastShieldState = 'full';
+      }
+    } else {
+      this._lastShieldState = 'full';
+    }
+  },
+
+  /**
+   * Update engine audio loop based on player movement
+   */
+  updateEngineAudio() {
+    if (typeof AudioManager === 'undefined') return;
+
+    // Calculate velocity magnitude
+    const velocityMag = Math.sqrt(this.velocity.x * this.velocity.x + this.velocity.y * this.velocity.y);
+    const isMoving = velocityMag > 0.1; // Small threshold to avoid audio flickering
+
+    if (isMoving && !this._engineLoopActive) {
+      // Start engine loop
+      const engineSound = `engine_${this.ship.engineTier}`;
+      AudioManager.startLoop(engineSound);
+      this._engineLoopActive = true;
+    } else if (!isMoving && this._engineLoopActive) {
+      // Stop engine loop
+      const engineSound = `engine_${this.ship.engineTier}`;
+      AudioManager.stopLoop(engineSound);
+      this._engineLoopActive = false;
     }
   },
 
@@ -448,7 +509,13 @@ const Player = {
   onDamaged(data) {
     // Update health values
     this.hull.current = data.hull;
+    const previousShield = this.shield.current;
     this.shield.current = data.shield;
+
+    // Track shield state for recharge sound
+    if (this.shield.current < previousShield) {
+      this._lastShieldState = 'damaged';
+    }
   },
 
   getCargoUsed() {
@@ -611,6 +678,13 @@ const Player = {
     this.boostEndTime = now + boostDuration;
     this.boostCooldownEnd = now + boostCooldown;
 
+    // Play boost activation and start sustain loop
+    if (typeof AudioManager !== 'undefined') {
+      AudioManager.play('boost_activate');
+      AudioManager.startLoop('boost_sustain');
+      this._boostLoopActive = true;
+    }
+
     Logger.log(`Thrust boost activated! Duration: ${boostDuration}ms, Cooldown: ${boostCooldown}ms`);
   },
 
@@ -652,6 +726,19 @@ const Player = {
   onDeath(data) {
     this.isDead = true;
     // Note: Don't reset sessionStartTime here - we use it for survival time display
+
+    // Stop any active audio loops
+    if (typeof AudioManager !== 'undefined') {
+      if (this._engineLoopActive) {
+        const engineSound = `engine_${this.ship.engineTier}`;
+        AudioManager.stopLoop(engineSound);
+        this._engineLoopActive = false;
+      }
+      if (this._boostLoopActive) {
+        AudioManager.stopLoop('boost_sustain');
+        this._boostLoopActive = false;
+      }
+    }
   },
 
   /**
@@ -678,6 +765,19 @@ const Player = {
     }
     if (typeof data.shield !== 'undefined') {
       this.shield.current = data.shield;
+    }
+
+    // Stop any active audio loops
+    if (typeof AudioManager !== 'undefined') {
+      if (this._engineLoopActive) {
+        const engineSound = `engine_${this.ship.engineTier}`;
+        AudioManager.stopLoop(engineSound);
+        this._engineLoopActive = false;
+      }
+      if (this._boostLoopActive) {
+        AudioManager.stopLoop('boost_sustain');
+        this._boostLoopActive = false;
+      }
     }
 
     Logger.log('[Player] Respawned at:', this.position);

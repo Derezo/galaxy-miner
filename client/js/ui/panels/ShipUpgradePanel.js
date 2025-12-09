@@ -302,6 +302,11 @@ const ShipUpgradePanel = {
     }
     this.isUpgrading = false;
 
+    // Play upgrade success sound
+    if (typeof AudioManager !== 'undefined') {
+      AudioManager.play('upgrade_success');
+    }
+
     // Flash success animation
     if (this.container) {
       this.container.classList.add('upgrade-success-flash');
@@ -324,6 +329,12 @@ const ShipUpgradePanel = {
     }
     this.isUpgrading = false;
     this.lastError = error;
+
+    // Play upgrade failed sound
+    if (typeof AudioManager !== 'undefined') {
+      AudioManager.play('upgrade_failed');
+    }
+
     this.render();
 
     // Clear error after a few seconds
