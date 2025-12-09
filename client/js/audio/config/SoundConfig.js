@@ -702,6 +702,12 @@ const SoundConfig = {
     priority: 100,
     category: "sfx",
   },
+  wormhole_select: {
+    file: "ui/ui_success.mp3",
+    baseVolume: 0.6,
+    priority: 75,
+    category: "ui",
+  },
 
   // ============================================
   // ENVIRONMENT - Comets & Hazards

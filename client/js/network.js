@@ -32,7 +32,7 @@ const Network = {
     });
 
     this.socket.on('auth:error', (error) => {
-      console.error('Authentication error:', error);
+      Logger.error('Authentication error:', error);
       AuthUI.showError(error.message);
     });
 
@@ -54,7 +54,7 @@ const Network = {
     });
 
     this.socket.on('ship:colorError', (data) => {
-      console.error('Color change error:', data.message);
+      Logger.error('Color change error:', data.message);
       if (typeof NotificationManager !== 'undefined') {
         NotificationManager.error(data.message);
       }
@@ -70,7 +70,7 @@ const Network = {
     });
 
     this.socket.on('ship:profileError', (data) => {
-      console.error('Profile change error:', data.message);
+      Logger.error('Profile change error:', data.message);
       if (typeof NotificationManager !== 'undefined') {
         NotificationManager.error(data.message);
       }
@@ -139,7 +139,7 @@ const Network = {
     });
 
     this.socket.on('upgrade:error', (data) => {
-      console.error('Upgrade error:', data.message);
+      Logger.error('Upgrade error:', data.message);
       if (typeof ShipUpgradePanel !== 'undefined') {
         ShipUpgradePanel.onUpgradeError(data.message);
       }
@@ -152,7 +152,7 @@ const Network = {
 
     // Generic error handler for server-side errors
     this.socket.on('error:generic', (data) => {
-      console.error('Server error:', data.message);
+      Logger.error('Server error:', data.message);
       if (typeof NotificationManager !== 'undefined') {
         NotificationManager.error(data.message);
       }
@@ -1373,7 +1373,7 @@ const Network = {
     });
 
     this.socket.on('market:error', (data) => {
-      console.error('Market error:', data.message);
+      Logger.error('Market error:', data.message);
       // Could show a modal notification here
     });
 
@@ -1417,10 +1417,18 @@ const Network = {
 
     this.socket.on('wreckage:despawn', (data) => {
       Entities.removeWreckage(data.id);
+      // If player was collecting this wreckage, cancel the collection state
+      if (Player.collectingWreckage && Player.collectingWreckage.id === data.id) {
+        Player.onLootCollectionCancelled({ reason: 'Wreckage despawned' });
+      }
     });
 
     this.socket.on('wreckage:collected', (data) => {
       Entities.removeWreckage(data.wreckageId);
+      // If player was collecting this wreckage (but someone else got it), cancel
+      if (Player.collectingWreckage && Player.collectingWreckage.id === data.wreckageId) {
+        Player.onLootCollectionCancelled({ reason: 'Wreckage collected by another player' });
+      }
     });
 
     // Loot collection events
@@ -1480,7 +1488,7 @@ const Network = {
     });
 
     this.socket.on('loot:error', (data) => {
-      console.error('Loot error:', data.message);
+      Logger.error('Loot error:', data.message);
       if (typeof NotificationManager !== 'undefined') {
         NotificationManager.error(data.message);
       }

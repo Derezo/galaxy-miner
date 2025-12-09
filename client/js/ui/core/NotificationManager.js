@@ -54,7 +54,7 @@ const NotificationManager = {
       return MessageStack.show(message, type, duration);
     }
     // Fallback to console
-    console.log(`[${type.toUpperCase()}] ${message}`);
+    Logger.log(`[${type.toUpperCase()}] ${message}`);
     return null;
   },
 

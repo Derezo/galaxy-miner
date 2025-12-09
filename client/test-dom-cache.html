@@ -1,0 +1,332 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>DOMCache Test Suite</title>
+  <style>
+    body {
+      font-family: 'Courier New', monospace;
+      max-width: 800px;
+      margin: 40px auto;
+      padding: 20px;
+      background: #1a1a1a;
+      color: #00ff00;
+    }
+    h1 {
+      color: #00ffff;
+      border-bottom: 2px solid #00ffff;
+      padding-bottom: 10px;
+    }
+    h2 {
+      color: #ffff00;
+      margin-top: 30px;
+    }
+    .test-result {
+      margin: 10px 0;
+      padding: 10px;
+      background: #2a2a2a;
+      border-left: 4px solid #00ff00;
+    }
+    .test-result.fail {
+      border-left-color: #ff0000;
+      color: #ff0000;
+    }
+    .test-result.pass {
+      border-left-color: #00ff00;
+    }
+    pre {
+      background: #000;
+      padding: 10px;
+      overflow-x: auto;
+      border: 1px solid #333;
+    }
+    #test-elements {
+      display: none;
+    }
+    button {
+      background: #00ffff;
+      color: #000;
+      border: none;
+      padding: 10px 20px;
+      font-size: 16px;
+      cursor: pointer;
+      margin: 10px 5px;
+      font-family: inherit;
+    }
+    button:hover {
+      background: #00cccc;
+    }
+  </style>
+</head>
+<body>
+  <h1>DOMCache Test Suite</h1>
+  <p>Testing the lazy-loading DOM element cache module for Galaxy Miner.</p>
+
+  <button onclick="runAllTests()">Run All Tests</button>
+  <button onclick="runBenchmark()">Run Benchmark</button>
+  <button onclick="DOMCache.debug()">Show Cache Debug Info</button>
+
+  <div id="test-results"></div>
+
+  <!-- Hidden test elements -->
+  <div id="test-elements">
+    <div id="test-element-1">Test 1</div>
+    <div id="test-element-2">Test 2</div>
+    <div id="test-element-3">Test 3</div>
+    <div id="dynamic-container"></div>
+    <div id="auth-screen">Auth Screen</div>
+    <div id="hud">HUD</div>
+    <div id="terminal-panel">Terminal Panel</div>
+    <div id="radar-canvas">Radar Canvas</div>
+    <div id="chat-overlay">Chat Overlay</div>
+  </div>
+
+  <!-- Load DOMCache -->
+  <script src="js/dom-cache.js"></script>
+
+  <!-- Test Suite -->
+  <script>
+    let testResults = [];
+
+    function assert(condition, message) {
+      if (!condition) {
+        throw new Error(`Assertion failed: ${message}`);
+      }
+    }
+
+    function test(name, fn) {
+      const resultDiv = document.getElementById('test-results');
+      const testDiv = document.createElement('div');
+      testDiv.className = 'test-result';
+
+      try {
+        fn();
+        testDiv.classList.add('pass');
+        testDiv.innerHTML = `<strong>✓ ${name}</strong>`;
+        testResults.push({ name, passed: true });
+      } catch (error) {
+        testDiv.classList.add('fail');
+        testDiv.innerHTML = `<strong>✗ ${name}</strong><br>${error.message}`;
+        testResults.push({ name, passed: false, error: error.message });
+        console.error(`Test failed: ${name}`, error);
+      }
+
+      resultDiv.appendChild(testDiv);
+    }
+
+    function runAllTests() {
+      // Clear previous results
+      document.getElementById('test-results').innerHTML = '<h2>Test Results</h2>';
+      testResults = [];
+      DOMCache.invalidateAll(); // Start fresh
+
+      // Test 1: Basic get()
+      test('Basic get() returns element', () => {
+        const el = DOMCache.get('test-element-1');
+        assert(el !== null, 'Element should not be null');
+        assert(el.id === 'test-element-1', 'Element ID should match');
+      });
+
+      // Test 2: Caching works
+      test('Element is cached on second access', () => {
+        const el1 = DOMCache.get('test-element-2');
+        const el2 = DOMCache.get('test-element-2');
+        assert(el1 === el2, 'Should return same cached reference');
+      });
+
+      // Test 3: Named getters work
+      test('Named getters return correct elements', () => {
+        const authScreen = DOMCache.authScreen;
+        assert(authScreen !== null, 'Auth screen should exist');
+        assert(authScreen.id === 'auth-screen', 'Should have correct ID');
+
+        const hud = DOMCache.hud;
+        assert(hud !== null, 'HUD should exist');
+        assert(hud.id === 'hud', 'Should have correct ID');
+      });
+
+      // Test 4: getMany() works
+      test('getMany() returns multiple elements', () => {
+        const elements = DOMCache.getMany(['auth-screen', 'hud', 'terminal-panel']);
+        assert(elements['auth-screen'] !== null, 'Auth screen should exist');
+        assert(elements.hud !== null, 'HUD should exist');
+        assert(elements['terminal-panel'] !== null, 'Terminal panel should exist');
+      });
+
+      // Test 5: invalidate() clears cache
+      test('invalidate() clears cached element', () => {
+        const el1 = DOMCache.get('test-element-3');
+        DOMCache.invalidate('test-element-3');
+        const el2 = DOMCache.get('test-element-3');
+        // Both should point to same DOM element, but cache was cleared between
+        assert(el1.id === el2.id, 'Should retrieve same element after invalidate');
+      });
+
+      // Test 6: invalidateMany() works
+      test('invalidateMany() clears multiple elements', () => {
+        DOMCache.get('auth-screen');
+        DOMCache.get('hud');
+        DOMCache.invalidateMany(['auth-screen', 'hud']);
+
+        const stats = DOMCache.getStats();
+        // Elements should be re-cached when accessed again
+        const auth = DOMCache.authScreen;
+        const hud = DOMCache.hud;
+        assert(auth !== null && hud !== null, 'Elements should be accessible after invalidation');
+      });
+
+      // Test 7: invalidateAll() works
+      test('invalidateAll() clears entire cache', () => {
+        DOMCache.get('test-element-1');
+        DOMCache.get('test-element-2');
+        DOMCache.get('test-element-3');
+
+        DOMCache.invalidateAll();
+        const stats = DOMCache.getStats();
+        assert(stats.totalCached === 0, 'Cache should be empty after invalidateAll');
+      });
+
+      // Test 8: refresh() works
+      test('refresh() re-fetches element', () => {
+        const el1 = DOMCache.get('auth-screen');
+        const el2 = DOMCache.refresh('auth-screen');
+        assert(el1.id === el2.id, 'Should retrieve same element');
+      });
+
+      // Test 9: exists() works
+      test('exists() checks element presence', () => {
+        assert(DOMCache.exists('auth-screen'), 'Existing element should return true');
+        assert(!DOMCache.exists('non-existent-element'), 'Non-existent element should return false');
+      });
+
+      // Test 10: null elements are cached
+      test('Non-existent elements return null', () => {
+        const el = DOMCache.get('does-not-exist');
+        assert(el === null, 'Non-existent element should return null');
+
+        const el2 = DOMCache.get('does-not-exist');
+        assert(el2 === null, 'Cached null should still be null');
+      });
+
+      // Test 11: Dynamic content handling
+      test('Dynamic content requires invalidation', () => {
+        const container = document.getElementById('dynamic-container');
+        container.innerHTML = '<div id="dynamic-child">Dynamic</div>';
+
+        // Should be null if not invalidated (first time, not cached)
+        DOMCache.invalidate('dynamic-child'); // Clear any potential cache
+        const child = document.getElementById('dynamic-child');
+        assert(child !== null, 'Dynamic element should exist in DOM');
+
+        const cached = DOMCache.refresh('dynamic-child');
+        assert(cached !== null, 'Refreshed element should be found');
+      });
+
+      // Test 12: getStats() returns valid data
+      test('getStats() returns valid statistics', () => {
+        DOMCache.invalidateAll();
+        DOMCache.get('test-element-1');
+        DOMCache.get('test-element-2');
+        DOMCache.get('does-not-exist');
+
+        const stats = DOMCache.getStats();
+        assert(stats.totalCached >= 3, 'Should have at least 3 cached elements');
+        assert(stats.validElements >= 2, 'Should have at least 2 valid elements');
+        assert(typeof stats.initialized === 'boolean', 'initialized should be boolean');
+      });
+
+      // Summary
+      const passed = testResults.filter(r => r.passed).length;
+      const total = testResults.length;
+      const summaryDiv = document.createElement('div');
+      summaryDiv.className = 'test-result ' + (passed === total ? 'pass' : 'fail');
+      summaryDiv.innerHTML = `<strong>Summary: ${passed}/${total} tests passed</strong>`;
+      document.getElementById('test-results').appendChild(summaryDiv);
+
+      console.log('Test Results:', testResults);
+    }
+
+    function runBenchmark() {
+      const resultsDiv = document.getElementById('test-results');
+      resultsDiv.innerHTML = '<h2>Performance Benchmark</h2>';
+
+      const iterations = 10000;
+      const ids = ['auth-screen', 'hud', 'terminal-panel', 'radar-canvas', 'chat-overlay'];
+
+      // Benchmark 1: getElementById vs DOMCache (single element)
+      const start1 = performance.now();
+      for (let i = 0; i < iterations; i++) {
+        const el = document.getElementById('hud');
+      }
+      const time1 = performance.now() - start1;
+
+      // Clear cache and warm it up
+      DOMCache.invalidateAll();
+      DOMCache.hud; // Warm up
+
+      const start2 = performance.now();
+      for (let i = 0; i < iterations; i++) {
+        const el = DOMCache.hud;
+      }
+      const time2 = performance.now() - start2;
+
+      // Benchmark 2: Multiple elements
+      const start3 = performance.now();
+      for (let i = 0; i < iterations; i++) {
+        ids.forEach(id => document.getElementById(id));
+      }
+      const time3 = performance.now() - start3;
+
+      DOMCache.invalidateAll();
+      ids.forEach(id => DOMCache.get(id)); // Warm up
+
+      const start4 = performance.now();
+      for (let i = 0; i < iterations; i++) {
+        ids.forEach(id => DOMCache.get(id));
+      }
+      const time4 = performance.now() - start4;
+
+      // Benchmark 3: getMany()
+      DOMCache.invalidateAll();
+      DOMCache.getMany(ids); // Warm up
+
+      const start5 = performance.now();
+      for (let i = 0; i < iterations; i++) {
+        DOMCache.getMany(ids);
+      }
+      const time5 = performance.now() - start5;
+
+      // Display results
+      resultsDiv.innerHTML += `
+        <pre>
+Iterations: ${iterations.toLocaleString()}
+
+Single Element Access:
+  document.getElementById(): ${time1.toFixed(2)}ms
+  DOMCache.hud (cached):     ${time2.toFixed(2)}ms
+  Speedup:                   ${(time1 / time2).toFixed(2)}x faster
+
+Multiple Element Access (${ids.length} elements):
+  document.getElementById(): ${time3.toFixed(2)}ms
+  DOMCache.get() (cached):   ${time4.toFixed(2)}ms
+  DOMCache.getMany():        ${time5.toFixed(2)}ms
+  Speedup (get):             ${(time3 / time4).toFixed(2)}x faster
+  Speedup (getMany):         ${(time3 / time5).toFixed(2)}x faster
+
+Performance Improvement: ${(((time1 - time2) / time1) * 100).toFixed(1)}% for single element
+                        ${(((time3 - time4) / time3) * 100).toFixed(1)}% for multiple elements
+        </pre>
+      `;
+
+      console.log('Benchmark completed');
+    }
+
+    // Run tests automatically on load
+    window.addEventListener('DOMContentLoaded', () => {
+      console.log('DOMCache loaded:', typeof DOMCache !== 'undefined');
+      console.log('DOMCache stats:', DOMCache.getStats());
+    });
+  </script>
+</body>
+</html>

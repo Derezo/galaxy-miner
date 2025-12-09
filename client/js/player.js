@@ -481,7 +481,7 @@ const Player = {
 
   onMiningError(data) {
     // Debug logging for mining errors
-    console.error('[Mining Debug] Error received:', {
+    Logger.error('[Mining Debug] Error received:', {
       message: data.message,
       serverRejectedObjectId: data.objectId,
       clientTargetWas: this.miningTarget ? {
@@ -593,8 +593,11 @@ const Player = {
     Logger.log('Loot collected:', data.contents);
 
     // Show reward pop-ups
+    // Note: Exclude buffs from results since they're already queued via the
+    // separate 'buff:applied' event handler to avoid duplicate notifications
     if (data.results && typeof NotificationManager !== 'undefined') {
-      NotificationManager.queueReward(data.results);
+      const { buffs, ...resultsWithoutBuffs } = data.results;
+      NotificationManager.queueReward(resultsWithoutBuffs);
     }
 
     this.collectingWreckage = null;
@@ -871,6 +874,11 @@ const Player = {
     this.wormholeTransitPhase = 'selecting';
     this.wormholeDestinations = data.destinations || [];
 
+    // Start wormhole ambient sound loop
+    if (typeof AudioManager !== 'undefined') {
+      AudioManager.startLoop('wormhole_ambient');
+    }
+
     // Show the transit UI
     if (typeof WormholeTransitUI !== 'undefined') {
       WormholeTransitUI.show(this.wormholeDestinations);
@@ -899,6 +907,12 @@ const Player = {
     this.wormholeTransitPhase = 'transit';
     this.wormholeDestination = data.destination;
     this.wormholeTransitProgress = 0;
+
+    // Stop ambient and play transit sound
+    if (typeof AudioManager !== 'undefined') {
+      AudioManager.stopLoop('wormhole_ambient');
+      AudioManager.play('wormhole_transit');
+    }
 
     if (typeof WormholeTransitUI !== 'undefined') {
       WormholeTransitUI.startTransit(data.duration, data.destination);
@@ -937,6 +951,11 @@ const Player = {
     this.wormholeTransitProgress = 0;
     this.wormholeDestination = null;
 
+    // Stop any wormhole sounds
+    if (typeof AudioManager !== 'undefined') {
+      AudioManager.stopLoop('wormhole_ambient');
+    }
+
     // Hide the transit UI
     if (typeof WormholeTransitUI !== 'undefined') {
       WormholeTransitUI.hide();
@@ -968,6 +987,11 @@ const Player = {
     this.wormholeTransitProgress = 0;
     this.wormholeDestination = null;
 
+    // Stop any wormhole sounds
+    if (typeof AudioManager !== 'undefined') {
+      AudioManager.stopLoop('wormhole_ambient');
+    }
+
     if (typeof WormholeTransitUI !== 'undefined') {
       WormholeTransitUI.hide();
     }
@@ -985,6 +1009,6 @@ const Player = {
    */
   onWormholeError(data) {
     NotificationManager.error(data.error || 'Wormhole error');
-    console.error('[Wormhole] Error:', data.error);
+    Logger.error('[Wormhole] Error:', data.error);
   }
 };

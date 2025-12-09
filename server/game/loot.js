@@ -150,7 +150,8 @@ function cleanupExpiredWreckage() {
   const expired = [];
 
   for (const [id, wreckage] of activeWreckage) {
-    if (now >= wreckage.despawnTime) {
+    // Don't despawn wreckage that is currently being collected
+    if (now >= wreckage.despawnTime && !wreckage.beingCollectedBy) {
       expired.push(id);
     }
   }

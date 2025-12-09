@@ -41,7 +41,7 @@ const IconCache = {
         this.cache.set(key, img);
         return img;
       } catch (e) {
-        console.warn(`Failed to create resource icon for ${resourceType}:`, e);
+        Logger.warn(`Failed to create resource icon for ${resourceType}:`, e);
       }
     }
 
@@ -69,7 +69,7 @@ const IconCache = {
         this.cache.set(key, img);
         return img;
       } catch (e) {
-        console.warn(`Failed to create relic icon for ${relicType}:`, e);
+        Logger.warn(`Failed to create relic icon for ${relicType}:`, e);
       }
     }
 

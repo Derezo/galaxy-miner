@@ -21,7 +21,7 @@ const World = {
       StarSystem._debugLogged = false;  // Reset debug flag
       Logger.log('[World] StarSystem loaded and cache cleared (v7)');
     } else {
-      console.error('[World] StarSystem NOT LOADED! Check for JS errors above.');
+      Logger.error('[World] StarSystem NOT LOADED! Check for JS errors above.');
     }
     Logger.log('World initialized with seed:', seed);
   },
@@ -66,7 +66,7 @@ const World = {
     }
 
     // Fallback to legacy generation - log warning
-    console.warn('%c[World] Using LEGACY generation - StarSystem not available!', 'color: red; font-weight: bold');
+    Logger.warn('%c[World] Using LEGACY generation - StarSystem not available!', 'color: red; font-weight: bold');
     return this.generateSectorLegacy(sectorX, sectorY);
   },
 

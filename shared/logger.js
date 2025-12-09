@@ -7,11 +7,15 @@
  */
 
 // Determine if debug mode is enabled
-const DEBUG = true; /*typeof process !== 'undefined' && process.env
-  ? process.env.NODE_ENV !== 'production'
+// Server: Uses DEBUG env var or defaults based on NODE_ENV
+// Client: Uses window.DEBUG or localStorage
+const DEBUG = typeof process !== 'undefined' && process.env
+  ? (process.env.DEBUG !== undefined
+      ? process.env.DEBUG === 'true'
+      : process.env.NODE_ENV !== 'production')
   : typeof window !== 'undefined'
     ? (window.DEBUG === true || localStorage.getItem('DEBUG') === 'true')
-    : true;*/
+    : true;
 
 /**
  * Logger object with methods that respect DEBUG flag

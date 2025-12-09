@@ -66,7 +66,7 @@ const RelicsPanel = {
     const normalizedType = relicType.toUpperCase();
     const relicInfo = CONSTANTS.RELIC_TYPES[normalizedType];
     if (!relicInfo) {
-      console.warn('Unknown relic type:', relicType);
+      Logger.warn('Unknown relic type:', relicType);
       return '';
     }
 

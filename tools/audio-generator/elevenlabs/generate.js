@@ -883,21 +883,21 @@ const SOUNDS = {
         filename: "base_swarm.mp3",
         duration: 8.0,
         prompt:
-          "alien organic hive dissolution: biotech dimming and organic membrane pulsing for one and a half seconds, then wet biological pustules bursting and squelching with increasing intensity for two and a half seconds, massive core rupture with organic explosion and spore cloud release for two seconds, ending with dissipating biological mist and fading alien resonance for final two seconds, grotesque wet organic sounds throughout",
+          "alien organic hive dissolution begins as biotech moans down with organic membrane pulsing for one and a half seconds, then wet biological pustules begin bursting and squelching with increasing intensity for two and a half seconds, massive core rupture with organic burst and spore cloud release for two seconds, ending with dissipating biological misting and fading alien moans resonating, grotesque wet organic sounds throughout",
       },
       {
         id: "base_destruction_void",
         filename: "base_void.mp3",
         duration: 8.0,
         prompt:
-          "interdimensional rift collapse: begins with portal destabilization crackling and reality distortion hum for one and a half seconds, then space fragmentation with sparks and arcs and increasing gravitational pull sounds for two and a half seconds, violent implosion sucking everything inward with dimensional collapse for two seconds, ending with reality flash and ethereal release as portal seals for final two seconds, otherworldly and haunting",
+          "implosion of interdimensional rift begins with portal destabilization crackling and zapping and distortion hum for one and a half seconds, then space fragmentation with sparks and arcs and increasing gravitational pull sounds for two and a half seconds, violent implosion sucking everything inward with dimensional collapse for two seconds, ending with flash of energy and ethereal release as portal bursts for final second, otherworldly",
       },
       {
         id: "base_destruction_mining",
         filename: "base_mining.mp3",
         duration: 8.0,
         prompt:
-          "industrial mining platform destruction: electrical equipment malfunction with sparking and power surge for one and a half seconds, then fuel tank ruptures with smaller explosions and growing fire sounds for two and a half seconds, main reactor cascade explosion with massive blast and expanding shockwave for two seconds, ending with embers crackling and industrial machinery winding down for two seconds, electrical and chemical explosion",
+          "electrical equipment malfunction with sparking and power surge for one and a half seconds, then fuel tank ruptures with smaller explosions and growing fire sounds for two and a half seconds, main reactor cascade explosion with massive blast and expanding shockwave for two seconds, ending with industrial machinery winding down for two seconds, then finally an electrical and chemical explosion",
       },
     ],
   },

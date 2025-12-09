@@ -278,7 +278,7 @@ const IconFactory = {
     const config = this.RESOURCE_ICONS[resourceType];
 
     if (!config) {
-      console.warn(`No icon config for resource type: ${resourceType}`);
+      Logger.warn(`No icon config for resource type: ${resourceType}`);
       return this._createFallbackIcon(size);
     }
 
@@ -337,7 +337,7 @@ const IconFactory = {
       : null;
 
     if (!relicInfo) {
-      console.warn(`No relic info for type: ${relicType}`);
+      Logger.warn(`No relic info for type: ${relicType}`);
       return this._createFallbackRelicIcon(size);
     }
 

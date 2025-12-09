@@ -31,6 +31,7 @@ const RewardDisplay = {
 
   /**
    * Queue rewards for display
+   * Order: credits, buffs, common, uncommon, rare, ultrarare, components, relics
    * @param {Object} rewards - Reward data
    * @param {number} [rewards.credits] - Credit amount
    * @param {Array} [rewards.resources] - Array of {type, name, quantity}
@@ -41,39 +42,90 @@ const RewardDisplay = {
   queue(rewards) {
     if (!rewards) return;
 
-    // Queue credits first
+    // Build items array then sort by desired order
+    const items = [];
+
+    // Credits (sortOrder: 0)
     if (rewards.credits && rewards.credits > 0) {
-      this.pendingQueue.push({
+      items.push({
         type: 'credits',
         value: rewards.credits,
-        text: `+${rewards.credits.toLocaleString()}`
+        text: `+${rewards.credits.toLocaleString()}`,
+        sortOrder: 0
       });
     }
 
-    // Queue resources
-    if (rewards.resources && Array.isArray(rewards.resources)) {
-      rewards.resources.forEach(r => {
-        if (r && r.quantity > 0) {
-          // Get friendly name: use provided name, lookup from CONSTANTS, or format type
-          let resourceName = r.name;
-          if (!resourceName && typeof CONSTANTS !== 'undefined' && CONSTANTS.RESOURCE_TYPES && CONSTANTS.RESOURCE_TYPES[r.type]) {
-            resourceName = CONSTANTS.RESOURCE_TYPES[r.type].name;
-          }
-          if (!resourceName) {
-            // Convert "DARK_MATTER" to "Dark Matter"
-            resourceName = this._formatTypeName(r.type);
-          }
-          this.pendingQueue.push({
-            type: 'resource',
-            resourceType: r.type,
-            value: r.quantity,
-            text: `+${r.quantity} ${resourceName}`
+    // Buffs (sortOrder: 1)
+    if (rewards.buffs && Array.isArray(rewards.buffs)) {
+      rewards.buffs.forEach(b => {
+        const buffType = typeof b === 'string' ? b : b.type;
+        if (buffType) {
+          const buffNames = {
+            SHIELD_BOOST: 'Shield Boost',
+            SPEED_BURST: 'Speed Burst',
+            DAMAGE_AMP: 'Damage Amp',
+            RADAR_PULSE: 'Radar Pulse'
+          };
+          items.push({
+            type: 'buff',
+            buffType: buffType,
+            text: buffNames[buffType] || buffType,
+            sortOrder: 1
           });
         }
       });
     }
 
-    // Queue relics
+    // Resources - sorted by rarity (sortOrder: 2-5)
+    const raritySortOrder = {
+      'common': 2,
+      'uncommon': 3,
+      'rare': 4,
+      'ultrarare': 5
+    };
+
+    if (rewards.resources && Array.isArray(rewards.resources)) {
+      rewards.resources.forEach(r => {
+        if (r && r.quantity > 0) {
+          // Get friendly name: use provided name, lookup from CONSTANTS, or format type
+          let resourceName = r.name;
+          let rarity = 'common';
+          if (typeof CONSTANTS !== 'undefined' && CONSTANTS.RESOURCE_TYPES && CONSTANTS.RESOURCE_TYPES[r.type]) {
+            const resourceInfo = CONSTANTS.RESOURCE_TYPES[r.type];
+            if (!resourceName) resourceName = resourceInfo.name;
+            if (resourceInfo.rarity) rarity = resourceInfo.rarity;
+          }
+          if (!resourceName) {
+            // Convert "DARK_MATTER" to "Dark Matter"
+            resourceName = this._formatTypeName(r.type);
+          }
+          items.push({
+            type: 'resource',
+            resourceType: r.type,
+            value: r.quantity,
+            text: `+${r.quantity} ${resourceName}`,
+            sortOrder: raritySortOrder[rarity] || 2
+          });
+        }
+      });
+    }
+
+    // Components (sortOrder: 6)
+    if (rewards.components && Array.isArray(rewards.components)) {
+      rewards.components.forEach(c => {
+        const componentType = typeof c === 'string' ? c : c.type;
+        if (componentType) {
+          items.push({
+            type: 'component',
+            componentType: componentType,
+            text: componentType.replace(/_/g, ' '),
+            sortOrder: 6
+          });
+        }
+      });
+    }
+
+    // Relics (sortOrder: 7)
     if (rewards.relics && Array.isArray(rewards.relics)) {
       rewards.relics.forEach(r => {
         const relicType = typeof r === 'string' ? r : r.type;
@@ -83,49 +135,22 @@ const RewardDisplay = {
           if (typeof CONSTANTS !== 'undefined' && CONSTANTS.RELIC_TYPES && CONSTANTS.RELIC_TYPES[relicType]) {
             relicName = CONSTANTS.RELIC_TYPES[relicType].name || relicType;
           }
-          this.pendingQueue.push({
+          items.push({
             type: 'relic',
             relicType: relicType,
-            text: relicName
+            text: relicName,
+            sortOrder: 7
           });
         }
       });
     }
 
-    // Queue components
-    if (rewards.components && Array.isArray(rewards.components)) {
-      rewards.components.forEach(c => {
-        const componentType = typeof c === 'string' ? c : c.type;
-        if (componentType) {
-          this.pendingQueue.push({
-            type: 'component',
-            componentType: componentType,
-            text: componentType.replace(/_/g, ' ')
-          });
-        }
-      });
-    }
-
-    // Queue buffs
-    if (rewards.buffs && Array.isArray(rewards.buffs)) {
-      rewards.buffs.forEach(b => {
-        const buffType = typeof b === 'string' ? b : b.type;
-        if (buffType) {
-          // Get friendly name
-          const buffNames = {
-            SHIELD_BOOST: 'Shield Boost',
-            SPEED_BURST: 'Speed Burst',
-            DAMAGE_AMP: 'Damage Amp',
-            RADAR_PULSE: 'Radar Pulse'
-          };
-          this.pendingQueue.push({
-            type: 'buff',
-            buffType: buffType,
-            text: buffNames[buffType] || buffType
-          });
-        }
-      });
-    }
+    // Sort by sortOrder and add to queue
+    items.sort((a, b) => a.sortOrder - b.sortOrder);
+    items.forEach(item => {
+      delete item.sortOrder; // Remove helper property before queueing
+      this.pendingQueue.push(item);
+    });
   },
 
   /**

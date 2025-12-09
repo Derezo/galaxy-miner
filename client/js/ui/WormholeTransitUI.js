@@ -194,6 +194,12 @@ const WormholeTransitUI = {
    */
   selectDestination(destination) {
     this.selectedDestination = destination;
+
+    // Play selection sound
+    if (typeof AudioManager !== 'undefined') {
+      AudioManager.play('wormhole_select');
+    }
+
     Player.selectWormholeDestination(destination.id);
 
     // Disable other buttons visually

@@ -2,6 +2,7 @@
 // Centralized loot generation with faction-first architecture
 
 const CONSTANTS = require('../../shared/constants.js');
+const logger = require('../../shared/logger');
 
 // ============================================
 // FACTION DEFINITIONS (resources, relics, buffs, components per faction)
@@ -239,7 +240,7 @@ function getResourceRarity(resourceType) {
 function generateLoot(npcType) {
   const mapping = NPC_LOOT_MAPPING[npcType];
   if (!mapping) {
-    console.warn(`No loot mapping found for NPC type: ${npcType}`);
+    logger.warn(`No loot mapping found for NPC type: ${npcType}`);
     return [];
   }
 
@@ -247,7 +248,7 @@ function generateLoot(npcType) {
   const template = TIER_TEMPLATES[mapping.tier];
 
   if (!faction || !template) {
-    console.warn(`Invalid faction or tier for NPC type: ${npcType}`);
+    logger.warn(`Invalid faction or tier for NPC type: ${npcType}`);
     return [];
   }
 

@@ -1173,11 +1173,11 @@ module.exports = function(io) {
 
       const player = connectedPlayers.get(socket.id);
       if (!player || !player.position) {
-        console.log('[Wormhole] getNearestPosition - no player or position');
+        logger.log('[Wormhole] getNearestPosition - no player or position');
         return;
       }
 
-      console.log('[Wormhole] getNearestPosition request from player at', Math.round(player.position.x), Math.round(player.position.y));
+      logger.log('[Wormhole] getNearestPosition request from player at', Math.round(player.position.x), Math.round(player.position.y));
 
       const nearestWormhole = world.findNearestWormhole(
         player.position.x,
@@ -1185,9 +1185,9 @@ module.exports = function(io) {
       );
 
       if (nearestWormhole) {
-        console.log('[Wormhole] Found nearest at', Math.round(nearestWormhole.x), Math.round(nearestWormhole.y), 'distance:', Math.round(nearestWormhole.distance));
+        logger.log('[Wormhole] Found nearest at', Math.round(nearestWormhole.x), Math.round(nearestWormhole.y), 'distance:', Math.round(nearestWormhole.distance));
       } else {
-        console.log('[Wormhole] No wormhole found in search radius');
+        logger.log('[Wormhole] No wormhole found in search radius');
       }
 
       socket.emit('wormhole:nearestPosition', nearestWormhole);

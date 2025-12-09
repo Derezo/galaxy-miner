@@ -1,18 +1,39 @@
 const CONSTANTS = require('../shared/constants');
+const { env } = require('./env');
 
 module.exports = {
-  // Server settings
-  PORT: process.env.PORT || 3388,
-  HOST: process.env.HOST || '0.0.0.0',
+  // Server settings from env.js
+  PORT: env.PORT,
+  HOST: env.HOST,
+  NODE_ENV: env.NODE_ENV,
 
   // Import shared constants
   ...CONSTANTS,
 
-  // Server-specific settings
-  SESSION_SECRET: process.env.SESSION_SECRET || 'galaxy-miner-dev-secret-change-in-production',
-  TOKEN_EXPIRY: 24 * 60 * 60 * 1000, // 24 hours
+  // Server-specific settings from env.js
+  SESSION_SECRET: env.SESSION_SECRET,
+  TOKEN_EXPIRY: env.TOKEN_EXPIRY,
 
-  // Rate limiting
-  LOGIN_RATE_LIMIT: 5, // attempts per minute
-  REGISTER_RATE_LIMIT: 3, // attempts per minute
+  // Rate limiting from env.js
+  LOGIN_RATE_LIMIT: env.LOGIN_RATE_LIMIT,
+  REGISTER_RATE_LIMIT: env.REGISTER_RATE_LIMIT,
+
+  // Game timing from env.js
+  POSITION_SAVE_INTERVAL: env.POSITION_SAVE_INTERVAL,
+  WRECKAGE_DESPAWN_TIME: env.WRECKAGE_DESPAWN_TIME,
+
+  // Wormhole settings from env.js
+  TRANSIT_DURATION: env.TRANSIT_DURATION,
+  WORMHOLE_RANGE: env.WORMHOLE_RANGE,
+  SELECTION_TIMEOUT: env.SELECTION_TIMEOUT,
+
+  // Spawn settings from env.js
+  SAFE_SPAWN_RADIUS: env.SAFE_SPAWN_RADIUS,
+
+  // Debug flag from env.js
+  DEBUG: env.DEBUG,
+
+  // Helper flags
+  isProduction: env.isProduction,
+  isDevelopment: env.isDevelopment
 };

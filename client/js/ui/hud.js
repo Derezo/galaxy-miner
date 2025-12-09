@@ -43,10 +43,10 @@ const HUD = {
     const terminalIcon = document.getElementById('terminal-icon');
     const radialMenu = document.getElementById('terminal-radial-menu');
 
-    console.log('[HUD] initTerminalIcon: terminalIcon=', terminalIcon, 'radialMenu=', radialMenu);
+    Logger.log('[HUD] initTerminalIcon: terminalIcon=', terminalIcon, 'radialMenu=', radialMenu);
 
     if (!terminalIcon || !radialMenu) {
-      console.warn('[HUD] Terminal icon or radial menu not found!');
+      Logger.warn('[HUD] Terminal icon or radial menu not found!');
       return;
     }
 
@@ -99,13 +99,13 @@ const HUD = {
 
     // Radial menu item handlers - use mouseup/touchend since mousedown happens on terminal icon
     const radialItems = radialMenu.querySelectorAll('.radial-item');
-    console.log('[HUD] Found', radialItems.length, 'radial menu items');
+    Logger.log('[HUD] Found', radialItems.length, 'radial menu items');
 
     const handleRadialSelect = (item, e) => {
       // Only handle if radial menu is open (prevents accidental triggers)
       if (!this.radialMenuOpen) return;
 
-      console.log('[HUD] Radial item selected! Tab:', item.dataset.tab);
+      Logger.log('[HUD] Radial item selected! Tab:', item.dataset.tab);
       e.stopPropagation();
       e.preventDefault();
 
@@ -116,12 +116,12 @@ const HUD = {
         TerminalUI.show();
         TerminalUI.switchTab(tab);
       } else {
-        console.error('[HUD] TerminalUI is not defined!');
+        Logger.error('[HUD] TerminalUI is not defined!');
       }
     };
 
     radialItems.forEach(item => {
-      console.log('[HUD] Adding mouseup/touchend handler for tab:', item.dataset.tab);
+      Logger.log('[HUD] Adding mouseup/touchend handler for tab:', item.dataset.tab);
       // Mouse release selects the item
       item.addEventListener('mouseup', (e) => handleRadialSelect(item, e));
       // Touch release selects the item

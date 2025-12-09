@@ -803,6 +803,7 @@ const Renderer = {
   drawWreckage() {
     const ctx = this.ctx;
     const dt = this.lastDt;
+    const now = Date.now();
 
     // Faction colors for wreckage
     const FACTION_COLORS = {
@@ -813,6 +814,10 @@ const Renderer = {
       rogue_miner: "#ff9900",
       unknown: "#888888",
     };
+
+    // Despawn fade constants
+    const FADE_START_MS = 10000; // Start fading 10 seconds before despawn
+    const FADE_PULSE_SPEED = 3; // Pulses per second when fading
 
     // Update wreckage rotation
     Entities.updateWreckageRotation(dt);
@@ -826,6 +831,21 @@ const Renderer = {
         wreckage.position.y
       );
       const color = FACTION_COLORS[wreckage.faction] || FACTION_COLORS.unknown;
+
+      // Calculate despawn fade effect
+      let despawnAlpha = 1.0;
+      const timeUntilDespawn = wreckage.despawnTime - now;
+      if (timeUntilDespawn <= FADE_START_MS && timeUntilDespawn > 0) {
+        // Progress from 0 (just started fading) to 1 (about to despawn)
+        const fadeProgress = 1 - (timeUntilDespawn / FADE_START_MS);
+        // Pulse faster as we approach despawn (3-8 pulses per second)
+        const pulseSpeed = FADE_PULSE_SPEED + fadeProgress * 5;
+        const fadePhase = (now / 1000 * pulseSpeed) % 1;
+        // Oscillate between (1 - fadeProgress*0.7) and 1, gradually lowering the floor
+        const minAlpha = Math.max(0.1, 1 - fadeProgress * 0.9);
+        const pulseAlpha = minAlpha + (1 - minAlpha) * (0.5 + 0.5 * Math.sin(fadePhase * Math.PI * 2));
+        despawnAlpha = pulseAlpha;
+      }
 
       ctx.save();
       ctx.translate(screen.x, screen.y);
@@ -844,7 +864,7 @@ const Renderer = {
 
         // Draw piece
         ctx.fillStyle = color;
-        ctx.globalAlpha = 0.8;
+        ctx.globalAlpha = 0.8 * despawnAlpha;
         ctx.beginPath();
         ctx.moveTo(px, py - size);
         ctx.lineTo(px + size * 0.8, py + size * 0.5);
@@ -855,12 +875,12 @@ const Renderer = {
         // Outline
         ctx.strokeStyle = "#ffffff";
         ctx.lineWidth = 1;
-        ctx.globalAlpha = 0.5;
+        ctx.globalAlpha = 0.5 * despawnAlpha;
         ctx.stroke();
       }
 
       // Pulsing glow to indicate loot value
-      const pulsePhase = (Date.now() / 500) % (Math.PI * 2);
+      const pulsePhase = (now / 500) % (Math.PI * 2);
       const pulseIntensity = 0.3 + Math.sin(pulsePhase) * 0.2;
       const glowRadius = 20 + wreckage.contentCount * 2;
 
@@ -868,7 +888,7 @@ const Renderer = {
       gradient.addColorStop(0, color + "66");
       gradient.addColorStop(1, "transparent");
 
-      ctx.globalAlpha = pulseIntensity;
+      ctx.globalAlpha = pulseIntensity * despawnAlpha;
       ctx.fillStyle = gradient;
       ctx.beginPath();
       ctx.arc(0, 0, glowRadius, 0, Math.PI * 2);
@@ -877,7 +897,7 @@ const Renderer = {
       ctx.restore();
 
       // Draw label below wreckage
-      ctx.globalAlpha = 0.8;
+      ctx.globalAlpha = 0.8 * despawnAlpha;
       ctx.fillStyle = color;
       ctx.font = "10px monospace";
       ctx.textAlign = "center";

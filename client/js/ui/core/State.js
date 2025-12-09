@@ -164,7 +164,7 @@ function createStore(initialState = {}) {
             try {
               cb(changes[key], key, state);
             } catch (e) {
-              console.error(`State listener error for key "${key}":`, e);
+              Logger.error(`State listener error for key "${key}":`, e);
             }
           });
         }
@@ -175,7 +175,7 @@ function createStore(initialState = {}) {
         try {
           cb(changes, state);
         } catch (e) {
-          console.error('Global state listener error:', e);
+          Logger.error('Global state listener error:', e);
         }
       });
     },

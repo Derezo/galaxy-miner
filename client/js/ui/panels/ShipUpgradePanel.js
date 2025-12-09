@@ -269,7 +269,7 @@ const ShipUpgradePanel = {
     if (typeof Network !== 'undefined' && Network.socket) {
       Network.socket.emit('ship:upgrade', { component: this.selectedPart });
     } else {
-      console.error('[UPGRADE] Network.socket is undefined!');
+      Logger.error('[UPGRADE] Network.socket is undefined!');
       this.isUpgrading = false;
       this.render();
       if (typeof NotificationManager !== 'undefined') {
