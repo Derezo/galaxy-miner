@@ -125,6 +125,70 @@ function cleanupExpiredDebuffs() {
   }
 }
 
+/**
+ * Handle player death with wreckage spawning
+ * Spawns wreckage at death location containing 50% of dropped cargo (25% of original inventory)
+ * @param {Object} player - The player object (from connectedPlayers)
+ * @param {string} killedBy - Description of what killed the player
+ * @param {string} socketId - The player's socket ID
+ * @returns {Object} Death result for event emission
+ */
+function handlePlayerDeathWithWreckage(player, killedBy, socketId) {
+  // Get death position BEFORE respawn changes it
+  const deathPosition = { x: player.position.x, y: player.position.y };
+
+  // Handle death with position for wreckage
+  const deathResult = combat.handleDeath(player.id, deathPosition);
+
+  // Spawn player wreckage if there's anything to drop
+  if (deathResult.wreckageContents && deathResult.wreckageContents.length > 0) {
+    const playerEntity = {
+      type: 'player',
+      name: deathResult.playerName || player.username || 'Unknown',
+      faction: null,
+      creditReward: 0
+    };
+
+    const wreckage = loot.spawnWreckage(
+      playerEntity,
+      deathPosition,
+      deathResult.wreckageContents,
+      null, // No damage contributors for player wreckage
+      { source: 'player', playerId: player.id }
+    );
+
+    // Broadcast wreckage spawn to nearby players
+    broadcastWreckageNear(wreckage, 'wreckage:spawn', {
+      id: wreckage.id,
+      x: wreckage.position.x,
+      y: wreckage.position.y,
+      size: wreckage.size,
+      source: wreckage.source,
+      faction: null,
+      npcType: 'player',
+      npcName: wreckage.npcName,
+      contents: wreckage.contents
+    });
+
+    logger.log(`[WRECKAGE] Player ${player.id} death spawned wreckage ${wreckage.id} with ${wreckage.contents.length} items`);
+  }
+
+  // Emit death event to player
+  io.to(socketId).emit('player:death', {
+    killedBy,
+    respawnPosition: deathResult.respawnPosition,
+    droppedCargo: deathResult.droppedCargo,
+    wreckageSpawned: deathResult.wreckageContents && deathResult.wreckageContents.length > 0
+  });
+
+  // Update player state
+  player.position = deathResult.respawnPosition;
+  player.hull = player.hullMax;
+  player.shield = player.shieldMax;
+
+  return deathResult;
+}
+
 // NPC Accuracy System Configuration
 // Makes NPC weapons dodgeable by adding miss chance based on distance and target movement
 const NPC_ACCURACY = {
@@ -241,17 +305,9 @@ function updatePlayers(deltaTime) {
           type: 'acid'
         });
 
-        // Handle death from DoT
+        // Handle death from DoT with wreckage spawning
         if (result.isDead) {
-          const deathResult = combat.handleDeath(player.id);
-          io.to(socketId).emit('player:death', {
-            killedBy: 'Acid damage',
-            respawnPosition: deathResult.respawnPosition,
-            droppedCargo: deathResult.droppedCargo
-          });
-          player.position = deathResult.respawnPosition;
-          player.hull = player.hullMax;
-          player.shield = player.shieldMax;
+          handlePlayerDeathWithWreckage(player, 'Acid damage', socketId);
         }
       }
     }
@@ -360,6 +416,37 @@ function updateBases(deltaTime) {
 
   // Check for newly spawned NPCs and broadcast them
   for (const [baseId, activeBase] of npc.activeBases) {
+    // Check for pending Hauler spawn broadcasts (scavenger_yard specific)
+    if (activeBase.pendingHaulerBroadcast) {
+      const hauler = npc.getNPC(activeBase.pendingHaulerBroadcast.haulerId);
+      if (hauler && now - activeBase.pendingHaulerBroadcast.timestamp < deltaTime * 2) {
+        // Broadcast Hauler spawn event
+        broadcastNearBase(activeBase, 'scavenger:haulerSpawn', {
+          haulerId: hauler.id,
+          type: hauler.type,
+          name: hauler.name,
+          faction: hauler.faction,
+          x: hauler.position.x,
+          y: hauler.position.y,
+          rotation: hauler.rotation,
+          hull: hauler.hull,
+          hullMax: hauler.hullMax,
+          shield: hauler.shield,
+          shieldMax: hauler.shieldMax,
+          sizeMultiplier: hauler.sizeMultiplier || 1.8,
+          baseId: baseId,
+          baseX: activeBase.x,
+          baseY: activeBase.y
+        });
+
+        // Clear the pending broadcast
+        delete activeBase.pendingHaulerBroadcast;
+      } else if (now - activeBase.pendingHaulerBroadcast.timestamp >= deltaTime * 2) {
+        // Cleanup old pending broadcasts
+        delete activeBase.pendingHaulerBroadcast;
+      }
+    }
+
     for (const npcId of activeBase.spawnedNPCs) {
       const npcEntity = npc.getNPC(npcId);
       // Only broadcast NPCs that were just spawned (within last tick)
@@ -704,7 +791,7 @@ function updateNPCs(deltaTime) {
 
     // Broadcast NPC position update
     // Include name/type/faction so players who just entered range get full data
-    broadcastNearNpc(npcEntity, 'npc:update', {
+    const npcUpdateData = {
       id: npcId,
       type: npcEntity.type,
       name: npcEntity.name,
@@ -717,7 +804,14 @@ function updateNPCs(deltaTime) {
       hullMax: npcEntity.hullMax,
       shield: npcEntity.shield,
       shieldMax: npcEntity.shieldMax
-    });
+    };
+
+    // Include wreckage collection position for tractor beam animation
+    if (npcEntity.collectingWreckagePos) {
+      npcUpdateData.collectingWreckagePos = npcEntity.collectingWreckagePos;
+    }
+
+    broadcastNearNpc(npcEntity, 'npc:update', npcUpdateData);
 
     // Handle NPC actions
     if (action && action.action === 'fire') {
@@ -848,19 +942,8 @@ function updateNPCs(deltaTime) {
             });
 
             if (result.isDead) {
-              // Handle player death
-              const deathResult = combat.handleDeath(targetPlayer.id);
-
-              io.to(socketId).emit('player:death', {
-                killedBy: npcEntity.name,
-                respawnPosition: deathResult.respawnPosition,
-                droppedCargo: deathResult.droppedCargo
-              });
-
-              // Update player position
-              targetPlayer.position = deathResult.respawnPosition;
-              targetPlayer.hull = targetPlayer.hullMax;
-              targetPlayer.shield = targetPlayer.shieldMax;
+              // Handle player death with wreckage spawning
+              handlePlayerDeathWithWreckage(targetPlayer, npcEntity.name, socketId);
             }
             break;
           }
@@ -995,6 +1078,162 @@ function updateNPCs(deltaTime) {
 
       // Remove from activeNPCs (will be handled after loop to avoid modification during iteration)
       npcsToRemove.push(npcId);
+    } else if (action && action.action === 'scavenger:collected') {
+      // ============================================
+      // SCAVENGER: Collected wreckage - notify clients to remove it
+      // ============================================
+      broadcastNearNpc(npcEntity, 'wreckage:collected', {
+        wreckageId: action.wreckageId,
+        collectedBy: npcId,
+        isNPC: true
+      });
+    } else if (action && action.action === 'scavenger:haulerGrow') {
+      // ============================================
+      // SCAVENGER: Hauler grew after collecting wreckage
+      // ============================================
+      // First broadcast wreckage removal to clients
+      if (action.wreckageId) {
+        broadcastNearNpc(npcEntity, 'wreckage:collected', {
+          wreckageId: action.wreckageId,
+          collectedBy: npcId,
+          isNPC: true
+        });
+      }
+      // Then broadcast hauler growth
+      broadcastNearNpc(npcEntity, 'scavenger:haulerGrow', {
+        npcId: action.npcId,
+        wreckageCount: action.wreckageCount,
+        sizeMultiplier: action.sizeMultiplier
+      });
+    } else if (action && action.action === 'scavenger:rageClear') {
+      // ============================================
+      // SCAVENGER: Rage cleared - target escaped
+      // ============================================
+      broadcastNearNpc(npcEntity, 'scavenger:rageClear', {
+        npcId: action.npcId
+      });
+    } else if (action && action.action === 'scavenger:rage') {
+      // ============================================
+      // SCAVENGER: Rage triggered (from wreckage theft)
+      // ============================================
+      broadcastNearNpc(npcEntity, 'scavenger:rage', {
+        npcId: action.npcId,
+        targetId: action.targetId,
+        reason: action.reason,
+        rageRange: action.rageRange,
+        x: npcEntity.position.x,
+        y: npcEntity.position.y
+      });
+      logger.info(`[SCAVENGER] ${npcEntity.name} (${npcEntity.type}) enraged - reason: ${action.reason}`);
+    } else if (action && action.action === 'scavenger:transform') {
+      // ============================================
+      // SCAVENGER: Hauler → Barnacle King transformation
+      // ============================================
+      // First broadcast wreckage removal to clients (the 5th wreckage that triggered transform)
+      if (action.wreckageId) {
+        broadcastNearNpc(npcEntity, 'wreckage:collected', {
+          wreckageId: action.wreckageId,
+          collectedBy: npcId,
+          isNPC: true
+        });
+      }
+      const hauler = npc.getNPC(npcId);
+      if (hauler && hauler.type === 'scavenger_hauler') {
+        // Create Barnacle King at Hauler position
+        const kingType = npc.NPC_TYPES.scavenger_barnacle_king;
+        const kingId = `npc_barnacle_king_${Date.now()}`;
+
+        const barnacleKing = {
+          id: kingId,
+          type: 'scavenger_barnacle_king',
+          name: kingType.name,
+          faction: 'scavenger',
+          position: { x: hauler.position.x, y: hauler.position.y },
+          x: hauler.position.x,
+          y: hauler.position.y,
+          vx: 0,
+          vy: 0,
+          rotation: hauler.rotation,
+          hull: kingType.hull,
+          hullMax: kingType.hull,
+          maxHull: kingType.hull,
+          shield: kingType.shield,
+          shieldMax: kingType.shield,
+          maxShield: kingType.shield,
+          speed: kingType.speed,
+          weaponType: kingType.weaponType,
+          weaponTier: kingType.weaponTier,
+          weaponDamage: kingType.weaponDamage,
+          weaponRange: kingType.weaponRange,
+          aggroRange: kingType.aggroRange,
+          lastFireTime: 0,
+          state: 'patrol',
+          targetId: null,
+          isBoss: true,
+          damageContributors: new Map(),
+          // Inherit wreckage contents from Hauler
+          carriedWreckage: hauler.carriedWreckage || [],
+          // Inherit homeBase if Hauler had one
+          homeBaseId: hauler.homeBaseId,
+          homeBasePosition: hauler.homeBasePosition,
+          patrolRadius: hauler.patrolRadius,
+          spawnPoint: hauler.spawnPoint
+        };
+
+        // Add to active NPCs
+        npc.activeNPCs.set(kingId, barnacleKing);
+
+        // Remove Hauler from activeNPCs
+        npc.activeNPCs.delete(npcId);
+
+        // Broadcast transformation
+        broadcastNearNpc(barnacleKing, 'scavenger:barnacleKingSpawn', {
+          kingId: kingId,
+          haulerId: npcId,
+          x: barnacleKing.position.x,
+          y: barnacleKing.position.y,
+          rotation: barnacleKing.rotation,
+          hull: barnacleKing.hull,
+          hullMax: barnacleKing.hullMax,
+          wreckageCount: barnacleKing.carriedWreckage.length
+        });
+
+        logger.info(`[SCAVENGER] Hauler ${npcId} transformed into Barnacle King ${kingId} at (${Math.round(barnacleKing.x)}, ${Math.round(barnacleKing.y)})`);
+      }
+    } else if (action && action.action === 'scavenger:dumped') {
+      // ============================================
+      // SCAVENGER: Wreckage dumped at base
+      // Update scrap pile and check for Hauler spawn
+      // ============================================
+      const dumpResult = npc.handleScavengerDump(action);
+
+      if (dumpResult) {
+        // Broadcast scrap pile update
+        const base = npc.getActiveBase(action.baseId);
+        if (base) {
+          broadcastNearBase(base, 'scavenger:scrapPileUpdate', {
+            baseId: action.baseId,
+            x: base.x,
+            y: base.y,
+            scrapPile: dumpResult.scrapPile,
+            npcId: action.npcId
+          });
+
+          // If transformation started, broadcast it
+          if (dumpResult.transforming) {
+            broadcastNearBase(base, 'scavenger:haulerTransform', {
+              baseId: action.baseId,
+              x: base.x,
+              y: base.y,
+              startTime: dumpResult.transforming.startTime,
+              duration: dumpResult.transforming.duration
+            });
+
+            // Note: The actual Hauler spawn is handled by setTimeout in handleScavengerDump
+            // and will be broadcast in the next section when it's added to spawnedNPCs
+          }
+        }
+      }
     }
   }
 
@@ -1153,17 +1392,9 @@ function updateComets(deltaTime) {
                 cometY: cometState.y
               });
 
-              // Handle death from comet collision
+              // Handle death from comet collision with wreckage spawning
               if (result.isDead) {
-                const deathResult = combat.handleDeath(player.id);
-                io.to(socketId).emit('player:death', {
-                  killedBy: 'Comet impact',
-                  respawnPosition: deathResult.respawnPosition,
-                  droppedCargo: deathResult.droppedCargo
-                });
-                player.position = deathResult.respawnPosition;
-                player.hull = player.hullMax;
-                player.shield = player.shieldMax;
+                handlePlayerDeathWithWreckage(player, 'Comet impact', socketId);
               }
             }
           }
@@ -1282,12 +1513,26 @@ function playerAttackNPC(attackerId, npcId, weaponType, weaponTier, damageOverri
       // Spawn wreckage at NPC position with loot, passing damage contributors for team rewards
       wreckage = loot.spawnWreckage(npcEntity, npcEntity.position, null, npcEntity.damageContributors);
 
+      // Barnacle King: Add accumulated wreckage contents to the wreckage drop
+      if (npcEntity.type === 'scavenger_barnacle_king' && npcEntity.carriedWreckage) {
+        for (const carried of npcEntity.carriedWreckage) {
+          if (carried.contents && Array.isArray(carried.contents)) {
+            // Merge carried wreckage contents into the king's wreckage
+            wreckage.contents.push(...carried.contents);
+          }
+        }
+        logger.info(`[BARNACLE KING] Dropped ${npcEntity.carriedWreckage.length} accumulated wreckage pieces with SCRAP_SIPHON`);
+      }
+
       // Broadcast wreckage spawn
       broadcastWreckageNear(wreckage, 'wreckage:spawn', {
         id: wreckage.id,
         x: wreckage.position.x,
         y: wreckage.position.y,
+        size: wreckage.size,
+        source: wreckage.source,
         faction: wreckage.faction,
+        npcType: wreckage.npcType,
         npcName: wreckage.npcName,
         contentCount: wreckage.contents.length,
         despawnTime: wreckage.despawnTime
@@ -1395,6 +1640,19 @@ function playerAttackNPC(attackerId, npcId, weaponType, weaponTier, damageOverri
       hitShield: result.hitShield
     });
 
+    // Broadcast scavenger rage event if triggered
+    if (result.rageAction && result.rageAction.action === 'scavenger:rage') {
+      broadcastNearNpc(npcEntity, 'scavenger:rage', {
+        npcId: result.rageAction.npcId,
+        targetId: result.rageAction.targetId,
+        reason: result.rageAction.reason,
+        rageRange: result.rageAction.rageRange,
+        x: npcEntity.position.x,
+        y: npcEntity.position.y
+      });
+      logger.info(`[SCAVENGER] ${npcEntity.name} (${npcEntity.type}) enraged - targeting ${attackerId}`);
+    }
+
     // Apply linked health damage for Swarm faction
     if (npcEntity.linkedHealth && npcEntity.faction === 'swarm') {
       const linkedResults = npc.applySwarmLinkedDamage(npcEntity, totalDamage);
@@ -1441,7 +1699,10 @@ function playerAttackNPC(attackerId, npcId, weaponType, weaponTier, damageOverri
                 id: wreckage.id,
                 x: wreckage.position.x,
                 y: wreckage.position.y,
+                size: wreckage.size,
+                source: wreckage.source,
                 faction: wreckage.faction,
+                npcType: wreckage.npcType,
                 npcName: wreckage.npcName,
                 contentCount: wreckage.contents.length,
                 despawnTime: wreckage.despawnTime
@@ -1520,7 +1781,10 @@ function playerAttackBase(attackerId, baseId, weaponType, weaponTier) {
       id: wreckage.id,
       x: wreckage.position.x,
       y: wreckage.position.y,
+      size: wreckage.size,
+      source: wreckage.source,
       faction: wreckage.faction,
+      npcType: wreckage.npcType,
       npcName: wreckage.npcName,
       contentCount: wreckage.contents.length,
       despawnTime: wreckage.despawnTime
@@ -1589,6 +1853,14 @@ function getWreckage(wreckageId) {
   return loot.getWreckage(wreckageId);
 }
 
+function removeWreckage(wreckageId) {
+  return loot.removeWreckage(wreckageId);
+}
+
+function getAllNPCs() {
+  return npc.activeNPCs;
+}
+
 module.exports = {
   init,
   start,
@@ -1600,5 +1872,7 @@ module.exports = {
   cancelWreckageCollection,
   getWreckageInRange,
   getWreckage,
+  removeWreckage,
+  getAllNPCs,
   loot
 };

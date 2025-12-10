@@ -70,11 +70,12 @@ const NPC_TYPES = {
   },
 
   // === SCAVENGERS (Retreat AI, Retreat at 20%) ===
+  // Scavengers have no shields - they rely on retreat behavior and hull only
   scavenger_scrapper: {
     name: 'Scavenger Scrapper',
     faction: 'scavenger',
     hull: 40,
-    shield: 10,
+    shield: 0,
     speed: 90,
     weaponType: 'energy',
     weaponTier: 1,
@@ -88,7 +89,7 @@ const NPC_TYPES = {
     name: 'Scavenger Salvager',
     faction: 'scavenger',
     hull: 70,
-    shield: 20,
+    shield: 0,
     speed: 80,
     weaponType: 'energy',
     weaponTier: 1,
@@ -102,7 +103,7 @@ const NPC_TYPES = {
     name: 'Scavenger Collector',
     faction: 'scavenger',
     hull: 100,
-    shield: 30,
+    shield: 0,
     speed: 70,
     weaponType: 'energy',
     weaponTier: 2,
@@ -116,15 +117,32 @@ const NPC_TYPES = {
     name: 'Scavenger Hauler',
     faction: 'scavenger',
     hull: 180,
-    shield: 40,
+    shield: 0,
     speed: 50,
-    weaponType: 'energy',
-    weaponTier: 2,
-    weaponDamage: 12,
-    weaponRange: 250,
+    weaponType: 'energy',  // Uses loader_slam melee weapon (defined in AI)
+    weaponTier: 3,
+    weaponDamage: 50,  // Melee damage (40-60 range)
+    weaponRange: 35,   // Melee range
     aggroRange: 450,
     creditReward: 180,  // Tier: high (was 150) - NOT boss, they flee
-    deathEffect: 'break_apart'
+    deathEffect: 'deconstruction',
+    sizeMultiplier: 1.8  // 80% larger than base scavenger
+  },
+  scavenger_barnacle_king: {
+    name: 'Barnacle King',
+    faction: 'scavenger',
+    hull: 25000,
+    shield: 0,
+    speed: 15,
+    size: 200,
+    weaponType: 'boring_drill',
+    weaponDamage: 99999, // instant kill
+    weaponRange: 50,
+    weaponTier: 5,
+    aggroRange: 600,
+    creditReward: 5000,
+    deathEffect: 'deconstruction',
+    isBoss: true
   },
 
   // === THE SWARM (Swarm AI, Never Retreat, Linked Health) ===
@@ -1224,7 +1242,7 @@ function activateBase(base) {
   const activatedX = computedPos ? computedPos.x : base.x;
   const activatedY = computedPos ? computedPos.y : base.y;
 
-  activeBases.set(base.id, {
+  const activeBase = {
     ...base,
     // Store computed position for consistency (will be recomputed for orbital bases)
     activatedX,
@@ -1233,7 +1251,19 @@ function activateBase(base) {
     pendingRespawns: [],  // Array of { respawnAt: timestamp } for killed NPCs
     lastSpawnTime: 0,
     activated: true
-  });
+  };
+
+  // Initialize scrap pile for scavenger_yard bases
+  if (base.type === 'scavenger_yard') {
+    activeBase.scrapPile = {
+      count: 0,
+      contents: []
+    };
+    activeBase.hasHauler = false;
+    activeBase.isTransforming = false;
+  }
+
+  activeBases.set(base.id, activeBase);
 
   // Do initial spawn
   for (let i = 0; i < spawnConfig.initialSpawn; i++) {
@@ -1536,6 +1566,12 @@ function damageBase(baseId, damage, attackerId = null) {
     // Generate special loot for bases
     const loot = generateBaseLoot(base);
 
+    // Add scrap pile contents to loot for scavenger_yard bases
+    if (base.type === 'scavenger_yard' && base.scrapPile && base.scrapPile.contents.length > 0) {
+      logger.log(`[SCAVENGER] Adding ${base.scrapPile.contents.length} items from scrap pile to base loot`);
+      loot.push(...base.scrapPile.contents);
+    }
+
     // Store destruction time for respawn
     base.destroyedAt = Date.now();
     base.destroyed = true;
@@ -1568,6 +1604,161 @@ function damageBase(baseId, damage, attackerId = null) {
 function generateBaseLoot(base) {
   // Use the loot pool system with base type mapping
   return LootPools.generateLoot(base.type);
+}
+
+/**
+ * Handle scavenger dumping wreckage at base
+ * Called from engine.js when scavenger AI emits 'scavenger:dumped' action
+ * @param {Object} dumpAction - Action object from AI { action: 'scavenger:dumped', npcId, wreckageCount, contents, baseId }
+ * @returns {Object|null} Result with scrap pile update and potential Hauler spawn
+ */
+function handleScavengerDump(dumpAction) {
+  const base = activeBases.get(dumpAction.baseId);
+  if (!base || base.type !== 'scavenger_yard') {
+    return null;
+  }
+
+  // Initialize scrap pile if missing (for bases activated before this update)
+  if (!base.scrapPile) {
+    base.scrapPile = { count: 0, contents: [] };
+    base.hasHauler = false;
+    base.isTransforming = false;
+  }
+
+  // Add wreckage to scrap pile
+  const wreckageCount = dumpAction.wreckageCount || 0;
+  base.scrapPile.count += wreckageCount;
+
+  // Merge contents into pile
+  if (dumpAction.contents && Array.isArray(dumpAction.contents)) {
+    for (const wreckage of dumpAction.contents) {
+      if (wreckage.contents) {
+        base.scrapPile.contents.push(...wreckage.contents);
+      }
+    }
+  }
+
+  const result = {
+    baseId: dumpAction.baseId,
+    scrapPile: {
+      count: base.scrapPile.count,
+      totalItems: base.scrapPile.contents.length
+    },
+    haulerSpawn: null
+  };
+
+  logger.log(`[SCAVENGER] Base ${base.name} scrap pile: ${base.scrapPile.count} wreckage, ${base.scrapPile.contents.length} items`);
+
+  // Check if Hauler should spawn (3+ wreckage, no existing Hauler, not transforming)
+  if (base.scrapPile.count >= 3 && !base.hasHauler && !base.isTransforming) {
+    // Start 4-second transformation
+    base.isTransforming = true;
+    base.transformStartTime = Date.now();
+    base.transformDuration = 4000;
+
+    logger.log(`[SCAVENGER] Base ${base.name} starting Hauler transformation (4 seconds)`);
+
+    // Schedule Hauler spawn after transformation
+    setTimeout(() => {
+      const currentBase = activeBases.get(dumpAction.baseId);
+      if (currentBase && currentBase.isTransforming) {
+        const hauler = spawnHauler(dumpAction.baseId);
+        if (hauler) {
+          logger.log(`[SCAVENGER] Hauler spawned at base ${currentBase.name}: ${hauler.id}`);
+
+          // Mark the base with pending Hauler spawn broadcast
+          currentBase.pendingHaulerBroadcast = {
+            haulerId: hauler.id,
+            timestamp: Date.now()
+          };
+        }
+        currentBase.isTransforming = false;
+      }
+    }, 4000);
+
+    result.transforming = {
+      startTime: base.transformStartTime,
+      duration: base.transformDuration
+    };
+  }
+
+  return result;
+}
+
+/**
+ * Spawn a Hauler NPC at a scavenger_yard base
+ * @param {string} baseId - Base ID
+ * @returns {Object|null} Spawned Hauler NPC or null
+ */
+function spawnHauler(baseId) {
+  const base = activeBases.get(baseId);
+  if (!base || base.type !== 'scavenger_yard') {
+    return null;
+  }
+
+  // Get current computed position for orbital/binary bases
+  const currentPos = world.getObjectPosition(baseId);
+  const baseX = currentPos ? currentPos.x : base.x;
+  const baseY = currentPos ? currentPos.y : base.y;
+
+  const haulerType = NPC_TYPES.scavenger_hauler;
+  if (!haulerType) {
+    logger.error('[SCAVENGER] scavenger_hauler type not found in NPC_TYPES!');
+    return null;
+  }
+
+  const haulerId = `npc_${++npcIdCounter}`;
+
+  // Spawn at base location with small offset
+  const spawnAngle = Math.random() * Math.PI * 2;
+  const spawnDist = 50 + Math.random() * 30; // 50-80 units from base
+  const spawnX = baseX + Math.cos(spawnAngle) * spawnDist;
+  const spawnY = baseY + Math.sin(spawnAngle) * spawnDist;
+
+  const hauler = {
+    id: haulerId,
+    type: 'scavenger_hauler',
+    name: haulerType.name,
+    faction: haulerType.faction,
+    position: { x: spawnX, y: spawnY },
+    velocity: { x: 0, y: 0 },
+    rotation: Math.random() * Math.PI * 2,
+    hull: haulerType.hull,
+    hullMax: haulerType.hull,
+    shield: haulerType.shield,
+    shieldMax: haulerType.shield,
+    speed: haulerType.speed,
+    weaponType: haulerType.weaponType,
+    weaponTier: haulerType.weaponTier,
+    weaponDamage: haulerType.weaponDamage,
+    weaponRange: haulerType.weaponRange,
+    aggroRange: haulerType.aggroRange,
+    creditReward: haulerType.creditReward,
+    deathEffect: haulerType.deathEffect || 'deconstruction',
+    sizeMultiplier: haulerType.sizeMultiplier || 1.8,
+    // Link to home base
+    homeBaseId: baseId,
+    homeBasePosition: { x: baseX, y: baseY },
+    patrolRadius: (base.patrolRadius || 3) * config.SECTOR_SIZE,
+    spawnPoint: { x: spawnX, y: spawnY },
+    targetPlayer: null,
+    lastFireTime: 0,
+    lastDamageTime: 0,
+    patrolAngle: Math.random() * Math.PI * 2,
+    damageContributors: new Map(),
+    state: 'patrol',
+    // Hauler doesn't carry wreckage initially
+    carriedWreckage: []
+  };
+
+  activeNPCs.set(haulerId, hauler);
+  base.spawnedNPCs.push(haulerId);
+  base.hasHauler = true;
+
+  // Reset scrap pile count after spawning Hauler
+  base.scrapPile.count = 0;
+
+  return hauler;
 }
 
 // Mark base as destroyed and schedule respawn
@@ -1656,7 +1847,8 @@ function getBasesInRange(position, range) {
         maxHealth: base.maxHealth,
         faction: base.faction,
         type: base.type,
-        name: base.name
+        name: base.name,
+        scrapPile: base.scrapPile || null
       });
     }
   }
@@ -1794,7 +1986,8 @@ function updateNPC(npc, players, deltaTime) {
   }
 
   // Use the new AI system for faction-specific behavior
-  return ai.updateNPCAI(npc, players, activeNPCs, deltaTime);
+  // Pass getActiveBase function for scavenger AI to look up base data
+  return ai.updateNPCAI(npc, players, activeNPCs, deltaTime, getActiveBase);
 }
 
 /**
@@ -1897,6 +2090,31 @@ function damageNPC(npcId, damage, attackerId = null) {
   // Record damage time for shield recharge delay
   npc.lastDamageTime = Date.now();
 
+  // Trigger scavenger rage when damaged
+  let rageAction = null;
+  if (npc.faction === 'scavenger' && attackerId) {
+    // Find nearby allies for rage spreading
+    const nearbyAllies = [];
+    for (const [id, ally] of activeNPCs) {
+      if (id === npc.id) continue;
+      if (ally.faction !== 'scavenger') continue;
+
+      const dx = ally.position.x - npc.position.x;
+      const dy = ally.position.y - npc.position.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+
+      if (dist <= 1000) { // RAGE_SPREAD_RANGE
+        nearbyAllies.push(ally);
+      }
+    }
+
+    // Call scavenger AI's onDamaged to trigger rage
+    const scavengerStrategy = ai.getScavengerStrategy();
+    if (scavengerStrategy && scavengerStrategy.onDamaged) {
+      rageAction = scavengerStrategy.onDamaged(npc, attackerId, nearbyAllies);
+    }
+  }
+
   // Apply damage to shield first
   if (npc.shield > 0) {
     if (damage <= npc.shield) {
@@ -1930,6 +2148,15 @@ function damageNPC(npcId, damage, attackerId = null) {
       });
     }
 
+    // Reset hasHauler flag if a Hauler died
+    if (npc.type === 'scavenger_hauler' && npc.homeBaseId) {
+      const base = activeBases.get(npc.homeBaseId);
+      if (base && base.hasHauler) {
+        base.hasHauler = false;
+        logger.log(`[SCAVENGER] Hauler ${npcId} died, base ${base.name} can spawn new Hauler`);
+      }
+    }
+
     activeNPCs.delete(npcId);
 
     return {
@@ -1948,7 +2175,8 @@ function damageNPC(npcId, damage, attackerId = null) {
     destroyed: false,
     hull: npc.hull,
     shield: npc.shield,
-    hitShield: npc.shield > 0
+    hitShield: npc.shield > 0,
+    rageAction
   };
 }
 
@@ -2352,5 +2580,8 @@ module.exports = {
   attachDroneToBase,
   detachDroneFromBase,
   getAttachedDrones,
-  isAttachedDrone
+  isAttachedDrone,
+  // Scavenger scrap pile and Hauler system
+  handleScavengerDump,
+  spawnHauler
 };

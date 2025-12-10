@@ -935,6 +935,58 @@
   }
 }
 
+/* Scrap Siphon gear animations */
+.scrap-gear-main {
+  animation: gear-rotate-main 6s linear infinite;
+}
+
+.scrap-gear-left {
+  animation: gear-rotate-secondary 6s linear infinite reverse;
+}
+
+.scrap-gear-right {
+  animation: gear-rotate-secondary 6s linear infinite reverse;
+}
+
+@keyframes gear-rotate-main {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes gear-rotate-secondary {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Scrap Siphon sparkle animation */
+.scrap-sparkles .scrap-sparkle {
+  animation: scrap-sparkle-twinkle 2s ease-in-out infinite;
+}
+
+@keyframes scrap-sparkle-twinkle {
+  0%, 100% {
+    opacity: 0;
+    transform: scale(0.3);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+/* Subtle shine effect on the scrap pile */
+.scrap-siphon-icon:hover .scrap-gears {
+  filter: brightness(1.2);
+}
+
 /* Rarity badges */
 .badge-ultrarare {
   background: linear-gradient(135deg, #9900ff 0%, #6600aa 100%);

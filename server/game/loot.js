@@ -29,10 +29,19 @@ function generateLootContents(npc) {
   return contents;
 }
 
-function spawnWreckage(npc, position, providedContents = null, damageContributors = null) {
+/**
+ * Spawn wreckage at a position with optional contents
+ * @param {Object} entity - The entity that died (NPC, base, or player data)
+ * @param {Object} position - { x, y } position to spawn wreckage
+ * @param {Array|null} providedContents - Optional pre-defined loot contents
+ * @param {Map|Object|null} damageContributors - Who contributed damage for team rewards
+ * @param {Object|null} options - Additional options { source: 'npc'|'base'|'player' }
+ * @returns {Object} The spawned wreckage object
+ */
+function spawnWreckage(entity, position, providedContents = null, damageContributors = null, options = {}) {
   const wreckageId = `wreckage_${++wreckageIdCounter}`;
   // Use provided contents (e.g., from base destruction) or generate from NPC
-  const contents = providedContents || generateLootContents(npc);
+  const contents = providedContents || generateLootContents(entity);
 
   // Convert Map to plain object for storage (if provided)
   let contributors = null;
@@ -42,14 +51,19 @@ function spawnWreckage(npc, position, providedContents = null, damageContributor
     contributors = damageContributors;
   }
 
+  // Determine source type (player, npc, or base)
+  const source = options.source || (entity.type === 'base' ? 'base' : 'npc');
+
   const wreckage = {
     id: wreckageId,
     position: { x: position.x, y: position.y },
-    size: 20, // Standard wreckage size for range calculations
-    faction: npc.faction,
-    npcType: npc.type,
-    npcName: npc.name,
-    creditReward: npc.creditReward || 0, // Store credit reward for team distribution
+    size: source === 'base' ? 40 : (source === 'player' ? 25 : 20), // Vary size by source
+    source, // 'player', 'npc', or 'base' - used by Scavengers to identify wreckage
+    faction: entity.faction || null,
+    npcType: entity.type,
+    npcName: entity.name,
+    playerId: options.playerId || null, // Track player ID if player wreckage
+    creditReward: entity.creditReward || 0, // Store credit reward for team distribution
     contents,
     damageContributors: contributors, // Track who contributed damage for team rewards
     spawnTime: Date.now(),
@@ -97,7 +111,12 @@ function startCollection(wreckageId, playerId) {
 
   // Calculate total collection time based on contents
   let totalTime = 0;
-  for (const item of wreckage.contents) {
+  const contents = wreckage.contents || [];
+  for (const item of contents) {
+    if (!item || !item.type) {
+      totalTime += 1000; // Default for invalid items
+      continue;
+    }
     const lootType = config.LOOT_TYPES[item.type.toUpperCase()];
     if (lootType) {
       totalTime += lootType.collectTime;
@@ -105,9 +124,10 @@ function startCollection(wreckageId, playerId) {
       totalTime += 1000; // Default 1 second
     }
   }
-  wreckage.totalCollectionTime = totalTime;
+  // Ensure minimum collection time
+  wreckage.totalCollectionTime = Math.max(totalTime, 500);
 
-  return { success: true, totalTime };
+  return { success: true, totalTime: wreckage.totalCollectionTime };
 }
 
 function updateCollection(wreckageId, playerId, deltaTime) {
@@ -121,7 +141,7 @@ function updateCollection(wreckageId, playerId, deltaTime) {
     // Collection complete - include wreckage metadata for team distribution
     const result = {
       complete: true,
-      contents: wreckage.contents,
+      contents: wreckage.contents || [],
       creditReward: wreckage.creditReward || 0,
       damageContributors: wreckage.damageContributors || null
     };

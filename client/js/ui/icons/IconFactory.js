@@ -354,6 +354,16 @@ const IconFactory = {
       } else {
         icon = this._createFallbackRelicIcon(size);
       }
+    } else if (relicInfo.iconType === 'scrap_siphon') {
+      // Use ScrapSiphonShape for the Scrap Siphon relic
+      if (typeof ScrapSiphonShape !== 'undefined') {
+        icon = ScrapSiphonShape.create({
+          size,
+          glowIntensity: 0.7
+        });
+      } else {
+        icon = this._createFallbackRelicIcon(size);
+      }
     } else {
       // Default: use RelicShape (stone monument)
       if (typeof RelicShape !== 'undefined') {

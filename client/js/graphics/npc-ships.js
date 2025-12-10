@@ -2,7 +2,7 @@
  * NPC Ship Geometry Definitions
  * Distinct ship silhouettes for each of the 5 factions
  * Pirates: Angular, aggressive, bright red
- * Scavengers: Asymmetric, patched together, dusty tan
+ * Scavengers: Construction equipment aesthetic - yellow/brown, front-loader buckets, industrial
  * Swarm: Stealthy predators - black hulls with crimson accents, blade-like shapes, glowing red eyes
  * Void: Sleek, ethereal, purple energy
  * Rogue Miners: Industrial, bulky, orange/yellow
@@ -20,10 +20,18 @@ const NPCShipGeometry = {
       outline: '#ff6600'
     },
     scavenger: {
-      hull: '#999966',
-      accent: '#666644',
-      glow: '#99996640',
-      outline: '#cccc88'
+      // Grimy industrial junkyard aesthetic
+      hull: '#8B4513',        // Rust brown (main hull)
+      accent: '#6B4423',      // Corroded copper (secondary)
+      rust: '#A0522D',        // Rust patches
+      dirtyYellow: '#B8860B', // Faded construction yellow
+      grimySteel: '#4A4A4A',  // Dark steel gray
+      weldGlow: '#FF6B35',    // Orange weld marks
+      oilStain: '#2F2F2F',    // Dark oil stains
+      copper: '#8B5A2B',      // Dull copper pipes
+      steel: '#5A5A5A',       // Weathered steel
+      glow: '#8B451340',      // Subtle rust glow
+      outline: '#5C4033'      // Dark brown outline
     },
     swarm: {
       // Stealthy predator theme - black hull with crimson accents
@@ -56,11 +64,12 @@ const NPCShipGeometry = {
     pirate_captain: 'pirate_3',
     pirate_dreadnought: 'pirate_4',
 
-    // Scavengers - Asymmetric, patched together
+    // Scavengers - Construction equipment with front-loaders
     scavenger_scrapper: 'scavenger_1',
     scavenger_salvager: 'scavenger_2',
     scavenger_collector: 'scavenger_3',
     scavenger_hauler: 'scavenger_4',
+    scavenger_barnacle_king: 'scavenger_5',
 
     // Swarm - Organic, insectoid
     swarm_drone: 'swarm_1',
@@ -85,13 +94,15 @@ const NPCShipGeometry = {
   cachedPaths: {},
   cachedAccents: {},
 
-  // Size multiplier per variant (1-4)
+  // Size multiplier per variant (1-5)
   // Variant 4 is bosses (queens, dreadnoughts, etc) - larger for visual impact
+  // Variant 5 is special super-bosses (Barnacle King) - massive but manageable
   SIZE_SCALE: {
     1: 0.9,
     2: 1.0,
     3: 1.15,
-    4: 1.8  // Increased from 1.4 for larger boss ships
+    4: 1.8,   // Increased from 1.4 for larger boss ships
+    5: 10     // 200 units total (20 * 10 = 200)
   },
 
   init() {
@@ -149,42 +160,231 @@ const NPCShipGeometry = {
   },
 
   generateScavengerPaths(SIZE) {
-    // Scavengers: Asymmetric, cobbled together, irregular
-    // Variant 1: Scrapper - Small, lopsided
+    // GRIMY JUNKYARD AESTHETIC - Rusty, cobbled-together ships made from scrap
+    // Each ship looks built from salvaged parts with visible welds, rust, mismatched panels
+
+    // Variant 1: Scrapper - Tiny salvage rat, barely holding together
+    // Asymmetric hull with mismatched panels, exposed wiring, single sputtering engine
     this.cachedPaths['scavenger_1'] = new Path2D(
-      `M ${SIZE * 0.7} ${-SIZE * 0.1} L ${SIZE * 0.3} ${-SIZE * 0.5}
-       L ${-SIZE * 0.4} ${-SIZE * 0.3} L ${-SIZE * 0.5} ${SIZE * 0.1}
-       L ${-SIZE * 0.2} ${SIZE * 0.5} L ${SIZE * 0.4} ${SIZE * 0.3} Z`
+      // Lopsided, irregular hull shape
+      `M ${SIZE * 0.7} ${SIZE * 0.05}
+       L ${SIZE * 0.5} ${-SIZE * 0.2}
+       L ${SIZE * 0.2} ${-SIZE * 0.35}
+       L ${-SIZE * 0.15} ${-SIZE * 0.38}
+       L ${-SIZE * 0.4} ${-SIZE * 0.25}
+       L ${-SIZE * 0.55} ${-SIZE * 0.1}
+       L ${-SIZE * 0.5} ${SIZE * 0.2}
+       L ${-SIZE * 0.25} ${SIZE * 0.38}
+       L ${SIZE * 0.15} ${SIZE * 0.35}
+       L ${SIZE * 0.45} ${SIZE * 0.28} Z`
+    );
+    // Skinny bent magnetic claw arm on front
+    this.cachedAccents['scavenger_1'] = new Path2D(
+      `M ${SIZE * 0.7} ${SIZE * 0.05}
+       L ${SIZE * 0.85} ${-SIZE * 0.08}
+       L ${SIZE * 0.95} ${-SIZE * 0.15}
+       L ${SIZE * 1.05} ${-SIZE * 0.1}
+       L ${SIZE * 1.0} ${SIZE * 0.05}
+       L ${SIZE * 0.9} ${SIZE * 0.12}
+       L ${SIZE * 0.78} ${SIZE * 0.1} Z`
+    );
+    // Mismatched panel for rendering (different color patch)
+    this.cachedPaths['scavenger_1_patch'] = new Path2D(
+      `M ${SIZE * 0.1} ${-SIZE * 0.15}
+       L ${SIZE * 0.3} ${-SIZE * 0.2}
+       L ${SIZE * 0.35} ${SIZE * 0.05}
+       L ${SIZE * 0.15} ${SIZE * 0.1} Z`
     );
 
-    // Variant 2: Salvager - Boxy with protrusions
+    // Variant 2: Salvager - Converted cargo pod with scrap armor bolted on
+    // Boxy body, dual mismatched engines, grappling hooks
     this.cachedPaths['scavenger_2'] = new Path2D(
-      `M ${SIZE * 0.8} ${-SIZE * 0.15} L ${SIZE * 0.6} ${-SIZE * 0.5}
-       L ${SIZE * 0.1} ${-SIZE * 0.6} L ${-SIZE * 0.3} ${-SIZE * 0.4}
-       L ${-SIZE * 0.6} ${-SIZE * 0.2} L ${-SIZE * 0.5} ${SIZE * 0.3}
-       L ${-SIZE * 0.1} ${SIZE * 0.5} L ${SIZE * 0.5} ${SIZE * 0.4}
-       L ${SIZE * 0.7} ${SIZE * 0.15} Z`
+      // Boxy rectangular cargo body
+      `M ${SIZE * 0.6} ${-SIZE * 0.15}
+       L ${SIZE * 0.65} ${-SIZE * 0.35}
+       L ${SIZE * 0.3} ${-SIZE * 0.45}
+       L ${-SIZE * 0.2} ${-SIZE * 0.48}
+       L ${-SIZE * 0.55} ${-SIZE * 0.35}
+       L ${-SIZE * 0.6} ${-SIZE * 0.1}
+       L ${-SIZE * 0.6} ${SIZE * 0.1}
+       L ${-SIZE * 0.55} ${SIZE * 0.35}
+       L ${-SIZE * 0.2} ${SIZE * 0.48}
+       L ${SIZE * 0.3} ${SIZE * 0.45}
+       L ${SIZE * 0.65} ${SIZE * 0.35}
+       L ${SIZE * 0.6} ${SIZE * 0.15} Z`
+    );
+    // Grappling hook arms (bent, industrial) and dual exhausts
+    this.cachedAccents['scavenger_2'] = new Path2D(
+      // Front grappling hooks
+      `M ${SIZE * 0.6} ${-SIZE * 0.15}
+       L ${SIZE * 0.8} ${-SIZE * 0.25}
+       L ${SIZE * 0.95} ${-SIZE * 0.2}
+       L ${SIZE * 0.9} ${-SIZE * 0.1}
+       M ${SIZE * 0.6} ${SIZE * 0.15}
+       L ${SIZE * 0.8} ${SIZE * 0.25}
+       L ${SIZE * 0.95} ${SIZE * 0.2}
+       L ${SIZE * 0.9} ${SIZE * 0.1}
+       M ${-SIZE * 0.6} ${-SIZE * 0.25}
+       L ${-SIZE * 0.75} ${-SIZE * 0.3}
+       L ${-SIZE * 0.72} ${-SIZE * 0.15}
+       M ${-SIZE * 0.6} ${SIZE * 0.25}
+       L ${-SIZE * 0.75} ${SIZE * 0.3}
+       L ${-SIZE * 0.72} ${SIZE * 0.15}`
+    );
+    // Bolted armor plates (irregular shapes)
+    this.cachedPaths['scavenger_2_armor'] = new Path2D(
+      `M ${SIZE * 0.0} ${-SIZE * 0.45}
+       L ${SIZE * 0.15} ${-SIZE * 0.52}
+       L ${SIZE * 0.25} ${-SIZE * 0.48}
+       L ${SIZE * 0.1} ${-SIZE * 0.4} Z
+       M ${-SIZE * 0.35} ${-SIZE * 0.4}
+       L ${-SIZE * 0.45} ${-SIZE * 0.45}
+       L ${-SIZE * 0.5} ${-SIZE * 0.35}
+       L ${-SIZE * 0.38} ${-SIZE * 0.32} Z`
     );
 
-    // Variant 3: Collector - Wide, cargo-focused
+    // Variant 3: Collector - Junkyard whale with wide intake maw
+    // Wide body, huge front opening with grinder teeth, storage tanks
     this.cachedPaths['scavenger_3'] = new Path2D(
-      `M ${SIZE * 0.9} 0 L ${SIZE * 0.5} ${-SIZE * 0.6}
-       L ${-SIZE * 0.2} ${-SIZE * 0.7} L ${-SIZE * 0.6} ${-SIZE * 0.4}
-       L ${-SIZE * 0.7} 0 L ${-SIZE * 0.6} ${SIZE * 0.4}
-       L ${-SIZE * 0.2} ${SIZE * 0.7} L ${SIZE * 0.5} ${SIZE * 0.6} Z`
+      // Wide whale-like body
+      `M ${SIZE * 0.5} ${-SIZE * 0.2}
+       L ${SIZE * 0.6} ${-SIZE * 0.45}
+       L ${SIZE * 0.3} ${-SIZE * 0.6}
+       L ${-SIZE * 0.1} ${-SIZE * 0.65}
+       L ${-SIZE * 0.5} ${-SIZE * 0.55}
+       L ${-SIZE * 0.7} ${-SIZE * 0.3}
+       L ${-SIZE * 0.75} 0
+       L ${-SIZE * 0.7} ${SIZE * 0.3}
+       L ${-SIZE * 0.5} ${SIZE * 0.55}
+       L ${-SIZE * 0.1} ${SIZE * 0.65}
+       L ${SIZE * 0.3} ${SIZE * 0.6}
+       L ${SIZE * 0.6} ${SIZE * 0.45}
+       L ${SIZE * 0.5} ${SIZE * 0.2} Z`
     );
+    // Intake maw with grinder teeth
     this.cachedAccents['scavenger_3'] = new Path2D(
-      `M ${SIZE * 0.3} 0 L ${0} ${-SIZE * 0.25} L ${-SIZE * 0.2} 0 L ${0} ${SIZE * 0.25} Z`
+      // Maw opening
+      `M ${SIZE * 0.5} ${-SIZE * 0.2}
+       L ${SIZE * 0.75} ${-SIZE * 0.35}
+       L ${SIZE * 0.9} ${-SIZE * 0.25}
+       L ${SIZE * 0.95} 0
+       L ${SIZE * 0.9} ${SIZE * 0.25}
+       L ${SIZE * 0.75} ${SIZE * 0.35}
+       L ${SIZE * 0.5} ${SIZE * 0.2}
+       L ${SIZE * 0.55} 0 Z`
     );
+    // Grinder teeth inside maw
+    this.cachedPaths['scavenger_3_teeth'] = new Path2D(
+      `M ${SIZE * 0.6} ${-SIZE * 0.15} L ${SIZE * 0.7} ${-SIZE * 0.08} L ${SIZE * 0.62} 0
+       M ${SIZE * 0.65} ${-SIZE * 0.05} L ${SIZE * 0.75} 0 L ${SIZE * 0.65} ${SIZE * 0.05}
+       M ${SIZE * 0.6} ${SIZE * 0.15} L ${SIZE * 0.7} ${SIZE * 0.08} L ${SIZE * 0.62} 0`
+    );
+    // Side storage tanks (rusty cylinders)
+    this.cachedPaths['scavenger_3_tanks'] = [
+      { x: -SIZE * 0.3, y: -SIZE * 0.5, w: SIZE * 0.25, h: SIZE * 0.12 },
+      { x: -SIZE * 0.3, y: SIZE * 0.38, w: SIZE * 0.25, h: SIZE * 0.12 }
+    ];
 
-    // Variant 4: Hauler - Massive, industrial
+    // Variant 4: Hauler - Scrap titan, massive industrial monster
+    // Enormous cargo bay, crane arm, tracked undercarriage, smoke stacks
     this.cachedPaths['scavenger_4'] = new Path2D(
-      `M ${SIZE * 1.0} ${-SIZE * 0.1} L ${SIZE * 0.7} ${-SIZE * 0.5}
-       L ${SIZE * 0.2} ${-SIZE * 0.8} L ${-SIZE * 0.3} ${-SIZE * 0.7}
-       L ${-SIZE * 0.7} ${-SIZE * 0.5} L ${-SIZE * 0.8} 0
-       L ${-SIZE * 0.7} ${SIZE * 0.5} L ${-SIZE * 0.3} ${SIZE * 0.7}
-       L ${SIZE * 0.2} ${SIZE * 0.8} L ${SIZE * 0.7} ${SIZE * 0.5}
-       L ${SIZE * 1.0} ${SIZE * 0.1} Z`
+      // Massive industrial body
+      `M ${SIZE * 0.7} 0
+       L ${SIZE * 0.5} ${-SIZE * 0.4}
+       L ${SIZE * 0.2} ${-SIZE * 0.65}
+       L ${-SIZE * 0.3} ${-SIZE * 0.7}
+       L ${-SIZE * 0.6} ${-SIZE * 0.55}
+       L ${-SIZE * 0.8} ${-SIZE * 0.3}
+       L ${-SIZE * 0.85} 0
+       L ${-SIZE * 0.8} ${SIZE * 0.3}
+       L ${-SIZE * 0.6} ${SIZE * 0.55}
+       L ${-SIZE * 0.3} ${SIZE * 0.7}
+       L ${SIZE * 0.2} ${SIZE * 0.65}
+       L ${SIZE * 0.5} ${SIZE * 0.4} Z`
+    );
+    // Crane arm with grabber claw
+    this.cachedAccents['scavenger_4'] = new Path2D(
+      // Crane arm extending forward
+      `M ${SIZE * 0.5} ${-SIZE * 0.15}
+       L ${SIZE * 0.8} ${-SIZE * 0.2}
+       L ${SIZE * 1.1} ${-SIZE * 0.15}
+       L ${SIZE * 1.25} ${-SIZE * 0.25}
+       L ${SIZE * 1.35} ${-SIZE * 0.15}
+       L ${SIZE * 1.3} 0
+       L ${SIZE * 1.35} ${SIZE * 0.15}
+       L ${SIZE * 1.25} ${SIZE * 0.25}
+       L ${SIZE * 1.1} ${SIZE * 0.15}
+       L ${SIZE * 0.8} ${SIZE * 0.2}
+       L ${SIZE * 0.5} ${SIZE * 0.15} Z`
+    );
+    // Cargo containers (multiple welded together)
+    this.cachedPaths['scavenger_4_cargo'] = new Path2D(
+      `M ${-SIZE * 0.1} ${-SIZE * 0.5}
+       L ${SIZE * 0.15} ${-SIZE * 0.55}
+       L ${SIZE * 0.2} ${-SIZE * 0.35}
+       L ${-SIZE * 0.05} ${-SIZE * 0.3} Z
+       M ${-SIZE * 0.4} ${-SIZE * 0.45}
+       L ${-SIZE * 0.2} ${-SIZE * 0.5}
+       L ${-SIZE * 0.15} ${-SIZE * 0.35}
+       L ${-SIZE * 0.35} ${-SIZE * 0.3} Z`
+    );
+    // Smoke stacks (twin)
+    this.cachedPaths['scavenger_4_stacks'] = [
+      { x: -SIZE * 0.5, y: -SIZE * 0.45 },
+      { x: -SIZE * 0.5, y: SIZE * 0.45 }
+    ];
+
+    // Variant 5: Barnacle King - Junkyard leviathan, nightmare of fused wreckage
+    // Central core under layers of salvaged hulls, boring drill, multiple smoke stacks
+    this.cachedPaths['scavenger_5'] = new Path2D(
+      // Massive chaotic body shape
+      `M ${SIZE * 1.0} 0
+       L ${SIZE * 0.8} ${-SIZE * 0.4}
+       L ${SIZE * 0.4} ${-SIZE * 0.7}
+       L ${-SIZE * 0.1} ${-SIZE * 0.85}
+       L ${-SIZE * 0.5} ${-SIZE * 0.8}
+       L ${-SIZE * 0.8} ${-SIZE * 0.5}
+       L ${-SIZE * 0.95} ${-SIZE * 0.2}
+       L ${-SIZE * 0.95} ${SIZE * 0.2}
+       L ${-SIZE * 0.8} ${SIZE * 0.5}
+       L ${-SIZE * 0.5} ${SIZE * 0.8}
+       L ${-SIZE * 0.1} ${SIZE * 0.85}
+       L ${SIZE * 0.4} ${SIZE * 0.7}
+       L ${SIZE * 0.8} ${SIZE * 0.4} Z`
+    );
+    // Boring drill assembly (massive spiral drill)
+    this.cachedAccents['scavenger_5'] = new Path2D(
+      `M ${SIZE * 1.0} ${-SIZE * 0.2}
+       L ${SIZE * 1.3} ${-SIZE * 0.3}
+       L ${SIZE * 1.5} ${-SIZE * 0.2}
+       L ${SIZE * 1.6} 0
+       L ${SIZE * 1.5} ${SIZE * 0.2}
+       L ${SIZE * 1.3} ${SIZE * 0.3}
+       L ${SIZE * 1.0} ${SIZE * 0.2}
+       L ${SIZE * 1.05} 0 Z`
+    );
+    // Multiple smoke stacks (3-4 constantly emitting)
+    this.cachedPaths['scavenger_5_stacks'] = [
+      { x: -SIZE * 0.6, y: -SIZE * 0.55 },
+      { x: -SIZE * 0.7, y: -SIZE * 0.3 },
+      { x: -SIZE * 0.7, y: SIZE * 0.3 },
+      { x: -SIZE * 0.6, y: SIZE * 0.55 }
+    ];
+    // Welded-on ship parts from different factions (debris layer)
+    this.cachedPaths['scavenger_5_debris'] = new Path2D(
+      // Random ship hull fragments welded on
+      `M ${SIZE * 0.2} ${-SIZE * 0.65}
+       L ${SIZE * 0.35} ${-SIZE * 0.7}
+       L ${SIZE * 0.4} ${-SIZE * 0.55}
+       L ${SIZE * 0.25} ${-SIZE * 0.5} Z
+       M ${-SIZE * 0.3} ${-SIZE * 0.7}
+       L ${-SIZE * 0.15} ${-SIZE * 0.75}
+       L ${-SIZE * 0.1} ${-SIZE * 0.6}
+       L ${-SIZE * 0.25} ${-SIZE * 0.55} Z
+       M ${SIZE * 0.5} ${-SIZE * 0.5}
+       L ${SIZE * 0.65} ${-SIZE * 0.45}
+       L ${SIZE * 0.6} ${-SIZE * 0.3}
+       L ${SIZE * 0.45} ${-SIZE * 0.35} Z`
     );
   },
 
@@ -392,11 +592,17 @@ const NPCShipGeometry = {
   /**
    * Draw an NPC ship with faction-specific geometry
    */
-  draw(ctx, position, rotation, npcType, faction, screenPos, time) {
+  draw(ctx, position, rotation, npcType, faction, screenPos, time, npc) {
     // Use special spider visuals for swarm queen
     if (npcType === 'swarm_queen' && typeof QueenVisuals !== 'undefined') {
       // Pass world position for eye tracking
       QueenVisuals.draw(ctx, screenPos.x, screenPos.y, rotation, time || Date.now(), null, position);
+      return;
+    }
+
+    // Use special rendering for Barnacle King
+    if (npcType === 'scavenger_barnacle_king') {
+      this.drawBarnacleKing(ctx, screenPos, rotation, time || Date.now(), npc);
       return;
     }
 
@@ -466,6 +672,527 @@ const NPCShipGeometry = {
     if (actualFaction === 'swarm') {
       this.drawSwarmEffects(ctx, variant, variantNum, colors, time);
     }
+
+    // Special Scavenger rendering: grimy junkyard effects
+    if (actualFaction === 'scavenger') {
+      this.drawScavengerEffects(ctx, variant, variantNum, colors, time, npc);
+    }
+
+    ctx.restore();
+
+    // Draw rage indicators AFTER restore (in screen space) for all scavengers
+    if (actualFaction === 'scavenger' && npc && npc.state === 'enraged') {
+      const effectSize = this.SIZE * scale;
+      this.drawScavengerRageEffects(ctx, screenPos, effectSize, time);
+    }
+  },
+
+  /**
+   * Draw grimy junkyard effects for scavenger ships
+   */
+  drawScavengerEffects(ctx, variant, variantNum, colors, time, npc) {
+    const SIZE = this.SIZE;
+
+    // Draw mismatched panels (different color patches)
+    if (variant === 'scavenger_1' && this.cachedPaths['scavenger_1_patch']) {
+      ctx.fillStyle = colors.dirtyYellow;
+      ctx.fill(this.cachedPaths['scavenger_1_patch']);
+    }
+
+    // Draw armor plates for salvager
+    if (variant === 'scavenger_2' && this.cachedPaths['scavenger_2_armor']) {
+      ctx.fillStyle = colors.grimySteel;
+      ctx.fill(this.cachedPaths['scavenger_2_armor']);
+      ctx.strokeStyle = colors.weldGlow;
+      ctx.lineWidth = 0.5;
+      ctx.stroke(this.cachedPaths['scavenger_2_armor']);
+    }
+
+    // Draw grinder teeth and tanks for collector
+    if (variant === 'scavenger_3') {
+      // Grinder teeth
+      if (this.cachedPaths['scavenger_3_teeth']) {
+        ctx.strokeStyle = '#888888';
+        ctx.lineWidth = 1.5;
+        ctx.stroke(this.cachedPaths['scavenger_3_teeth']);
+      }
+      // Storage tanks
+      const tanks = this.cachedPaths['scavenger_3_tanks'];
+      if (tanks) {
+        tanks.forEach(tank => {
+          // Rusty tank
+          ctx.fillStyle = colors.rust;
+          ctx.fillRect(tank.x, tank.y, tank.w, tank.h);
+          ctx.strokeStyle = colors.accent;
+          ctx.lineWidth = 0.5;
+          ctx.strokeRect(tank.x, tank.y, tank.w, tank.h);
+        });
+      }
+    }
+
+    // Draw cargo containers for hauler
+    if (variant === 'scavenger_4') {
+      if (this.cachedPaths['scavenger_4_cargo']) {
+        ctx.fillStyle = colors.dirtyYellow;
+        ctx.fill(this.cachedPaths['scavenger_4_cargo']);
+        ctx.strokeStyle = colors.weldGlow;
+        ctx.lineWidth = 0.8;
+        ctx.stroke(this.cachedPaths['scavenger_4_cargo']);
+      }
+      // Draw smoke stacks
+      const stacks = this.cachedPaths['scavenger_4_stacks'];
+      if (stacks) {
+        stacks.forEach(stack => {
+          ctx.fillStyle = colors.grimySteel;
+          ctx.fillRect(stack.x - SIZE * 0.04, stack.y - SIZE * 0.1, SIZE * 0.08, SIZE * 0.2);
+          ctx.strokeStyle = colors.oilStain;
+          ctx.lineWidth = 1;
+          ctx.strokeRect(stack.x - SIZE * 0.04, stack.y - SIZE * 0.1, SIZE * 0.08, SIZE * 0.2);
+        });
+      }
+    }
+
+    // Add rust patches to all scavengers
+    this.drawRustPatches(ctx, SIZE, variantNum, colors);
+
+    // Add weld lines
+    this.drawWeldLines(ctx, SIZE, variantNum, colors);
+
+    // Add rivets
+    this.drawRivets(ctx, SIZE, variantNum, colors);
+  },
+
+  /**
+   * Draw rust patches on scavenger ships
+   */
+  drawRustPatches(ctx, SIZE, variantNum, colors) {
+    const patchCount = variantNum + 1;
+    ctx.fillStyle = colors.rust;
+
+    for (let i = 0; i < patchCount; i++) {
+      const angle = (i / patchCount) * Math.PI * 2 + 0.5;
+      const dist = SIZE * (0.15 + i * 0.08);
+      const x = Math.cos(angle) * dist;
+      const y = Math.sin(angle) * dist;
+      const patchSize = SIZE * (0.08 + Math.random() * 0.04);
+
+      ctx.beginPath();
+      ctx.ellipse(x, y, patchSize, patchSize * 0.6, angle, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  },
+
+  /**
+   * Draw weld lines on scavenger ships (orange glow lines along seams)
+   */
+  drawWeldLines(ctx, SIZE, variantNum, colors) {
+    ctx.strokeStyle = colors.weldGlow;
+    ctx.lineWidth = 0.8;
+    ctx.globalAlpha = 0.7;
+
+    // Horizontal weld lines
+    ctx.beginPath();
+    ctx.moveTo(-SIZE * 0.3, -SIZE * 0.15);
+    ctx.lineTo(SIZE * 0.2, -SIZE * 0.15);
+    ctx.moveTo(-SIZE * 0.25, SIZE * 0.2);
+    ctx.lineTo(SIZE * 0.15, SIZE * 0.2);
+    ctx.stroke();
+
+    // Vertical weld line
+    if (variantNum >= 2) {
+      ctx.beginPath();
+      ctx.moveTo(SIZE * 0.1, -SIZE * 0.25);
+      ctx.lineTo(SIZE * 0.1, SIZE * 0.25);
+      ctx.stroke();
+    }
+
+    ctx.globalAlpha = 1;
+  },
+
+  /**
+   * Draw rivets on scavenger ships
+   */
+  drawRivets(ctx, SIZE, variantNum, colors) {
+    const rivetCount = 4 + variantNum * 2;
+    ctx.fillStyle = '#333333';
+
+    for (let i = 0; i < rivetCount; i++) {
+      const angle = (i / rivetCount) * Math.PI * 2;
+      const dist = SIZE * 0.25;
+      const x = Math.cos(angle) * dist;
+      const y = Math.sin(angle) * dist;
+
+      ctx.beginPath();
+      ctx.arc(x, y, SIZE * 0.02, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  },
+
+  /**
+   * Draw rage visual effects for ALL scavenger ships (not just Barnacle King)
+   * Called in screen space (after ctx.restore)
+   */
+  drawScavengerRageEffects(ctx, screenPos, SIZE, time) {
+    const pulsePhase = (Math.sin(time * 0.008) + 1) / 2;
+
+    // Red warning glow around ship
+    ctx.save();
+    const glowRadius = SIZE * 1.5;
+    const glowGradient = ctx.createRadialGradient(
+      screenPos.x, screenPos.y, SIZE * 0.3,
+      screenPos.x, screenPos.y, glowRadius
+    );
+    glowGradient.addColorStop(0, `rgba(255, 50, 0, ${0.3 + pulsePhase * 0.2})`);
+    glowGradient.addColorStop(0.5, `rgba(255, 0, 0, ${0.15 + pulsePhase * 0.1})`);
+    glowGradient.addColorStop(1, 'transparent');
+
+    ctx.fillStyle = glowGradient;
+    ctx.beginPath();
+    ctx.arc(screenPos.x, screenPos.y, glowRadius, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Rotating red warning beacon on top
+    const beaconY = screenPos.y - SIZE * 0.8;
+    const beaconSize = SIZE * 0.15;
+    const rotationAngle = time * 0.005;
+
+    // Beacon sweep
+    ctx.globalAlpha = 0.5 + pulsePhase * 0.3;
+    ctx.fillStyle = '#ff0000';
+    ctx.beginPath();
+    ctx.arc(screenPos.x, beaconY, beaconSize, rotationAngle, rotationAngle + Math.PI * 0.5);
+    ctx.lineTo(screenPos.x, beaconY);
+    ctx.fill();
+
+    // Beacon core
+    ctx.globalAlpha = 0.8 + pulsePhase * 0.2;
+    const beaconGradient = ctx.createRadialGradient(
+      screenPos.x, beaconY, 0,
+      screenPos.x, beaconY, beaconSize * 0.8
+    );
+    beaconGradient.addColorStop(0, '#ffffff');
+    beaconGradient.addColorStop(0.3, '#ff0000');
+    beaconGradient.addColorStop(1, '#880000');
+    ctx.fillStyle = beaconGradient;
+    ctx.beginPath();
+    ctx.arc(screenPos.x, beaconY, beaconSize * 0.5, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Steam particles venting from sides
+    ctx.globalAlpha = 0.4;
+    ctx.fillStyle = '#cccccc';
+    for (let i = 0; i < 3; i++) {
+      const steamOffset = ((time * 0.003 + i * 100) % 30);
+      const steamX = screenPos.x + (i % 2 === 0 ? -1 : 1) * SIZE * 0.6;
+      const steamY = screenPos.y - steamOffset;
+      const steamSize = SIZE * 0.08 * (1 - steamOffset / 30);
+
+      ctx.beginPath();
+      ctx.arc(steamX, steamY, steamSize, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    ctx.restore();
+  },
+
+  /**
+   * Draw the Barnacle King - junkyard leviathan, nightmare of fused wreckage
+   */
+  drawBarnacleKing(ctx, screenPos, rotation, time, npc) {
+    const SIZE = this.SIZE * 10; // 200 units total (20 * 10)
+    const colors = this.FACTION_COLORS.scavenger;
+    const isEnraged = npc && npc.state === 'enraged';
+
+    // Determine if moving (for drill spin and smoke)
+    let isMoving = false;
+    if (npc && npc.targetPosition && npc.position) {
+      const dx = npc.targetPosition.x - npc.position.x;
+      const dy = npc.targetPosition.y - npc.position.y;
+      isMoving = Math.sqrt(dx * dx + dy * dy) > 2;
+    }
+
+    ctx.save();
+    ctx.translate(screenPos.x, screenPos.y);
+    ctx.rotate(rotation);
+
+    // Outer glow (more intense when enraged, rust-colored normally)
+    const glowRadius = SIZE * 0.7;
+    const gradient = ctx.createRadialGradient(0, 0, SIZE * 0.2, 0, 0, glowRadius);
+    gradient.addColorStop(0, isEnraged ? '#ff220050' : colors.glow);
+    gradient.addColorStop(1, 'transparent');
+    ctx.globalAlpha = isEnraged ? 0.8 : 0.4;
+    ctx.fillStyle = gradient;
+    ctx.beginPath();
+    ctx.arc(0, 0, glowRadius, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.globalAlpha = 1;
+
+    // Main body (chaotic junkyard hull)
+    const bodyPath = this.cachedPaths['scavenger_5'];
+    ctx.fillStyle = colors.hull;
+    ctx.fill(bodyPath);
+    ctx.strokeStyle = colors.outline;
+    ctx.lineWidth = 2.5;
+    ctx.stroke(bodyPath);
+
+    // Welded-on ship fragments from other factions (debris layer)
+    const debrisPath = this.cachedPaths['scavenger_5_debris'];
+    if (debrisPath) {
+      // Draw each fragment in slightly different colors
+      ctx.fillStyle = colors.dirtyYellow;
+      ctx.fill(debrisPath);
+      ctx.strokeStyle = colors.weldGlow;
+      ctx.lineWidth = 1;
+      ctx.stroke(debrisPath);
+    }
+
+    // Massive rust patches covering hull
+    this.drawBarnacleKingRust(ctx, SIZE, colors, time);
+
+    // Steel armor panels
+    ctx.fillStyle = colors.grimySteel;
+    ctx.fillRect(-SIZE * 0.5, -SIZE * 0.35, SIZE * 0.25, SIZE * 0.7);
+    ctx.fillRect(-SIZE * 0.15, -SIZE * 0.45, SIZE * 0.35, SIZE * 0.9);
+
+    // Weld seams (orange glow lines)
+    ctx.strokeStyle = colors.weldGlow;
+    ctx.lineWidth = 1.5;
+    ctx.globalAlpha = 0.8;
+    ctx.beginPath();
+    ctx.moveTo(-SIZE * 0.5, -SIZE * 0.35);
+    ctx.lineTo(-SIZE * 0.5, SIZE * 0.35);
+    ctx.moveTo(-SIZE * 0.15, -SIZE * 0.45);
+    ctx.lineTo(-SIZE * 0.15, SIZE * 0.45);
+    ctx.moveTo(SIZE * 0.2, -SIZE * 0.45);
+    ctx.lineTo(SIZE * 0.2, SIZE * 0.45);
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+
+    // Copper/rusty piping network
+    ctx.strokeStyle = colors.copper;
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(-SIZE * 0.6, -SIZE * 0.25);
+    ctx.lineTo(SIZE * 0.25, -SIZE * 0.25);
+    ctx.moveTo(-SIZE * 0.6, SIZE * 0.25);
+    ctx.lineTo(SIZE * 0.25, SIZE * 0.25);
+    ctx.moveTo(-SIZE * 0.4, -SIZE * 0.4);
+    ctx.lineTo(-SIZE * 0.4, SIZE * 0.4);
+    ctx.stroke();
+
+    // Boring drill on front (spins when moving or enraged)
+    const drillPath = this.cachedAccents['scavenger_5'];
+    const drillSpin = (isMoving || isEnraged) ? time * 0.008 : 0;
+    ctx.save();
+    ctx.translate(SIZE * 0.7, 0);
+    ctx.rotate(drillSpin);
+
+    // Drill body
+    ctx.fillStyle = colors.grimySteel;
+    ctx.fill(drillPath);
+    ctx.strokeStyle = colors.accent;
+    ctx.lineWidth = 2;
+    ctx.stroke(drillPath);
+
+    // Spiral grooves on drill
+    ctx.strokeStyle = colors.oilStain;
+    ctx.lineWidth = 2;
+    for (let i = 0; i < 4; i++) {
+      const spiralAngle = (i / 4) * Math.PI * 2;
+      ctx.beginPath();
+      ctx.moveTo(Math.cos(spiralAngle) * SIZE * 0.08, Math.sin(spiralAngle) * SIZE * 0.08);
+      ctx.lineTo(Math.cos(spiralAngle + 0.5) * SIZE * 0.2, Math.sin(spiralAngle + 0.5) * SIZE * 0.2);
+      ctx.stroke();
+    }
+
+    // Drill teeth (sharper, industrial)
+    for (let i = 0; i < 8; i++) {
+      const angle = (i / 8) * Math.PI * 2;
+      const x = Math.cos(angle) * SIZE * 0.15;
+      const y = Math.sin(angle) * SIZE * 0.15;
+      ctx.fillStyle = '#aaaaaa';
+      ctx.beginPath();
+      ctx.moveTo(x, y);
+      ctx.lineTo(x + Math.cos(angle) * SIZE * 0.1, y + Math.sin(angle) * SIZE * 0.1);
+      ctx.lineTo(x + Math.cos(angle + 0.15) * SIZE * 0.07, y + Math.sin(angle + 0.15) * SIZE * 0.07);
+      ctx.closePath();
+      ctx.fill();
+    }
+
+    // Heat glow from drill center (when active)
+    if (isMoving || isEnraged) {
+      const heatGlow = ctx.createRadialGradient(0, 0, 0, 0, 0, SIZE * 0.1);
+      heatGlow.addColorStop(0, isEnraged ? '#ff4400' : '#ff660080');
+      heatGlow.addColorStop(1, 'transparent');
+      ctx.fillStyle = heatGlow;
+      ctx.beginPath();
+      ctx.arc(0, 0, SIZE * 0.1, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
+
+    // Tracked wheels (treads)
+    this.drawTracks(ctx, SIZE, colors, time, npc, isMoving);
+
+    // Multiple smoke stacks (4 total)
+    const stacks = this.cachedPaths['scavenger_5_stacks'];
+    if (stacks) {
+      stacks.forEach((stack, idx) => {
+        // Stack base
+        ctx.fillStyle = colors.grimySteel;
+        ctx.fillRect(stack.x - SIZE * 0.025, stack.y - SIZE * 0.06, SIZE * 0.05, SIZE * 0.12);
+        ctx.strokeStyle = colors.oilStain;
+        ctx.lineWidth = 1;
+        ctx.strokeRect(stack.x - SIZE * 0.025, stack.y - SIZE * 0.06, SIZE * 0.05, SIZE * 0.12);
+
+        // Rust on stack top
+        ctx.fillStyle = colors.rust;
+        ctx.fillRect(stack.x - SIZE * 0.03, stack.y - SIZE * 0.07, SIZE * 0.06, SIZE * 0.02);
+      });
+    }
+
+    // Faded warning stripes (peeling, grimy)
+    ctx.strokeStyle = '#00000080';
+    ctx.lineWidth = 1.5;
+    for (let i = 0; i < 4; i++) {
+      const x = -SIZE * 0.25 + i * SIZE * 0.12;
+      ctx.beginPath();
+      ctx.moveTo(x, -SIZE * 0.5);
+      ctx.lineTo(x + SIZE * 0.06, -SIZE * 0.4);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(x, SIZE * 0.5);
+      ctx.lineTo(x + SIZE * 0.06, SIZE * 0.4);
+      ctx.stroke();
+    }
+
+    // Chains and cables hanging (decorative)
+    ctx.strokeStyle = '#555555';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    // Chain 1
+    ctx.moveTo(-SIZE * 0.3, -SIZE * 0.6);
+    ctx.quadraticCurveTo(-SIZE * 0.35, -SIZE * 0.7, -SIZE * 0.25, -SIZE * 0.75);
+    // Chain 2
+    ctx.moveTo(SIZE * 0.1, -SIZE * 0.65);
+    ctx.quadraticCurveTo(SIZE * 0.05, -SIZE * 0.75, SIZE * 0.15, -SIZE * 0.8);
+    ctx.stroke();
+
+    // Rivets around hull
+    ctx.fillStyle = '#333333';
+    for (let i = 0; i < 12; i++) {
+      const angle = (i / 12) * Math.PI * 2;
+      const dist = SIZE * 0.5;
+      const x = Math.cos(angle) * dist;
+      const y = Math.sin(angle) * dist;
+      ctx.beginPath();
+      ctx.arc(x, y, SIZE * 0.015, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    ctx.restore();
+
+    // Draw rage indicators if enraged (use unified rage effect system)
+    if (isEnraged) {
+      this.drawScavengerRageEffects(ctx, screenPos, SIZE, time);
+    }
+  },
+
+  /**
+   * Draw massive rust patches for Barnacle King
+   */
+  drawBarnacleKingRust(ctx, SIZE, colors, time) {
+    ctx.fillStyle = colors.rust;
+
+    // Large rust patches at strategic locations
+    const rustSpots = [
+      { x: -SIZE * 0.3, y: -SIZE * 0.5, r: SIZE * 0.12 },
+      { x: SIZE * 0.2, y: -SIZE * 0.45, r: SIZE * 0.1 },
+      { x: -SIZE * 0.5, y: SIZE * 0.2, r: SIZE * 0.15 },
+      { x: SIZE * 0.1, y: SIZE * 0.5, r: SIZE * 0.11 },
+      { x: -SIZE * 0.1, y: -SIZE * 0.3, r: SIZE * 0.08 },
+      { x: SIZE * 0.35, y: SIZE * 0.25, r: SIZE * 0.09 },
+    ];
+
+    rustSpots.forEach(spot => {
+      ctx.beginPath();
+      ctx.ellipse(spot.x, spot.y, spot.r, spot.r * 0.7, Math.PI * 0.2, 0, Math.PI * 2);
+      ctx.fill();
+    });
+  },
+
+  /**
+   * Draw tracked wheels/treads for Barnacle King
+   */
+  drawTracks(ctx, SIZE, colors, time, npc, isMoving) {
+    const trackY = SIZE * 0.5;
+    const trackLength = SIZE * 1.5;
+    const trackHeight = SIZE * 0.12;
+    const moveOffset = isMoving ? (time * 0.003) % (SIZE * 0.15) : 0;
+    const segmentWidth = SIZE * 0.12;
+    const segmentGap = SIZE * 0.15;
+
+    [-trackY, trackY].forEach(y => {
+      // Track base (dark, grimy)
+      ctx.fillStyle = colors.oilStain;
+      ctx.fillRect(-SIZE * 0.75, y - trackHeight / 2, trackLength, trackHeight);
+
+      // Track outline
+      ctx.strokeStyle = colors.grimySteel;
+      ctx.lineWidth = 1.5;
+      ctx.strokeRect(-SIZE * 0.75, y - trackHeight / 2, trackLength, trackHeight);
+
+      // Track segments (moving treads)
+      ctx.fillStyle = colors.grimySteel;
+      const segmentCount = Math.ceil(trackLength / segmentGap) + 2;
+      for (let i = -1; i < segmentCount; i++) {
+        const baseX = -SIZE * 0.75 + i * segmentGap + moveOffset;
+        // Wrap around
+        const x = baseX > SIZE * 0.75 ? baseX - trackLength : baseX;
+        if (x < -SIZE * 0.8 || x > SIZE * 0.75) continue;
+        ctx.fillRect(x, y - trackHeight / 2 + 1, segmentWidth, trackHeight - 2);
+      }
+
+      // Rust on tracks
+      ctx.fillStyle = colors.rust + '60';
+      ctx.fillRect(-SIZE * 0.6, y - trackHeight / 2, SIZE * 0.2, trackHeight);
+      ctx.fillRect(SIZE * 0.3, y - trackHeight / 2, SIZE * 0.15, trackHeight);
+    });
+  },
+
+  /**
+   * Draw rage visual indicators (steam vents and warning light)
+   */
+  drawRageIndicators(ctx, screenPos, SIZE, time) {
+    // Swirling red warning light on top
+    const pulsePhase = (Math.sin(time * 0.008) + 1) / 2;
+    const lightX = screenPos.x;
+    const lightY = screenPos.y - SIZE * 0.4;
+
+    ctx.save();
+    ctx.globalAlpha = 0.7 + pulsePhase * 0.3;
+
+    // Warning light glow
+    const lightGradient = ctx.createRadialGradient(lightX, lightY, 0, lightX, lightY, SIZE * 0.15);
+    lightGradient.addColorStop(0, '#ff0000');
+    lightGradient.addColorStop(0.5, '#ff000080');
+    lightGradient.addColorStop(1, 'transparent');
+    ctx.fillStyle = lightGradient;
+    ctx.beginPath();
+    ctx.arc(lightX, lightY, SIZE * 0.15, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Rotating beam
+    ctx.strokeStyle = '#ff000080';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    const beamAngle = time * 0.005;
+    ctx.moveTo(lightX, lightY);
+    ctx.lineTo(
+      lightX + Math.cos(beamAngle) * SIZE * 0.3,
+      lightY + Math.sin(beamAngle) * SIZE * 0.3
+    );
+    ctx.stroke();
 
     ctx.restore();
   },

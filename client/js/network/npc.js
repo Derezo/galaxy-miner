@@ -60,6 +60,15 @@ function register(socket) {
           npc.phase || 'HUNT',
           npc.rotation || 0
         );
+      } else if (npc.type === 'scavenger_hauler' || npc.type === 'scavenger_barnacle_king') {
+        // Hauler and Barnacle King get deconstruction death effect
+        DeathEffects.trigger(
+          npc.position.x,
+          npc.position.y,
+          'deconstruction',
+          npc.faction,
+          { rotation: npc.rotation || 0, npcType: npc.type }
+        );
       } else {
         // Standard faction-specific death effect
         const effectType = DeathEffects.getEffectForFaction(npc.faction);

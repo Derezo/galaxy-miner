@@ -7,6 +7,8 @@ const logger = require('../../shared/logger');
 const { validateLootCollection } = require('../validators');
 const config = require('../config');
 const { statements, getSafeCredits, safeUpdateCredits, safeUpsertInventory } = require('../database');
+const { getScavengerStrategy } = require('../game/ai');
+const Constants = require('../../shared/constants');
 
 /**
  * Register loot-related socket event handlers
@@ -157,6 +159,9 @@ function register(ctx) {
             wreckageId,
             collectedBy: authenticatedUserId()
           });
+
+          // Check if this triggers Scavenger rage (unless player has Scrap Siphon)
+          checkScavengerRageOnCollection(currentPlayer, authenticatedUserId(), engine, io);
         } else {
           // Send progress update
           socket.emit('loot:progress', {
@@ -213,6 +218,158 @@ function register(ctx) {
         despawnTime: w.despawnTime
       }))
     });
+  });
+
+  // Loot: Multi-collect wreckage with Scrap Siphon relic (M key)
+  socket.on('wreckage:multiCollect', () => {
+    if (!authenticatedUserId()) return;
+
+    const player = connectedPlayers.get(socket.id);
+    if (!player) return;
+
+    // Check if player has the Scrap Siphon relic
+    const hasScrapSiphon = statements.hasRelic.get(authenticatedUserId(), 'SCRAP_SIPHON');
+    if (!hasScrapSiphon) {
+      socket.emit('loot:error', { message: 'You need the Scrap Siphon relic to use multi-collect' });
+      return;
+    }
+
+    // Get Scrap Siphon effect values
+    const siphonEffects = Constants.RELIC_TYPES.SCRAP_SIPHON.effects;
+    const multiCount = siphonEffects.multiWreckageCount || 3;
+    const multiRange = siphonEffects.multiWreckageRange || 300;
+    const collectSpeed = siphonEffects.wreckageCollectionSpeed || 0.5;
+
+    // Find nearest wreckage within multi-collect range
+    const nearbyWreckage = engine.getWreckageInRange(player.position, multiRange);
+
+    if (nearbyWreckage.length === 0) {
+      socket.emit('loot:error', { message: 'No wreckage within range' });
+      return;
+    }
+
+    // Sort by distance and take up to multiCount
+    nearbyWreckage.sort((a, b) => a.distance - b.distance);
+    const toCollect = nearbyWreckage.slice(0, multiCount);
+
+    // Check none are being collected by others
+    for (const w of toCollect) {
+      if (w.beingCollectedBy && w.beingCollectedBy !== authenticatedUserId()) {
+        socket.emit('loot:error', { message: 'Some wreckage is being collected by another player' });
+        return;
+      }
+    }
+
+    // Mark all as being collected
+    const wreckageIds = toCollect.map(w => w.id);
+    for (const w of toCollect) {
+      engine.startWreckageCollection(w.id, authenticatedUserId());
+    }
+
+    socket.emit('loot:multiStarted', {
+      wreckageIds,
+      totalTime: collectSpeed * 1000
+    });
+
+    setPlayerStatus(authenticatedUserId(), 'collecting');
+
+    // Broadcast multi-collection start
+    broadcastToNearby(socket, player, 'loot:playerMultiCollecting', {
+      playerId: authenticatedUserId(),
+      wreckageIds
+    });
+
+    // Single timer for the fast collection
+    const multiCollectTimeout = setTimeout(() => {
+      const currentPlayer = connectedPlayers.get(socket.id);
+      if (!currentPlayer) {
+        for (const wId of wreckageIds) {
+          engine.cancelWreckageCollection(wId, authenticatedUserId());
+        }
+        return;
+      }
+
+      // Collect all wreckage and merge rewards
+      const allContents = [];
+      let totalCredits = 0;
+      const allDamageContributors = {};
+
+      for (const wId of wreckageIds) {
+        const wreckage = engine.getWreckage(wId);
+        if (wreckage) {
+          allContents.push(...wreckage.contents);
+          totalCredits += wreckage.creditReward || 0;
+
+          // Merge damage contributors
+          if (wreckage.damageContributors) {
+            for (const [pid, dmg] of Object.entries(wreckage.damageContributors)) {
+              allDamageContributors[pid] = (allDamageContributors[pid] || 0) + dmg;
+            }
+          }
+
+          // Remove wreckage
+          engine.removeWreckage(wId);
+        }
+      }
+
+      // Distribute credits (merged)
+      const teamCredits = distributeTeamCredits(
+        totalCredits,
+        Object.keys(allDamageContributors).length > 0 ? allDamageContributors : null,
+        authenticatedUserId(),
+        io,
+        userSockets
+      );
+
+      // Filter out credits
+      const nonCreditContents = allContents.filter(item => item.type !== 'credits');
+
+      // Distribute resources
+      const teamResources = distributeTeamResources(
+        nonCreditContents,
+        Object.keys(allDamageContributors).length > 0 ? allDamageContributors : null,
+        authenticatedUserId(),
+        io,
+        userSockets
+      );
+
+      // Process collector's loot
+      const lootResults = processCollectedLoot(authenticatedUserId(), teamResources.collectorLoot, io, userSockets);
+      lootResults.credits = teamCredits.collectorCredits;
+
+      socket.emit('loot:multiComplete', {
+        wreckageIds,
+        contents: allContents,
+        results: lootResults,
+        teamCredits: teamCredits.total
+      });
+
+      // Update inventory
+      const inventory = statements.getInventory.all(authenticatedUserId());
+      const ship = statements.getShipByUserId.get(authenticatedUserId());
+      socket.emit('inventory:update', {
+        inventory,
+        credits: getSafeCredits(ship)
+      });
+
+      setPlayerStatus(authenticatedUserId(), 'idle');
+
+      // Broadcast collection complete
+      broadcastToNearby(socket, currentPlayer, 'loot:playerStopped', {
+        playerId: authenticatedUserId()
+      });
+      for (const wId of wreckageIds) {
+        broadcastToNearby(socket, currentPlayer, 'wreckage:collected', {
+          wreckageId: wId,
+          collectedBy: authenticatedUserId()
+        });
+      }
+
+      // Scrap Siphon provides rage immunity, so we skip rage check here
+      // (The immunity is already handled in ScavengerStrategy.onWreckageCollectedNearby)
+    }, collectSpeed * 1000);
+
+    trackInterval(socket.id, multiCollectTimeout);
   });
 }
 
@@ -272,7 +429,7 @@ function distributeTeamCredits(baseCredits, damageContributors, collectorId, io,
 
         // Notify non-collector team members of their credit reward
         if (playerId !== collectorIdStr) {
-          const socketId = userSockets.get(playerId);
+          const socketId = userSockets.get(Number(playerId));
           if (socketId) {
             io.to(socketId).emit('team:creditReward', {
               credits: creditsPerPlayer,
@@ -404,7 +561,7 @@ function distributeTeamResources(contents, damageContributors, collectorId, io, 
       }
 
       // Notify team member of their share
-      const socketId = userSockets.get(playerId);
+      const socketId = userSockets.get(Number(playerId));
       if (socketId) {
         io.to(socketId).emit('team:lootShare', {
           resources: items,
@@ -422,7 +579,7 @@ function distributeTeamResources(contents, damageContributors, collectorId, io, 
       }
     } else if (result.rareDropNotifications.length > 0) {
       // No shared resources but notify about rare drops
-      const socketId = userSockets.get(playerId);
+      const socketId = userSockets.get(Number(playerId));
       if (socketId) {
         io.to(socketId).emit('team:lootShare', {
           resources: [],
@@ -492,10 +649,20 @@ function processCollectedLoot(userId, contents, io, userSockets) {
 
         case 'relic':
           // Add relic to relics table (only if not already owned)
-          statements.addRelic.run(userId, item.relicType);
+          const relicResult = statements.addRelic.run(userId, item.relicType);
           results.relics.push({
             type: item.relicType
           });
+
+          // Emit relic:collected event to notify client (only if relic was newly added)
+          if (relicResult.changes > 0) {
+            const relicSocketId = userSockets.get(userId);
+            if (relicSocketId) {
+              io.to(relicSocketId).emit('relic:collected', {
+                relicType: item.relicType
+              });
+            }
+          }
           break;
 
         case 'buff':
@@ -520,6 +687,15 @@ function processCollectedLoot(userId, contents, io, userSockets) {
             });
           }
           break;
+
+        default:
+          // Log unrecognized item type for debugging (likely format mismatch)
+          logger.warn(`[LOOT] Unrecognized item type: ${item.type}`, {
+            userId,
+            item: JSON.stringify(item)
+          });
+          results.errors.push({ type: item.type || 'unknown', error: 'Unrecognized item type' });
+          break;
       }
     } catch (err) {
       logger.error(`[LOOT ERROR] User ${userId} processing ${item.type}:`, err.message);
@@ -528,6 +704,56 @@ function processCollectedLoot(userId, contents, io, userSockets) {
   }
 
   return results;
+}
+
+/**
+ * Helper: Check and trigger Scavenger rage when player collects wreckage
+ * @param {Object} player - The collecting player
+ * @param {number} userId - Player's user ID
+ * @param {Object} engine - Game engine instance
+ * @param {Object} io - Socket.io instance
+ */
+function checkScavengerRageOnCollection(player, userId, engine, io) {
+  // Check if player has Scrap Siphon immunity
+  const hasScrapSiphon = statements.hasRelic.get(userId, 'SCRAP_SIPHON');
+
+  // Get all nearby scavenger NPCs
+  const scavengerStrategy = getScavengerStrategy();
+  const allNPCs = engine.getAllNPCs ? engine.getAllNPCs() : new Map();
+
+  for (const [npcId, npc] of allNPCs) {
+    if (npc.faction !== 'scavenger') continue;
+
+    // Get nearby allies for rage spread
+    const nearbyAllies = [];
+    for (const [allyId, ally] of allNPCs) {
+      if (allyId === npcId || ally.faction !== 'scavenger') continue;
+      const dx = ally.position.x - npc.position.x;
+      const dy = ally.position.y - npc.position.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      if (dist <= 500) {
+        nearbyAllies.push(ally);
+      }
+    }
+
+    // Check if this collection triggers rage
+    const rageResult = scavengerStrategy.onWreckageCollectedNearby(
+      npc,
+      userId,
+      player.position,
+      nearbyAllies,
+      !!hasScrapSiphon
+    );
+
+    if (rageResult && rageResult.action === 'scavenger:rage') {
+      // Broadcast rage to nearby players
+      io.emit('scavenger:rage', {
+        npcId: rageResult.npcId,
+        targetId: rageResult.targetId,
+        reason: rageResult.reason
+      });
+    }
+  }
 }
 
 module.exports = { register };

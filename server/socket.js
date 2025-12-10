@@ -9,6 +9,7 @@ const engine = require('./game/engine');
 const wormhole = require('./game/wormhole');
 const world = require('./world');
 const logger = require('../shared/logger');
+const Constants = require('../shared/constants');
 
 // Track connected players: socketId -> { userId, username, position, etc. }
 const connectedPlayers = new Map();
@@ -1036,6 +1037,154 @@ module.exports = function(io) {
           despawnTime: w.despawnTime
         }))
       });
+    });
+
+    // Loot: Multi-collect wreckage with Scrap Siphon relic (M key)
+    socket.on('wreckage:multiCollect', () => {
+      if (!authenticatedUserId) return;
+
+      const player = connectedPlayers.get(socket.id);
+      if (!player) return;
+
+      // Check if player has the Scrap Siphon relic
+      const hasScrapSiphon = statements.hasRelic.get(authenticatedUserId, 'SCRAP_SIPHON');
+      if (!hasScrapSiphon) {
+        socket.emit('loot:error', { message: 'You need the Scrap Siphon relic to use multi-collect' });
+        return;
+      }
+
+      // Get Scrap Siphon effect values
+      const siphonEffects = Constants.RELIC_TYPES.SCRAP_SIPHON.effects;
+      const multiCount = siphonEffects.multiWreckageCount || 3;
+      const multiRange = siphonEffects.multiWreckageRange || 300;
+      const collectSpeed = siphonEffects.wreckageCollectionSpeed || 0.5;
+
+      // Find nearest wreckage within multi-collect range
+      const nearbyWreckage = engine.getWreckageInRange(player.position, multiRange);
+
+      if (nearbyWreckage.length === 0) {
+        socket.emit('loot:error', { message: 'No wreckage within range' });
+        return;
+      }
+
+      // Sort by distance and take up to multiCount
+      nearbyWreckage.sort((a, b) => a.distance - b.distance);
+      const toCollect = nearbyWreckage.slice(0, multiCount);
+
+      // Check none are being collected by others
+      for (const w of toCollect) {
+        if (w.beingCollectedBy && w.beingCollectedBy !== authenticatedUserId) {
+          socket.emit('loot:error', { message: 'Some wreckage is being collected by another player' });
+          return;
+        }
+      }
+
+      // Mark all as being collected
+      const wreckageIds = toCollect.map(w => w.id);
+      for (const w of toCollect) {
+        engine.startWreckageCollection(w.id, authenticatedUserId);
+      }
+
+      console.log('[SIPHON SERVER] Emitting loot:multiStarted with wreckageIds:', wreckageIds, 'totalTime:', collectSpeed * 1000);
+      socket.emit('loot:multiStarted', {
+        wreckageIds,
+        totalTime: collectSpeed * 1000
+      });
+
+      setPlayerStatus(authenticatedUserId, 'collecting');
+
+      // Broadcast multi-collection start
+      broadcastToNearby(socket, player, 'loot:playerMultiCollecting', {
+        playerId: authenticatedUserId,
+        wreckageIds
+      });
+
+      // Single timer for the fast collection
+      const multiCollectTimeout = setTimeout(() => {
+        const currentPlayer = connectedPlayers.get(socket.id);
+        if (!currentPlayer) {
+          for (const wId of wreckageIds) {
+            engine.cancelWreckageCollection(wId, authenticatedUserId);
+          }
+          return;
+        }
+
+        // Collect all wreckage and merge rewards
+        const allContents = [];
+        let totalCredits = 0;
+        const allDamageContributors = {};
+
+        for (const wId of wreckageIds) {
+          const wreckage = engine.getWreckage(wId);
+          if (wreckage) {
+            allContents.push(...wreckage.contents);
+            totalCredits += wreckage.creditReward || 0;
+
+            // Merge damage contributors
+            if (wreckage.damageContributors) {
+              for (const [pid, dmg] of Object.entries(wreckage.damageContributors)) {
+                allDamageContributors[pid] = (allDamageContributors[pid] || 0) + dmg;
+              }
+            }
+
+            // Remove wreckage
+            engine.removeWreckage(wId);
+          }
+        }
+
+        // Distribute credits (merged)
+        const teamCredits = distributeTeamCredits(
+          totalCredits,
+          Object.keys(allDamageContributors).length > 0 ? allDamageContributors : null,
+          authenticatedUserId
+        );
+
+        // Filter out credits
+        const nonCreditContents = allContents.filter(item => item.type !== 'credits');
+
+        // Distribute resources
+        const teamResources = distributeTeamResources(
+          nonCreditContents,
+          Object.keys(allDamageContributors).length > 0 ? allDamageContributors : null,
+          authenticatedUserId
+        );
+
+        // Process collector's loot
+        const lootResults = processCollectedLoot(authenticatedUserId, teamResources.collectorLoot);
+        lootResults.credits = teamCredits.collectorCredits;
+
+        socket.emit('loot:multiComplete', {
+          wreckageIds,
+          contents: allContents,
+          results: lootResults,
+          teamCredits: teamCredits.total
+        });
+
+        // Update inventory
+        const inventory = statements.getInventory.all(authenticatedUserId);
+        const ship = statements.getShipByUserId.get(authenticatedUserId);
+        socket.emit('inventory:update', {
+          inventory,
+          credits: getSafeCredits(ship)
+        });
+
+        setPlayerStatus(authenticatedUserId, 'idle');
+
+        // Broadcast collection complete
+        broadcastToNearby(socket, currentPlayer, 'loot:playerStopped', {
+          playerId: authenticatedUserId
+        });
+        for (const wId of wreckageIds) {
+          broadcastToNearby(socket, currentPlayer, 'wreckage:collected', {
+            wreckageId: wId,
+            collectedBy: authenticatedUserId
+          });
+        }
+
+        // Scrap Siphon provides rage immunity, so we skip rage check here
+      }, collectSpeed * 1000);
+
+      trackInterval(socket.id, multiCollectTimeout);
     });
 
     // Wormhole: Enter wormhole

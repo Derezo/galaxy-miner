@@ -37,6 +37,10 @@ const Player = {
   collectingWreckage: null,
   collectProgress: 0,
   collectTotalTime: 0,
+  // Multi-collect (Scrap Siphon) state
+  multiCollecting: false,
+  multiCollectWreckageIds: null,
+  multiCollectCooldownEnd: 0,  // Timestamp when cooldown ends
   // Active buffs
   activeBuffs: new Map(),
   // Gravity well state
@@ -610,6 +614,47 @@ const Player = {
     this.collectingWreckage = null;
     this.collectProgress = 0;
     this.collectTotalTime = 0;
+  },
+
+  // Multi-collect for Scrap Siphon relic
+  tryMultiCollectWreckage() {
+    // Check if already collecting or on cooldown
+    if (this.collectingWreckage || this.miningTarget || this.multiCollecting) return;
+    if (Date.now() < this.multiCollectCooldownEnd) return;
+
+    if (!this.hasRelic('SCRAP_SIPHON')) {
+      // Fall back to single collect if no relic
+      this.tryCollectWreckage();
+      return;
+    }
+
+    // Scrap Siphon multi-collect
+    this.multiCollecting = true;
+    this.collectProgress = 0;
+    Network.sendMultiCollect();
+  },
+
+  onMultiCollectStarted(data) {
+    this.collectTotalTime = data.totalTime;
+    this.multiCollectWreckageIds = data.wreckageIds;
+    Logger.log('Started multi-collecting wreckage:', data.wreckageIds);
+  },
+
+  onMultiCollectComplete(data) {
+    Logger.log('Multi-collect complete:', data.contents);
+
+    // Show reward pop-ups
+    if (data.results && typeof NotificationManager !== 'undefined') {
+      const { buffs, ...resultsWithoutBuffs } = data.results;
+      NotificationManager.queueReward(resultsWithoutBuffs);
+    }
+
+    this.multiCollecting = false;
+    this.multiCollectWreckageIds = null;
+    this.collectProgress = 0;
+    this.collectTotalTime = 0;
+    // Set cooldown to prevent rapid re-triggering (matches animation duration)
+    this.multiCollectCooldownEnd = Date.now() + 700;
   },
 
   // Buff methods

@@ -112,7 +112,7 @@ const RelicsPanel = {
     if (!relicInfo) return '';
 
     const obtainedDate = new Date(this.selectedRelic.obtained_at).toLocaleDateString();
-    const hasEffect = relicInfo.effect ? true : false;
+    const hasEffect = relicInfo.effect || relicInfo.effects ? true : false;
 
     return `
       <div class="panel-detail">
@@ -153,6 +153,24 @@ const RelicsPanel = {
     if (relicInfo.effect === 'wormhole_transit') {
       effectName = 'Wormhole Transit';
       effectDesc = 'Approach a wormhole and press [M] to enter. Select a destination from nearby wormholes to instantly travel.';
+    } else if (relicInfo.effects) {
+      // Handle relics with multiple effects (like SCRAP_SIPHON)
+      const effects = relicInfo.effects;
+
+      if (effects.wreckageCollectionSpeed !== undefined) {
+        effectName = 'Scrap Siphon';
+        const speedPct = Math.round((1 - effects.wreckageCollectionSpeed) * 100);
+        const multiCount = effects.multiWreckageCount || 1;
+        const multiRange = effects.multiWreckageRange || 100;
+
+        let descParts = [];
+        descParts.push(`Press [M] near wreckage to instantly collect up to ${multiCount} pieces within ${multiRange} units.`);
+        descParts.push(`Collection is ${speedPct}% faster than normal.`);
+        if (effects.scavengerWreckageImmunity) {
+          descParts.push('Scavengers will ignore your wreckage collection.');
+        }
+        effectDesc = descParts.join(' ');
+      }
     }
 
     return `

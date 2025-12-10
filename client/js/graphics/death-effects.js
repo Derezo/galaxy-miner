@@ -64,6 +64,23 @@ const DeathEffects = {
       particleSpeed: 180,
       particleSize: { min: 3, max: 7 }
     },
+    // Scavenger Hauler/Barnacle King - Deconstruction death effect
+    deconstruction: {
+      warningDuration: 1500,    // 1.5 sec warning phase
+      particles: 40,
+      colors: ['#D4A017', '#8B4513', '#71797E', '#B87333'], // Yellow/brown/steel/copper
+      duration: 1500,           // Total effect duration after warning
+      debrisCount: 12,          // More debris than normal
+      debrisRotation: true,
+      particleSpeed: 400,
+      particleSize: { min: 6, max: 18 },
+      screenShake: { intensity: 15, duration: 500 },
+      warning: {
+        shakeIntensity: 3,
+        lightColor: '#ff0000',
+        lightPulseSpeed: 200    // ms per pulse
+      }
+    },
     // Swarm Queen - extended grotesque death sequence
     queen_death: {
       duration: 7500,  // 7.5 seconds
@@ -99,8 +116,9 @@ const DeathEffects = {
    * @param {number} y - World Y position
    * @param {string} effectType - Type of death effect
    * @param {string} faction - Faction for color theming (optional)
+   * @param {object} extraData - Optional extra data (e.g., npc object for deconstruction)
    */
-  trigger(x, y, effectType, faction = null) {
+  trigger(x, y, effectType, faction = null, extraData = {}) {
     const config = this.EFFECT_CONFIGS[effectType] || this.EFFECT_CONFIGS.explosion;
 
     const effect = {
@@ -116,17 +134,35 @@ const DeathEffects = {
       shockwaveRadius: 0
     };
 
-    // Generate particles
-    this.generateParticles(effect);
+    // For deconstruction effect, start with warning phase
+    if (effectType === 'deconstruction') {
+      effect.phase = 'warning';
+      effect.warningStartTime = Date.now();
+      effect.rotation = extraData.rotation || 0;
+      effect.npcType = extraData.npcType || 'scavenger_hauler';
 
-    // Generate debris if applicable
-    if (config.debrisCount) {
-      this.generateDebris(effect);
-    }
+      // Trigger warning screen shake
+      if (typeof Renderer !== 'undefined' && Renderer.triggerScreenShake) {
+        Renderer.triggerScreenShake(config.warning.shakeIntensity, config.warningDuration);
+      }
 
-    // Generate sparks if applicable
-    if (config.sparks) {
-      this.generateSparks(effect);
+      // Play warning alarm sound
+      if (typeof AudioManager !== 'undefined' && AudioManager.isReady && AudioManager.isReady()) {
+        AudioManager.playAt('notification_warning', x, y);
+      }
+    } else {
+      // Generate particles immediately for non-warning effects
+      this.generateParticles(effect);
+
+      // Generate debris if applicable
+      if (config.debrisCount) {
+        this.generateDebris(effect);
+      }
+
+      // Generate sparks if applicable
+      if (config.sparks) {
+        this.generateSparks(effect);
+      }
     }
 
     this.activeEffects.push(effect);
@@ -199,6 +235,51 @@ const DeathEffects = {
     }
   },
 
+  generateDeconstructionParts(effect) {
+    // Generate specific mechanical parts for deconstruction effect
+    if (!effect.mechanicalParts) {
+      effect.mechanicalParts = [];
+    }
+
+    // Determine NPC type for size scaling
+    const npcType = effect.npcType || 'scavenger_hauler';
+    const isBarnacleKing = npcType === 'scavenger_barnacle_king';
+
+    // More part types for grimy industrial junkyard aesthetic
+    const partTypes = [
+      'bucket', 'wheel', 'hull_plate', 'engine', 'smoke_stack',
+      'drill', 'crane_arm', 'cargo_bay', 'tread', 'pipe',
+      'gear', 'armor_plate', 'chain'
+    ];
+
+    // Barnacle King has more and larger parts
+    const partCount = isBarnacleKing ? 16 : 10;
+    const sizeMultiplier = isBarnacleKing ? 2.0 : 1.2;
+
+    for (let i = 0; i < partCount; i++) {
+      const angle = (Math.PI * 2 * i) / partCount + (Math.random() - 0.5) * 0.5;
+      const speed = (isBarnacleKing ? 350 : 250) + Math.random() * 200; // Faster for larger ships
+      const partType = partTypes[i % partTypes.length];
+
+      effect.mechanicalParts.push({
+        type: partType,
+        x: effect.x + (Math.random() - 0.5) * 30,
+        y: effect.y + (Math.random() - 0.5) * 30,
+        vx: Math.cos(angle) * speed,
+        vy: Math.sin(angle) * speed,
+        rotation: Math.random() * Math.PI * 2,
+        rotationSpeed: (Math.random() - 0.5) * (isBarnacleKing ? 6 : 8),
+        size: (10 + Math.random() * 10) * sizeMultiplier,
+        alpha: 1,
+        color: effect.config.colors[Math.floor(Math.random() * effect.config.colors.length)],
+        // Add smoke trail data
+        smokeTrail: true,
+        lastSmokeTime: 0,
+        smokeInterval: 50 + Math.random() * 50
+      });
+    }
+  },
+
   /**
    * Update all active effects
    */
@@ -209,6 +290,32 @@ const DeathEffects = {
     this.updateQueenDeaths(dt);
 
     this.activeEffects = this.activeEffects.filter(effect => {
+      // Handle deconstruction warning phase
+      if (effect.type === 'deconstruction' && effect.phase === 'warning') {
+        const warningElapsed = now - effect.warningStartTime;
+
+        if (warningElapsed >= effect.config.warningDuration) {
+          // Transition to explosion phase
+          effect.phase = 'explosion';
+          effect.startTime = now;
+
+          // Generate explosion particles and debris
+          this.generateParticles(effect);
+          this.generateDebris(effect);
+          this.generateDeconstructionParts(effect);
+
+          // Trigger explosion screen shake
+          if (typeof Renderer !== 'undefined' && Renderer.triggerScreenShake) {
+            Renderer.triggerScreenShake(
+              effect.config.screenShake.intensity,
+              effect.config.screenShake.duration
+            );
+          }
+        }
+
+        return true; // Keep effect active during warning
+      }
+
       const elapsed = now - effect.startTime;
       const progress = elapsed / effect.config.duration;
 
@@ -252,6 +359,55 @@ const DeathEffects = {
         s.alpha = Math.max(0, 1 - progress * 2);
       }
 
+      // Update mechanical parts (for deconstruction effect)
+      if (effect.mechanicalParts) {
+        const now = Date.now();
+        for (const m of effect.mechanicalParts) {
+          m.x += m.vx * dt;
+          m.y += m.vy * dt;
+          m.vx *= 0.95;
+          m.vy *= 0.95;
+          m.rotation += m.rotationSpeed * dt;
+          m.alpha = Math.max(0, 1 - progress * 0.7);
+
+          // Spawn smoke trail particles for flying parts
+          if (m.smokeTrail && m.alpha > 0.3 && typeof ParticleSystem !== 'undefined') {
+            if (now - m.lastSmokeTime > m.smokeInterval) {
+              m.lastSmokeTime = now;
+              // Smoke particle
+              ParticleSystem.spawn({
+                x: m.x,
+                y: m.y,
+                vx: -m.vx * 0.1 + (Math.random() - 0.5) * 20,
+                vy: -m.vy * 0.1 + (Math.random() - 0.5) * 20 - 15,
+                life: 600 + Math.random() * 400,
+                color: '#555555',
+                size: 4 + Math.random() * 4,
+                decay: 0.85,
+                drag: 0.97,
+                type: 'smoke',
+                gravity: -8
+              });
+              // Occasional spark
+              if (Math.random() < 0.3) {
+                ParticleSystem.spawn({
+                  x: m.x,
+                  y: m.y,
+                  vx: (Math.random() - 0.5) * 60,
+                  vy: (Math.random() - 0.5) * 60,
+                  life: 200 + Math.random() * 200,
+                  color: '#FF6B35',
+                  size: 2 + Math.random() * 2,
+                  decay: 0.9,
+                  drag: 0.99,
+                  type: 'spark'
+                });
+              }
+            }
+          }
+        }
+      }
+
       // Update shockwave
       if (effect.config.shockwave) {
         effect.shockwaveRadius = progress * 100;
@@ -271,6 +427,13 @@ const DeathEffects = {
     for (const effect of this.activeEffects) {
       const screenX = effect.x - camera.x;
       const screenY = effect.y - camera.y;
+
+      // Handle deconstruction warning phase rendering
+      if (effect.type === 'deconstruction' && effect.phase === 'warning') {
+        this.drawDeconstructionWarning(ctx, effect, screenX, screenY);
+        continue;
+      }
+
       const elapsed = Date.now() - effect.startTime;
       const progress = elapsed / effect.config.duration;
 
@@ -381,6 +544,23 @@ const DeathEffects = {
         ctx.stroke();
       }
 
+      // Draw mechanical parts (for deconstruction effect)
+      if (effect.mechanicalParts) {
+        for (const m of effect.mechanicalParts) {
+          const mx = m.x - camera.x;
+          const my = m.y - camera.y;
+
+          ctx.save();
+          ctx.translate(mx, my);
+          ctx.rotate(m.rotation);
+          ctx.globalAlpha = m.alpha;
+
+          this.drawMechanicalPart(ctx, m.type, m.size, m.color);
+
+          ctx.restore();
+        }
+      }
+
       ctx.restore();
     }
   },
@@ -397,6 +577,354 @@ const DeathEffects = {
       rogue_miner: 'industrial_explosion'
     };
     return factionEffects[faction] || 'explosion';
+  },
+
+  /**
+   * Draw deconstruction warning phase
+   */
+  drawDeconstructionWarning(ctx, effect, screenX, screenY) {
+    const now = Date.now();
+    const warningElapsed = now - effect.warningStartTime;
+    const warningProgress = warningElapsed / effect.config.warningDuration;
+
+    // Calculate shake offset
+    const shakeIntensity = effect.config.warning.shakeIntensity;
+    const shakeX = (Math.random() - 0.5) * shakeIntensity * 2;
+    const shakeY = (Math.random() - 0.5) * shakeIntensity * 2;
+
+    ctx.save();
+    ctx.translate(screenX + shakeX, screenY + shakeY);
+    ctx.rotate(effect.rotation);
+
+    // Draw the ship (simplified Hauler/Barnacle King shape)
+    // Use NPC ship geometry if available
+    if (typeof NPCShipGeometry !== 'undefined') {
+      const SIZE = NPCShipGeometry.SIZE * 1.8; // Boss size multiplier
+      const colors = NPCShipGeometry.FACTION_COLORS.scavenger;
+
+      // Draw simplified ship hull
+      ctx.fillStyle = colors.hull;
+      ctx.strokeStyle = colors.outline;
+      ctx.lineWidth = 2;
+
+      // Hauler shape (simplified)
+      ctx.beginPath();
+      ctx.moveTo(SIZE * 1.0, -SIZE * 0.1);
+      ctx.lineTo(SIZE * 0.7, -SIZE * 0.5);
+      ctx.lineTo(-SIZE * 0.8, -SIZE * 0.5);
+      ctx.lineTo(-SIZE * 0.8, SIZE * 0.5);
+      ctx.lineTo(SIZE * 0.7, SIZE * 0.5);
+      ctx.lineTo(SIZE * 1.0, SIZE * 0.1);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+    }
+
+    // Draw rotating red warning beacon on top
+    const pulsePhase = (now / effect.config.warning.lightPulseSpeed) % (Math.PI * 2);
+    const pulseIntensity = 0.5 + Math.sin(pulsePhase) * 0.5;
+
+    const beaconGradient = ctx.createRadialGradient(0, 0, 0, 0, 0, 25);
+    beaconGradient.addColorStop(0, effect.config.warning.lightColor);
+    beaconGradient.addColorStop(0.3, effect.config.warning.lightColor + 'cc');
+    beaconGradient.addColorStop(1, 'transparent');
+
+    ctx.globalAlpha = pulseIntensity;
+    ctx.fillStyle = beaconGradient;
+    ctx.beginPath();
+    ctx.arc(0, 0, 25, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Draw smaller rotating beacon light
+    ctx.globalAlpha = 1;
+    const beaconRotation = (now * 0.01) % (Math.PI * 2);
+    ctx.save();
+    ctx.rotate(beaconRotation);
+    ctx.fillStyle = effect.config.warning.lightColor;
+    ctx.beginPath();
+    ctx.arc(0, -8, 4, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+
+    // Optional steam/smoke particles during warning
+    if (Math.random() < 0.1 && typeof ParticleSystem !== 'undefined') {
+      const offsetX = (Math.random() - 0.5) * 30;
+      const offsetY = (Math.random() - 0.5) * 30;
+
+      ParticleSystem.spawn({
+        x: effect.x + offsetX,
+        y: effect.y + offsetY,
+        vx: (Math.random() - 0.5) * 20,
+        vy: -20 - Math.random() * 30,
+        life: 400 + Math.random() * 200,
+        color: '#999999',
+        size: 4 + Math.random() * 4,
+        type: 'smoke',
+        drag: 0.98,
+        decay: 1
+      });
+    }
+
+    ctx.restore();
+  },
+
+  /**
+   * Draw a mechanical part for deconstruction effect
+   */
+  drawMechanicalPart(ctx, type, size, color) {
+    ctx.fillStyle = color;
+    ctx.strokeStyle = '#000000';
+    ctx.lineWidth = 1;
+
+    switch (type) {
+      case 'bucket':
+        // Excavator bucket shape
+        ctx.beginPath();
+        ctx.moveTo(-size * 0.4, -size * 0.6);
+        ctx.lineTo(size * 0.4, -size * 0.6);
+        ctx.lineTo(size * 0.6, size * 0.2);
+        ctx.lineTo(size * 0.2, size * 0.6);
+        ctx.lineTo(-size * 0.2, size * 0.6);
+        ctx.lineTo(-size * 0.6, size * 0.2);
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+
+        // Teeth
+        ctx.fillStyle = '#666666';
+        for (let i = -1; i <= 1; i++) {
+          ctx.beginPath();
+          ctx.moveTo(i * size * 0.25, size * 0.6);
+          ctx.lineTo(i * size * 0.25 - size * 0.08, size * 0.8);
+          ctx.lineTo(i * size * 0.25 + size * 0.08, size * 0.8);
+          ctx.closePath();
+          ctx.fill();
+        }
+        break;
+
+      case 'wheel':
+        // Tread/wheel
+        ctx.beginPath();
+        ctx.arc(0, 0, size * 0.5, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+
+        // Inner hub
+        ctx.fillStyle = '#333333';
+        ctx.beginPath();
+        ctx.arc(0, 0, size * 0.25, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Spokes
+        ctx.strokeStyle = '#333333';
+        for (let i = 0; i < 4; i++) {
+          const angle = (i / 4) * Math.PI * 2;
+          ctx.beginPath();
+          ctx.moveTo(0, 0);
+          ctx.lineTo(Math.cos(angle) * size * 0.5, Math.sin(angle) * size * 0.5);
+          ctx.stroke();
+        }
+        break;
+
+      case 'hull_plate':
+        // Rectangular hull plate
+        ctx.fillRect(-size * 0.6, -size * 0.3, size * 1.2, size * 0.6);
+        ctx.strokeRect(-size * 0.6, -size * 0.3, size * 1.2, size * 0.6);
+
+        // Rivets
+        ctx.fillStyle = '#555555';
+        for (let i = 0; i < 3; i++) {
+          for (let j = 0; j < 2; j++) {
+            ctx.beginPath();
+            ctx.arc(
+              -size * 0.4 + i * size * 0.4,
+              -size * 0.15 + j * size * 0.3,
+              size * 0.05,
+              0,
+              Math.PI * 2
+            );
+            ctx.fill();
+          }
+        }
+        break;
+
+      case 'engine':
+        // Engine block
+        ctx.beginPath();
+        ctx.moveTo(-size * 0.4, -size * 0.5);
+        ctx.lineTo(size * 0.4, -size * 0.5);
+        ctx.lineTo(size * 0.3, size * 0.5);
+        ctx.lineTo(-size * 0.3, size * 0.5);
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+
+        // Exhaust pipes
+        ctx.fillStyle = '#444444';
+        ctx.fillRect(-size * 0.2, -size * 0.7, size * 0.15, size * 0.3);
+        ctx.fillRect(size * 0.05, -size * 0.7, size * 0.15, size * 0.3);
+        break;
+
+      case 'smoke_stack':
+        // Industrial smoke stack
+        ctx.fillRect(-size * 0.2, -size * 0.8, size * 0.4, size * 1.0);
+        ctx.strokeRect(-size * 0.2, -size * 0.8, size * 0.4, size * 1.0);
+
+        // Top rim
+        ctx.fillStyle = '#555555';
+        ctx.fillRect(-size * 0.25, -size * 0.8, size * 0.5, size * 0.1);
+
+        // Bands
+        ctx.fillStyle = '#666666';
+        ctx.fillRect(-size * 0.2, -size * 0.4, size * 0.4, size * 0.08);
+        ctx.fillRect(-size * 0.2, 0, size * 0.4, size * 0.08);
+        break;
+
+      case 'drill':
+        // Boring drill piece
+        ctx.beginPath();
+        ctx.moveTo(size * 0.6, 0);
+        ctx.lineTo(size * 0.2, -size * 0.3);
+        ctx.lineTo(-size * 0.4, -size * 0.25);
+        ctx.lineTo(-size * 0.5, 0);
+        ctx.lineTo(-size * 0.4, size * 0.25);
+        ctx.lineTo(size * 0.2, size * 0.3);
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+
+        // Drill grooves
+        ctx.strokeStyle = '#333333';
+        ctx.lineWidth = 1.5;
+        for (let i = 0; i < 3; i++) {
+          ctx.beginPath();
+          ctx.moveTo(size * (0.4 - i * 0.25), -size * 0.2);
+          ctx.lineTo(size * (0.3 - i * 0.25), size * 0.2);
+          ctx.stroke();
+        }
+        break;
+
+      case 'crane_arm':
+        // Crane arm segment
+        ctx.fillRect(-size * 0.6, -size * 0.1, size * 1.2, size * 0.2);
+        ctx.strokeRect(-size * 0.6, -size * 0.1, size * 1.2, size * 0.2);
+
+        // Joint at end
+        ctx.fillStyle = '#444444';
+        ctx.beginPath();
+        ctx.arc(size * 0.55, 0, size * 0.15, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+        break;
+
+      case 'cargo_bay':
+        // Cargo container
+        ctx.fillRect(-size * 0.5, -size * 0.35, size * 1.0, size * 0.7);
+        ctx.strokeRect(-size * 0.5, -size * 0.35, size * 1.0, size * 0.7);
+
+        // Door lines
+        ctx.strokeStyle = '#333333';
+        ctx.beginPath();
+        ctx.moveTo(0, -size * 0.35);
+        ctx.lineTo(0, size * 0.35);
+        ctx.stroke();
+
+        // Handle
+        ctx.fillStyle = '#666666';
+        ctx.fillRect(size * 0.1, -size * 0.05, size * 0.15, size * 0.1);
+        break;
+
+      case 'tread':
+        // Tank tread segment
+        ctx.fillRect(-size * 0.5, -size * 0.15, size * 1.0, size * 0.3);
+        ctx.strokeRect(-size * 0.5, -size * 0.15, size * 1.0, size * 0.3);
+
+        // Tread teeth
+        ctx.fillStyle = '#333333';
+        for (let i = 0; i < 4; i++) {
+          ctx.fillRect(-size * 0.4 + i * size * 0.25, size * 0.15, size * 0.15, size * 0.1);
+        }
+        break;
+
+      case 'pipe':
+        // Rusty pipe section
+        ctx.beginPath();
+        ctx.ellipse(0, 0, size * 0.15, size * 0.5, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+
+        // Rust patches
+        ctx.fillStyle = '#A0522D';
+        ctx.beginPath();
+        ctx.ellipse(size * 0.05, -size * 0.2, size * 0.08, size * 0.1, 0.3, 0, Math.PI * 2);
+        ctx.fill();
+        break;
+
+      case 'gear':
+        // Gear with teeth
+        const teeth = 8;
+        const innerR = size * 0.3;
+        const outerR = size * 0.5;
+        ctx.beginPath();
+        for (let t = 0; t < teeth; t++) {
+          const tAngle = (t / teeth) * Math.PI * 2;
+          const nextAngle = ((t + 0.5) / teeth) * Math.PI * 2;
+          if (t === 0) {
+            ctx.moveTo(Math.cos(tAngle) * outerR, Math.sin(tAngle) * outerR);
+          } else {
+            ctx.lineTo(Math.cos(tAngle) * outerR, Math.sin(tAngle) * outerR);
+          }
+          ctx.lineTo(Math.cos(nextAngle) * innerR, Math.sin(nextAngle) * innerR);
+        }
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+
+        // Center hole
+        ctx.fillStyle = '#222222';
+        ctx.beginPath();
+        ctx.arc(0, 0, size * 0.1, 0, Math.PI * 2);
+        ctx.fill();
+        break;
+
+      case 'armor_plate':
+        // Irregular armor plate with bolt holes
+        ctx.beginPath();
+        ctx.moveTo(-size * 0.5, -size * 0.3);
+        ctx.lineTo(size * 0.4, -size * 0.35);
+        ctx.lineTo(size * 0.5, size * 0.2);
+        ctx.lineTo(-size * 0.3, size * 0.35);
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+
+        // Bolt holes
+        ctx.fillStyle = '#222222';
+        ctx.beginPath();
+        ctx.arc(-size * 0.25, -size * 0.1, size * 0.06, 0, Math.PI * 2);
+        ctx.arc(size * 0.2, size * 0.1, size * 0.06, 0, Math.PI * 2);
+        ctx.fill();
+        break;
+
+      case 'chain':
+        // Chain segment (3 links)
+        ctx.strokeStyle = '#444444';
+        ctx.lineWidth = size * 0.08;
+        for (let i = 0; i < 3; i++) {
+          const offsetX = (i - 1) * size * 0.3;
+          ctx.beginPath();
+          ctx.ellipse(offsetX, 0, size * 0.12, size * 0.2, 0, 0, Math.PI * 2);
+          ctx.stroke();
+        }
+        break;
+
+      default:
+        // Generic debris
+        ctx.beginPath();
+        ctx.arc(0, 0, size * 0.5, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+    }
   },
 
   // ============================================

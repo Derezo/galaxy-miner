@@ -8,6 +8,13 @@ const Network = {
   init() {
     this.socket = io();
 
+    // Debug: Log ALL incoming socket events
+    this.socket.onAny((eventName, ...args) => {
+      if (eventName.startsWith('loot:') || eventName.startsWith('wreckage:')) {
+        Logger.log('[SOCKET] Received event:', eventName, args);
+      }
+    });
+
     this.socket.on('connect', () => {
       Logger.log('Connected to server');
       this.connected = true;
@@ -269,7 +276,7 @@ const Network = {
     this.socket.on('npc:update', (data) => {
       // Server now sends full NPC data in updates, so we can create NPCs
       // if they don't exist (happens when player enters range of existing NPC)
-      Entities.updateNPC({
+      const npcData = {
         id: data.id,
         type: data.type,
         name: data.name,
@@ -282,7 +289,12 @@ const Network = {
         hullMax: data.hullMax,
         shield: data.shield,
         shieldMax: data.shieldMax
-      });
+      };
+      // Include wreckage collection position for tractor beam animation
+      if (data.collectingWreckagePos) {
+        npcData.collectingWreckagePos = data.collectingWreckagePos;
+      }
+      Entities.updateNPC(npcData);
     });
 
     this.socket.on('npc:destroyed', (data) => {
@@ -303,6 +315,15 @@ const Network = {
             npc.position.y,
             npc.phase || 'HUNT',
             npc.rotation || 0
+          );
+        } else if (npc.type === 'scavenger_hauler' || npc.type === 'scavenger_barnacle_king') {
+          // Hauler and Barnacle King get deconstruction death effect
+          DeathEffects.trigger(
+            npc.position.x,
+            npc.position.y,
+            'deconstruction',
+            npc.faction,
+            { rotation: npc.rotation || 0, npcType: npc.type }
           );
         } else {
           // Standard faction-specific death effect
@@ -635,6 +656,278 @@ const Network = {
           newLeader.isFormationLeader = true;
           newLeader.formationLeader = true;
         }
+      }
+    });
+
+    // ============================================
+    // SCAVENGER FACTION EVENTS
+    // ============================================
+
+    // Scavenger rage triggered - visual indicator
+    this.socket.on('scavenger:rage', (data) => {
+      Logger.log('Scavenger rage triggered:', data);
+
+      // Update NPC state for visual indicators
+      let wasAlreadyEnraged = false;
+      if (typeof Entities !== 'undefined') {
+        const npc = Entities.npcs.get(data.npcId);
+        if (npc) {
+          // Check if already enraged before updating state
+          wasAlreadyEnraged = npc.state === 'enraged';
+          npc.state = 'enraged';
+          npc.rageTarget = data.targetId;
+        }
+      }
+
+      // Steam burst particles at NPC location (always show for visual feedback)
+      if (typeof ParticleSystem !== 'undefined' && data.x !== undefined) {
+        for (let i = 0; i < 8; i++) {
+          const angle = Math.random() * Math.PI * 2;
+          ParticleSystem.spawn({
+            x: data.x,
+            y: data.y,
+            vx: Math.cos(angle) * 40,
+            vy: Math.sin(angle) * 40 - 30,
+            life: 400 + Math.random() * 200,
+            color: '#ffffff',
+            size: 4 + Math.random() * 4,
+            type: 'smoke',
+            drag: 0.95,
+            decay: 1.5
+          });
+        }
+      }
+
+      // Warning notification only on FIRST enrage (not already enraged)
+      if (!wasAlreadyEnraged &&
+          typeof NotificationManager !== 'undefined' && typeof Player !== 'undefined' &&
+          data.targetId === Player.id) {
+        NotificationManager.warning('Scavengers are enraged!');
+      }
+    });
+
+    // Scavenger rage cleared
+    this.socket.on('scavenger:rageClear', (data) => {
+      if (typeof Entities !== 'undefined') {
+        const npc = Entities.npcs.get(data.npcId);
+        if (npc) {
+          npc.state = 'idle';
+          npc.rageTarget = null;
+        }
+      }
+    });
+
+    // Scrap pile update at base
+    this.socket.on('scavenger:scrapPileUpdate', (data) => {
+      Logger.log('Scrap pile updated:', data);
+
+      // Update base scrap pile data for rendering
+      if (typeof Entities !== 'undefined') {
+        const base = Entities.bases.get(data.baseId);
+        if (base) {
+          base.scrapPile = data.scrapPile;
+        }
+      }
+    });
+
+    // Hauler transformation starting
+    this.socket.on('scavenger:haulerTransform', (data) => {
+      Logger.log('Hauler transformation starting:', data);
+
+      // Yellow construction particles during transformation
+      if (typeof ParticleSystem !== 'undefined') {
+        for (let i = 0; i < 20; i++) {
+          const angle = Math.random() * Math.PI * 2;
+          const speed = 30 + Math.random() * 60;
+          ParticleSystem.spawn({
+            x: data.x,
+            y: data.y,
+            vx: Math.cos(angle) * speed,
+            vy: Math.sin(angle) * speed,
+            life: 800 + Math.random() * 500,
+            color: '#D4A017',
+            size: 3 + Math.random() * 4,
+            type: 'spark',
+            drag: 0.95,
+            decay: 1
+          });
+        }
+      }
+    });
+
+    // Hauler spawned
+    this.socket.on('scavenger:haulerSpawn', (data) => {
+      Logger.log('Hauler spawned:', data);
+
+      // Add Hauler to entities
+      if (typeof Entities !== 'undefined') {
+        Entities.updateNPC({
+          id: data.haulerId,
+          type: data.type,
+          name: data.name,
+          faction: data.faction,
+          x: data.x,
+          y: data.y,
+          rotation: data.rotation || 0,
+          hull: data.hull,
+          hullMax: data.hullMax,
+          shield: data.shield || 0,
+          shieldMax: data.shieldMax || 0,
+          size: data.size,
+          sizeMultiplier: data.sizeMultiplier
+        });
+      }
+
+      // Notification
+      if (typeof NotificationManager !== 'undefined') {
+        NotificationManager.info('A Scavenger Hauler has emerged!');
+      }
+    });
+
+    // Hauler grew after collecting wreckage
+    this.socket.on('scavenger:haulerGrow', (data) => {
+      Logger.log('Hauler grew:', data);
+
+      // Update Hauler size in entities
+      if (typeof Entities !== 'undefined') {
+        const npc = Entities.npcs.get(data.npcId);
+        if (npc) {
+          npc.sizeMultiplier = data.sizeMultiplier;
+          // Update actual size based on multiplier
+          const baseSize = 80; // Base hauler size
+          npc.size = baseSize * data.sizeMultiplier;
+        }
+      }
+
+      // Visual feedback - growth particles
+      if (typeof ParticleSystem !== 'undefined') {
+        const npc = Entities.npcs.get(data.npcId);
+        if (npc) {
+          for (let i = 0; i < 10; i++) {
+            const angle = Math.random() * Math.PI * 2;
+            const speed = 20 + Math.random() * 40;
+            ParticleSystem.spawn({
+              x: npc.x,
+              y: npc.y,
+              vx: Math.cos(angle) * speed,
+              vy: Math.sin(angle) * speed,
+              life: 500 + Math.random() * 300,
+              color: '#D4A017',
+              size: 3 + Math.random() * 3,
+              type: 'spark',
+              drag: 0.95,
+              decay: 1
+            });
+          }
+        }
+      }
+    });
+
+    // Barnacle King spawned (transformation from Hauler)
+    this.socket.on('scavenger:barnacleKingSpawn', (data) => {
+      Logger.log('BARNACLE KING SPAWNED!', data);
+
+      // Massive construction explosion effect
+      if (typeof ParticleSystem !== 'undefined') {
+        // Yellow/copper burst
+        for (let i = 0; i < 40; i++) {
+          const angle = Math.random() * Math.PI * 2;
+          const speed = 60 + Math.random() * 120;
+          ParticleSystem.spawn({
+            x: data.x,
+            y: data.y,
+            vx: Math.cos(angle) * speed,
+            vy: Math.sin(angle) * speed,
+            life: 1000 + Math.random() * 500,
+            color: i % 2 === 0 ? '#D4A017' : '#B87333',
+            size: 4 + Math.random() * 6,
+            type: 'spark',
+            drag: 0.92,
+            decay: 1
+          });
+        }
+
+        // Dark smoke plume
+        for (let i = 0; i < 15; i++) {
+          ParticleSystem.spawn({
+            x: data.x + (Math.random() - 0.5) * 50,
+            y: data.y + (Math.random() - 0.5) * 50,
+            vx: (Math.random() - 0.5) * 30,
+            vy: -20 - Math.random() * 40,
+            life: 1500 + Math.random() * 700,
+            color: '#333333',
+            size: 10 + Math.random() * 15,
+            type: 'smoke',
+            drag: 0.98,
+            decay: 0.8
+          });
+        }
+      }
+
+      // Add Barnacle King to entities (remove old Hauler)
+      if (typeof Entities !== 'undefined') {
+        // Remove old Hauler if exists
+        if (data.haulerId) {
+          Entities.npcs.delete(data.haulerId);
+        }
+
+        Entities.updateNPC({
+          id: data.kingId,
+          type: 'scavenger_barnacle_king',
+          name: data.name,
+          faction: 'scavenger',
+          x: data.x,
+          y: data.y,
+          rotation: data.rotation || 0,
+          hull: data.hull,
+          hullMax: data.hullMax,
+          shield: 0,
+          shieldMax: 0,
+          size: 250,
+          isBoss: true
+        });
+      }
+
+      // Screen shake
+      if (typeof Renderer !== 'undefined' && Renderer.shake) {
+        Renderer.shake(15, 500);
+      }
+
+      // Epic notification
+      if (typeof NotificationManager !== 'undefined') {
+        NotificationManager.error('⚠ THE BARNACLE KING HAS EMERGED!');
+      }
+    });
+
+    // Barnacle King drill charge warning
+    this.socket.on('scavenger:drillCharge', (data) => {
+      Logger.log('Barnacle King charging drill!', data);
+
+      // Warning indicator at king position
+      if (typeof ParticleSystem !== 'undefined') {
+        // Red warning glow
+        for (let i = 0; i < 10; i++) {
+          const angle = (Math.PI * 2 * i) / 10;
+          const radius = 60;
+          ParticleSystem.spawn({
+            x: data.kingX + Math.cos(angle) * radius,
+            y: data.kingY + Math.sin(angle) * radius,
+            vx: Math.cos(angle) * -20,
+            vy: Math.sin(angle) * -20,
+            life: 1500,
+            color: '#ff0000',
+            size: 5,
+            type: 'glow',
+            drag: 0.99,
+            decay: 0.5
+          });
+        }
+      }
+
+      // Warning notification if player is the target
+      if (typeof NotificationManager !== 'undefined' && typeof Player !== 'undefined' &&
+          data.targetId === Player.id) {
+        NotificationManager.error('⚠ INCOMING DRILL ATTACK - EVADE!');
       }
     });
 
@@ -1450,6 +1743,37 @@ const Network = {
       Player.onLootCollectionCancelled(data);
     });
 
+    // Scrap Siphon multi-collect events
+    this.socket.on('loot:multiStarted', (data) => {
+      Logger.log('[SIPHON] Multi-collect started:', data.wreckageIds, 'totalTime:', data.totalTime);
+      Player.onMultiCollectStarted(data);
+
+      // Start siphon animation for each wreckage piece
+      // Use a minimum animation duration of 600ms for visibility, even if server collection is faster
+      if (typeof Entities !== 'undefined') {
+        const animDuration = Math.max(600, data.totalTime);
+        Entities.startSiphonAnimation(data.wreckageIds, animDuration);
+      }
+    });
+
+    this.socket.on('loot:multiComplete', (data) => {
+      Logger.log('[SIPHON] Multi-collect complete:', data.wreckageIds);
+      Player.onMultiCollectComplete(data);
+
+      // Delay wreckage removal to let animation complete (minimum 600ms animation)
+      // The animation was started with Math.max(600, totalTime), so wait that long
+      const animDelay = 650; // slightly longer than min animation duration
+      setTimeout(() => {
+        Logger.log('[SIPHON] Removing wreckage after animation delay');
+        if (typeof Entities !== 'undefined') {
+          Entities.clearSiphonAnimations(data.wreckageIds);
+        }
+        for (const wreckageId of data.wreckageIds) {
+          Entities.removeWreckage(wreckageId);
+        }
+      }, animDelay);
+    });
+
     // Team credit reward - when another player collects scrap we contributed damage to
     this.socket.on('team:creditReward', (data) => {
       Logger.log('[TEAM] Received credit share:', data.credits, 'from team kill');
@@ -1489,8 +1813,17 @@ const Network = {
 
     this.socket.on('loot:error', (data) => {
       Logger.error('Loot error:', data.message);
-      if (typeof NotificationManager !== 'undefined') {
+      // Don't show "No wreckage within range" - it's noisy when flying by
+      const silentErrors = ['No wreckage within range'];
+      if (typeof NotificationManager !== 'undefined' && !silentErrors.includes(data.message)) {
         NotificationManager.error(data.message);
+      }
+      // Reset multi-collect state on error so player can retry
+      if (typeof Player !== 'undefined') {
+        Player.multiCollecting = false;
+        Player.multiCollectWreckageIds = null;
+        Player.collectProgress = 0;
+        Player.collectTotalTime = 0;
       }
     });
 
@@ -1671,6 +2004,12 @@ const Network = {
   sendLootCancel(wreckageId) {
     if (!this.connected) return;
     this.socket.emit('loot:cancelCollect', { wreckageId });
+  },
+
+  // Scrap Siphon multi-collect
+  sendMultiCollect() {
+    if (!this.connected) return;
+    this.socket.emit('wreckage:multiCollect');
   },
 
   requestNearbyWreckage() {

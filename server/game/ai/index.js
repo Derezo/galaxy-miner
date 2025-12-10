@@ -6,11 +6,12 @@ const SwarmStrategy = require('./swarm');
 const FormationStrategy = require('./formation');
 const TerritorialStrategy = require('./territorial');
 const RetreatStrategy = require('./retreat');
+const ScavengerStrategy = require('./scavenger');
 
 // Map faction to AI strategy
 const FACTION_STRATEGIES = {
   pirate: 'flanking',
-  scavenger: 'retreat',
+  scavenger: 'scavenger', // Changed from 'retreat' to new scavenger strategy
   swarm: 'swarm',
   void: 'formation',
   rogue_miner: 'territorial'
@@ -22,7 +23,8 @@ const strategies = {
   swarm: new SwarmStrategy(),
   formation: new FormationStrategy(),
   territorial: new TerritorialStrategy(),
-  retreat: new RetreatStrategy()
+  retreat: new RetreatStrategy(),
+  scavenger: new ScavengerStrategy()
 };
 
 // Retreat thresholds by faction
@@ -295,9 +297,10 @@ function handleRageMode(npc, allPlayers, deltaTime) {
  * @param {Array} allPlayers - All online players
  * @param {Map} allNPCs - All active NPCs (for ally detection)
  * @param {number} deltaTime - Time since last update
+ * @param {Function} getActiveBase - Function to look up base by ID (optional, for scavengers)
  * @returns {Object|null} Action result (fire, etc.)
  */
-function updateNPCAI(npc, allPlayers, allNPCs, deltaTime) {
+function updateNPCAI(npc, allPlayers, allNPCs, deltaTime, getActiveBase = null) {
   // Special handling for orphaned NPCs in rage mode
   if (npc.orphaned && npc.state === 'rage') {
     return handleRageMode(npc, allPlayers, deltaTime);
@@ -334,8 +337,27 @@ function updateNPCAI(npc, allPlayers, allNPCs, deltaTime) {
   }
 
   // Build context for strategy
+  // For scavengers, get the full base object (needed for scrap pile dumps)
+  let homeBase = null;
+  if (npc.homeBaseId && getActiveBase) {
+    const base = getActiveBase(npc.homeBaseId);
+    if (base) {
+      homeBase = {
+        id: npc.homeBaseId,
+        x: base.x,
+        y: base.y,
+        type: base.type,
+        name: base.name
+      };
+    }
+  }
+  // Fallback to position-only if no base ID or no lookup function
+  if (!homeBase && npc.homeBasePosition) {
+    homeBase = npc.homeBasePosition;
+  }
+
   const context = {
-    homeBase: npc.homeBasePosition,
+    homeBase,
     patrolRadius: npc.patrolRadius || 600,
     territoryRadius: npc.territoryRadius || 500
   };
@@ -378,9 +400,18 @@ function findFormationLeader(npcs) {
   , null);
 }
 
+/**
+ * Get the scavenger strategy instance for external calls (rage triggering, etc.)
+ * @returns {ScavengerStrategy} The scavenger strategy instance
+ */
+function getScavengerStrategy() {
+  return strategies.scavenger;
+}
+
 module.exports = {
   AIStrategy,
   getStrategy,
+  getScavengerStrategy,
   updateNPCAI,
   getNPCsByFaction,
   findFormationLeader,

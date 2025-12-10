@@ -50,6 +50,46 @@ function register(socket) {
     if (typeof NotificationManager !== 'undefined') {
       NotificationManager.error(data.message);
     }
+    // Reset multi-collect state on error so player can retry
+    if (typeof Player !== 'undefined') {
+      Player.multiCollecting = false;
+      Player.multiCollectWreckageIds = null;
+      Player.collectProgress = 0;
+      Player.collectTotalTime = 0;
+    }
+  });
+
+  // Scrap Siphon multi-collect events
+  socket.on('loot:multiStarted', (data) => {
+    window.Logger.log('[SIPHON] Multi-collect started:', data.wreckageIds, 'totalTime:', data.totalTime);
+    Player.onMultiCollectStarted(data);
+
+    // Start siphon animation for each wreckage piece
+    // Use a minimum animation duration of 600ms for visibility, even if server collection is faster
+    if (typeof Entities !== 'undefined' && typeof Player !== 'undefined') {
+      const playerPos = { x: Player.x, y: Player.y };
+      const animDuration = Math.max(600, data.totalTime);
+      window.Logger.log('[SIPHON] Starting animation at player pos:', playerPos, 'duration:', animDuration);
+      Entities.startSiphonAnimation(data.wreckageIds, playerPos, animDuration);
+    }
+  });
+
+  socket.on('loot:multiComplete', (data) => {
+    window.Logger.log('[SIPHON] Multi-collect complete:', data.wreckageIds);
+    Player.onMultiCollectComplete(data);
+
+    // Delay wreckage removal to let animation complete (minimum 600ms animation)
+    // The animation was started with Math.max(600, totalTime), so wait that long
+    const animDelay = 650; // slightly longer than min animation duration
+    setTimeout(() => {
+      window.Logger.log('[SIPHON] Removing wreckage after animation delay');
+      if (typeof Entities !== 'undefined') {
+        Entities.clearSiphonAnimations(data.wreckageIds);
+      }
+      for (const wreckageId of data.wreckageIds) {
+        Entities.removeWreckage(wreckageId);
+      }
+    }, animDelay);
   });
 
   // Team credit reward - when another player collects scrap we contributed damage to

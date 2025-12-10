@@ -167,11 +167,17 @@ function applyDamage(targetUserId, damage, damageType = 'kinetic') {
   };
 }
 
-function handleDeath(userId) {
+/**
+ * Handle player death - calculate dropped cargo, spawn wreckage, and respawn
+ * @param {number} userId - Player's user ID
+ * @param {Object} deathPosition - { x, y } position where player died (for wreckage)
+ * @returns {Object} Death result with droppedCargo, wreckageContents, respawnPosition, deathPosition
+ */
+function handleDeath(userId, deathPosition = null) {
   const ship = statements.getShipByUserId.get(userId);
   const inventory = statements.getInventory.all(userId);
 
-  // Calculate cargo to drop
+  // Calculate cargo to drop (50% of inventory)
   const droppedCargo = [];
   for (const item of inventory) {
     const dropAmount = Math.floor(item.quantity * config.DEATH_CARGO_DROP_PERCENT);
@@ -192,6 +198,21 @@ function handleDeath(userId) {
     }
   }
 
+  // Calculate wreckage contents (50% of dropped cargo = 25% of original inventory)
+  // This is what goes into the wreckage for other players/Scavengers to collect
+  const wreckageContents = [];
+  for (const item of droppedCargo) {
+    const wreckageAmount = Math.floor(item.quantity * 0.5); // Half of dropped goes to wreckage
+    if (wreckageAmount > 0) {
+      wreckageContents.push({
+        type: 'resource',
+        resourceType: item.resource_type.toUpperCase(),
+        quantity: wreckageAmount,
+        rarity: 'common'  // Default rarity for player cargo
+      });
+    }
+  }
+
   // Find safe respawn position (away from stars)
   const safePos = world.findSafeSpawnLocation(0, 0, 5000);
 
@@ -200,7 +221,10 @@ function handleDeath(userId) {
 
   return {
     droppedCargo,
-    respawnPosition: safePos
+    wreckageContents, // For spawning wreckage
+    respawnPosition: safePos,
+    deathPosition: deathPosition || { x: ship?.x || 0, y: ship?.y || 0 },
+    playerName: ship?.username || 'Unknown'
   };
 }
 

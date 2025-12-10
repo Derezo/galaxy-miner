@@ -18,6 +18,9 @@ const Entities = {
   projectileTrails: [],  // Track recent weapon fire for radar (Tier 4+)
   _lastStaleCheck: 0,    // Timestamp of last staleness check
 
+  // Scrap Siphon animation state
+  siphonAnimations: new Map(), // wreckageId -> { startTime, duration, startPos, targetPos }
+
   init() {
     this.players.clear();
     this.npcs.clear();
@@ -26,6 +29,7 @@ const Entities = {
     this.baseStates.clear();
     this.bases.clear();
     this.projectileTrails = [];
+    this.siphonAnimations.clear();
     Logger.log('Entities initialized');
   },
 
@@ -245,6 +249,8 @@ const Entities = {
       if (data.shieldMax !== undefined) npc.shieldMax = data.shieldMax;
       if (data.type) npc.type = data.type;
       if (data.name) npc.name = data.name;
+      // Update wreckage collection position for tractor beam animation
+      npc.collectingWreckagePos = data.collectingWreckagePos || null;
       if (data.faction) npc.faction = data.faction;
     }
   },
@@ -347,6 +353,49 @@ const Entities = {
     }
   },
 
+  // Scrap Siphon animation methods
+  startSiphonAnimation(wreckageIds, duration) {
+    const now = Date.now();
+    Logger.log('[SIPHON] startSiphonAnimation called with', wreckageIds.length, 'wreckage pieces');
+    for (const wreckageId of wreckageIds) {
+      const wreckage = this.wreckage.get(wreckageId);
+      if (wreckage) {
+        Logger.log('[SIPHON] Adding animation for wreckage', wreckageId, 'at', wreckage.position);
+        this.siphonAnimations.set(wreckageId, {
+          startTime: now,
+          duration: duration,
+          startPos: { x: wreckage.position.x, y: wreckage.position.y },
+          faction: wreckage.faction
+        });
+      } else {
+        Logger.warn('[SIPHON] Wreckage not found:', wreckageId);
+      }
+    }
+    Logger.log('[SIPHON] Active animations:', this.siphonAnimations.size);
+  },
+
+  clearSiphonAnimations(wreckageIds) {
+    for (const wreckageId of wreckageIds) {
+      this.siphonAnimations.delete(wreckageId);
+    }
+  },
+
+  getSiphonAnimationState(wreckageId) {
+    const anim = this.siphonAnimations.get(wreckageId);
+    if (!anim) return null;
+
+    const now = Date.now();
+    const elapsed = now - anim.startTime;
+    const progress = Math.min(1, elapsed / anim.duration);
+
+    return {
+      progress,
+      startPos: anim.startPos,
+      faction: anim.faction,
+      isComplete: progress >= 1
+    };
+  },
+
   // Base state management
   updateBaseHealth(baseId, health, maxHealth) {
     if (!this.baseStates.has(baseId)) {
@@ -416,7 +465,8 @@ const Entities = {
         name: base.name,
         health: base.health,
         maxHealth: base.maxHealth,
-        size: base.size
+        size: base.size,
+        scrapPile: base.scrapPile || null
       });
     }
   },

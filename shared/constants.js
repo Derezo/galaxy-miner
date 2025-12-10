@@ -843,12 +843,13 @@ const CONSTANTS = {
       gradient: ['#ff4400', '#cc1100']
     },
     scavenger: {
-      primary: '#999966',
-      secondary: '#666644',
-      accent: '#cccc88',
-      glow: '#99996640',
-      outline: '#bbbb77',
-      gradient: ['#aaaa77', '#555533']
+      primary: '#D4A017',      // Construction yellow
+      secondary: '#8B4513',    // Saddle brown
+      accent: '#B87333',       // Copper
+      steel: '#71797E',        // Steel gray
+      glow: '#D4A01740',
+      outline: '#FFD700',
+      gradient: ['#D4A017', '#8B4513']
     },
     swarm: {
       // Stealthy predator theme - black hull with crimson accents
@@ -1043,6 +1044,37 @@ const CONSTANTS = {
       damageType: 'energy',
       width: 4,
       particles: true
+    },
+    dual_laser: {
+      id: 'dual_laser',
+      name: 'Dual Laser',
+      color: '#D4A017',      // Construction yellow
+      coreColor: '#FFD700',  // Gold core
+      glowColor: '#D4A01740',
+      type: 'projectile',
+      damageType: 'energy',
+      size: 4,
+      speed: 500,
+      trail: false,
+      dual: true             // Fires two parallel shots
+    },
+    boring_drill: {
+      id: 'boring_drill',
+      name: 'Boring Drill',
+      color: '#999966',
+      type: 'melee',
+      damageType: 'kinetic',
+      chargeTime: 1500,
+      instantKill: true
+    },
+    loader_slam: {
+      id: 'loader_slam',
+      name: 'Loader Slam',
+      color: '#666644',
+      type: 'melee',
+      damageType: 'kinetic',
+      size: 20,
+      knockback: true
     }
   },
 
@@ -1181,6 +1213,22 @@ const CONSTANTS = {
       iconType: 'wormhole_gem',
       glowColor: '#9900ff',
       effect: 'wormhole_transit'
+    },
+    SCRAP_SIPHON: {
+      id: 'scrap_siphon',
+      name: 'Scrap Siphon',
+      rarity: 'legendary',
+      value: 2500,
+      description: 'Collect wreckage faster and grab multiple pieces at once. Scavengers ignore your wreckage collection.',
+      iconType: 'scrap_siphon',
+      glyphVariant: 'mechanical',
+      glowColor: '#D4A017',
+      effects: {
+        wreckageCollectionSpeed: 0.5,
+        multiWreckageCount: 3,
+        multiWreckageRange: 300,
+        scavengerWreckageImmunity: true
+      }
     }
   },
 

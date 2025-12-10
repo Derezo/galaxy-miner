@@ -3,12 +3,14 @@
  * Used by both client and server to reduce code duplication
  */
 
-// Import constants if available (server-side)
-let CONSTANTS;
+// Import constants if available
+// In browser, CONSTANTS is already a global from constants.js script tag
+// In Node.js, we need to require it
+let _utilsConstants;
 if (typeof module !== 'undefined' && module.exports) {
-  CONSTANTS = require('./constants');
-} else if (typeof window !== 'undefined') {
-  CONSTANTS = window.CONSTANTS;
+  _utilsConstants = require('./constants');
+} else if (typeof window !== 'undefined' && typeof CONSTANTS !== 'undefined') {
+  _utilsConstants = CONSTANTS;
 }
 
 /**
@@ -18,7 +20,7 @@ if (typeof module !== 'undefined' && module.exports) {
  * @returns {number} Multiplier value
  */
 function getTierMultiplier(tier) {
-  const multiplier = CONSTANTS ? CONSTANTS.TIER_MULTIPLIER : 1.5;
+  const multiplier = _utilsConstants ? _utilsConstants.TIER_MULTIPLIER : 1.5;
   return Math.pow(multiplier, (tier || 1) - 1);
 }
 
@@ -57,7 +59,7 @@ function getDistanceSquared(x1, y1, x2, y2) {
  * @returns {number} Mining time in milliseconds
  */
 function getMiningTime(miningTier) {
-  const baseMiningTime = CONSTANTS ? CONSTANTS.BASE_MINING_TIME : 3000;
+  const baseMiningTime = _utilsConstants ? _utilsConstants.BASE_MINING_TIME : 3000;
   return baseMiningTime / getTierMultiplier(miningTier);
 }
 
@@ -68,7 +70,7 @@ function getMiningTime(miningTier) {
  * @returns {number} Base damage value
  */
 function getWeaponDamage(weaponTier, weaponType) {
-  const baseDamage = CONSTANTS ? CONSTANTS.BASE_WEAPON_DAMAGE : 10;
+  const baseDamage = _utilsConstants ? _utilsConstants.BASE_WEAPON_DAMAGE : 10;
   return baseDamage * getTierMultiplier(weaponTier);
 }
 
@@ -78,7 +80,7 @@ function getWeaponDamage(weaponTier, weaponType) {
  * @returns {number} Cooldown in milliseconds
  */
 function getWeaponCooldown(weaponTier) {
-  const baseCooldown = CONSTANTS ? CONSTANTS.BASE_WEAPON_COOLDOWN : 500;
+  const baseCooldown = _utilsConstants ? _utilsConstants.BASE_WEAPON_COOLDOWN : 500;
   // Higher tier = faster fire rate (lower cooldown)
   return baseCooldown / getTierMultiplier(weaponTier);
 }
@@ -89,7 +91,7 @@ function getWeaponCooldown(weaponTier) {
  * @returns {number} Recharge rate per second
  */
 function getShieldRechargeRate(shieldTier) {
-  const baseRate = CONSTANTS ? CONSTANTS.SHIELD_RECHARGE_RATE : 5;
+  const baseRate = _utilsConstants ? _utilsConstants.SHIELD_RECHARGE_RATE : 5;
   return baseRate * getTierMultiplier(shieldTier);
 }
 
@@ -99,7 +101,7 @@ function getShieldRechargeRate(shieldTier) {
  * @returns {number} Max speed
  */
 function getMaxSpeed(engineTier) {
-  const baseSpeed = CONSTANTS ? CONSTANTS.BASE_SPEED : 150;
+  const baseSpeed = _utilsConstants ? _utilsConstants.BASE_SPEED : 150;
   return baseSpeed * getTierMultiplier(engineTier);
 }
 
@@ -109,8 +111,8 @@ function getMaxSpeed(engineTier) {
  * @returns {number} Radar range in units
  */
 function getRadarRange(radarTier) {
-  if (CONSTANTS && CONSTANTS.RADAR_TIERS && CONSTANTS.RADAR_TIERS[radarTier]) {
-    return CONSTANTS.RADAR_TIERS[radarTier].range;
+  if (_utilsConstants && _utilsConstants.RADAR_TIERS && _utilsConstants.RADAR_TIERS[radarTier]) {
+    return _utilsConstants.RADAR_TIERS[radarTier].range;
   }
   // Fallback calculation
   const baseRange = 500;
@@ -123,8 +125,8 @@ function getRadarRange(radarTier) {
  * @returns {number} Cargo capacity
  */
 function getCargoCapacity(cargoTier) {
-  if (CONSTANTS && CONSTANTS.CARGO_CAPACITY && CONSTANTS.CARGO_CAPACITY[cargoTier]) {
-    return CONSTANTS.CARGO_CAPACITY[cargoTier];
+  if (_utilsConstants && _utilsConstants.CARGO_CAPACITY && _utilsConstants.CARGO_CAPACITY[cargoTier]) {
+    return _utilsConstants.CARGO_CAPACITY[cargoTier];
   }
   // Fallback calculation
   const baseCapacity = 50;

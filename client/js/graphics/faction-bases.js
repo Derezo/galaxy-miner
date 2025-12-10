@@ -165,7 +165,7 @@ const FactionBases = {
         this.drawPirateOutpost(ctx, config);
         break;
       case 'scavenger_yard':
-        this.drawScavengerYard(ctx, config);
+        this.drawScavengerYard(ctx, config, base);
         break;
       case 'swarm_hive':
         this.drawSwarmHive(ctx, config);
@@ -591,9 +591,14 @@ const FactionBases = {
     ctx.restore();
   },
 
-  drawScavengerYard(ctx, config) {
+  drawScavengerYard(ctx, config, base = null) {
     const time = this.animationTime;
     const size = config.size;
+
+    // Draw scrap pile if present (from scavenger dumps)
+    if (base && base.scrapPile && base.scrapPile.count > 0) {
+      this.drawScrapPile(ctx, base.scrapPile, size);
+    }
 
     // Scattered debris glow
     const gradient = ctx.createRadialGradient(0, 0, 0, 0, 0, size * 1.3);
@@ -713,6 +718,229 @@ const FactionBases = {
     ctx.beginPath();
     ctx.arc(0, 0, size * 0.25, 0, Math.PI * 2);
     ctx.fill();
+
+    ctx.restore();
+  },
+
+  /**
+   * Draw the scrap pile that accumulates at scavenger bases
+   * Grows in 3 stages based on wreckage count
+   * Stage 3 (count >= 3) adds "ready to transform" glow effect
+   */
+  drawScrapPile(ctx, scrapPile, baseSize) {
+    const count = scrapPile.count || 0;
+    if (count <= 0) return;
+
+    const time = this.animationTime;
+
+    // Position scrap pile offset from center
+    const pileX = baseSize * 0.5;
+    const pileY = baseSize * 0.3;
+
+    ctx.save();
+    ctx.translate(pileX, pileY);
+
+    // Pile size grows with count (3 stages) - more dramatic size difference
+    const stage = Math.min(3, Math.ceil(count / 1)); // Stage 1, 2, or 3
+    const pileRadius = 12 + stage * 15; // Bigger growth per stage
+    const isReadyToTransform = count >= 3;
+
+    // "Ready to transform" glow effect - intense pulsing when pile is full
+    if (isReadyToTransform) {
+      const transformPulse = 0.4 + Math.sin(time * 4) * 0.3;
+      const transformGlow = ctx.createRadialGradient(0, 0, 0, 0, 0, pileRadius * 2);
+      transformGlow.addColorStop(0, `rgba(255, 100, 0, ${transformPulse * 0.6})`);
+      transformGlow.addColorStop(0.4, `rgba(255, 180, 0, ${transformPulse * 0.4})`);
+      transformGlow.addColorStop(0.7, `rgba(200, 100, 0, ${transformPulse * 0.2})`);
+      transformGlow.addColorStop(1, 'transparent');
+      ctx.fillStyle = transformGlow;
+      ctx.beginPath();
+      ctx.arc(0, 0, pileRadius * 2, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Spark particles around pile when ready
+      ctx.fillStyle = '#FFD700';
+      for (let i = 0; i < 4; i++) {
+        const sparkAngle = time * 2 + (i * Math.PI / 2);
+        const sparkDist = pileRadius * 1.3 + Math.sin(time * 5 + i) * 5;
+        const sparkX = Math.cos(sparkAngle) * sparkDist;
+        const sparkY = Math.sin(sparkAngle) * sparkDist;
+        const sparkSize = 2 + Math.sin(time * 8 + i * 2) * 1;
+
+        ctx.globalAlpha = 0.6 + Math.sin(time * 6 + i) * 0.4;
+        ctx.beginPath();
+        ctx.arc(sparkX, sparkY, sparkSize, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.globalAlpha = 1;
+    }
+
+    // Base glow effect - rust/industrial color
+    const glowIntensity = 0.2 + Math.sin(time * 2) * 0.1;
+    const gradient = ctx.createRadialGradient(0, 0, 0, 0, 0, pileRadius * 1.5);
+    gradient.addColorStop(0, `rgba(139, 69, 19, ${glowIntensity + (isReadyToTransform ? 0.2 : 0)})`);
+    gradient.addColorStop(0.5, `rgba(160, 82, 45, ${glowIntensity * 0.6})`);
+    gradient.addColorStop(1, 'transparent');
+    ctx.fillStyle = gradient;
+    ctx.beginPath();
+    ctx.arc(0, 0, pileRadius * 1.5, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Debris piece types for more variety
+    const debrisTypes = [
+      'plate',    // Flat metal plate
+      'pipe',     // Cylindrical pipe
+      'gear',     // Gear shape
+      'hull',     // Ship hull fragment
+      'strut',    // Structural strut
+    ];
+
+    // Grimy junkyard colors - mix from different "factions" of collected wreckage
+    const debrisColors = [
+      '#8B4513',  // Rust brown (scavenger)
+      '#A0522D',  // Sienna rust
+      '#B87333',  // Copper
+      '#5A5A5A',  // Grimy steel
+      '#6B4423',  // Dark copper
+      '#4A4A4A',  // Dark steel
+      '#CD853F',  // Peru (weathered metal)
+      '#B8860B',  // Dark goldenrod
+    ];
+
+    // Draw debris pieces in the pile - more pieces with each stage
+    const pieceCount = 4 + stage * 4;
+    for (let i = 0; i < pieceCount; i++) {
+      const angle = (Math.PI * 2 * i) / pieceCount + i * 0.3 + Math.sin(i) * 0.5;
+      const distFactor = 0.2 + (i % 4) * 0.2 + Math.sin(i * 1.5) * 0.1;
+      const dist = pileRadius * distFactor;
+      const pieceSize = 4 + stage + (i % 4) * 2;
+      const rotation = time * 0.03 * ((i % 2) ? 1 : -1) + i * 0.8;
+      const debrisType = debrisTypes[i % debrisTypes.length];
+
+      ctx.save();
+      ctx.translate(Math.cos(angle) * dist, Math.sin(angle) * dist);
+      ctx.rotate(rotation);
+
+      ctx.fillStyle = debrisColors[i % debrisColors.length];
+      ctx.strokeStyle = '#333333';
+      ctx.lineWidth = 0.5;
+
+      // Draw different debris shapes
+      ctx.beginPath();
+      switch (debrisType) {
+        case 'plate':
+          // Irregular flat plate
+          ctx.moveTo(-pieceSize, -pieceSize * 0.4);
+          ctx.lineTo(pieceSize * 0.8, -pieceSize * 0.5);
+          ctx.lineTo(pieceSize, pieceSize * 0.3);
+          ctx.lineTo(-pieceSize * 0.6, pieceSize * 0.5);
+          break;
+
+        case 'pipe':
+          // Cylindrical pipe section
+          ctx.ellipse(0, 0, pieceSize * 0.3, pieceSize, 0, 0, Math.PI * 2);
+          break;
+
+        case 'gear':
+          // Gear with teeth
+          const teeth = 6;
+          const innerR = pieceSize * 0.5;
+          const outerR = pieceSize;
+          for (let t = 0; t < teeth; t++) {
+            const tAngle = (t / teeth) * Math.PI * 2;
+            const nextAngle = ((t + 0.5) / teeth) * Math.PI * 2;
+            if (t === 0) {
+              ctx.moveTo(Math.cos(tAngle) * outerR, Math.sin(tAngle) * outerR);
+            } else {
+              ctx.lineTo(Math.cos(tAngle) * outerR, Math.sin(tAngle) * outerR);
+            }
+            ctx.lineTo(Math.cos(nextAngle) * innerR, Math.sin(nextAngle) * innerR);
+          }
+          break;
+
+        case 'hull':
+          // Curved hull fragment
+          ctx.moveTo(-pieceSize, 0);
+          ctx.quadraticCurveTo(0, -pieceSize * 0.8, pieceSize, 0);
+          ctx.quadraticCurveTo(0, pieceSize * 0.4, -pieceSize, 0);
+          break;
+
+        case 'strut':
+          // Angular strut
+          ctx.moveTo(-pieceSize, -pieceSize * 0.2);
+          ctx.lineTo(-pieceSize * 0.7, -pieceSize * 0.2);
+          ctx.lineTo(pieceSize, pieceSize * 0.1);
+          ctx.lineTo(pieceSize, pieceSize * 0.3);
+          ctx.lineTo(-pieceSize * 0.5, pieceSize * 0.2);
+          ctx.lineTo(-pieceSize, pieceSize * 0.15);
+          break;
+
+        default:
+          // Fallback polygon
+          const points = 3 + (i % 3);
+          for (let j = 0; j < points; j++) {
+            const pAngle = (Math.PI * 2 * j) / points;
+            const r = pieceSize * (0.6 + (j % 2) * 0.4);
+            if (j === 0) {
+              ctx.moveTo(Math.cos(pAngle) * r, Math.sin(pAngle) * r);
+            } else {
+              ctx.lineTo(Math.cos(pAngle) * r, Math.sin(pAngle) * r);
+            }
+          }
+      }
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+
+      ctx.restore();
+    }
+
+    // Stage indicator orbs - show count progress toward transformation
+    const orbRadius = 3 + (isReadyToTransform ? 1 : 0);
+    const orbDist = pileRadius + 10;
+    for (let i = 0; i < 3; i++) {
+      const orbAngle = -Math.PI / 2 + (i - 1) * 0.6;
+      const orbX = Math.cos(orbAngle) * orbDist;
+      const orbY = Math.sin(orbAngle) * orbDist;
+
+      const isLit = i < count;
+      const orbPulse = isLit ? (0.7 + Math.sin(time * 3 + i) * 0.3) : 0.2;
+
+      // Orb glow
+      if (isLit) {
+        const orbGlow = ctx.createRadialGradient(orbX, orbY, 0, orbX, orbY, orbRadius * 2);
+        orbGlow.addColorStop(0, `rgba(255, 215, 0, ${orbPulse * 0.5})`);
+        orbGlow.addColorStop(1, 'transparent');
+        ctx.fillStyle = orbGlow;
+        ctx.beginPath();
+        ctx.arc(orbX, orbY, orbRadius * 2, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      // Orb core
+      ctx.fillStyle = isLit
+        ? `rgba(255, 215, 0, ${orbPulse})`
+        : `rgba(100, 100, 100, 0.3)`;
+      ctx.beginPath();
+      ctx.arc(orbX, orbY, orbRadius, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Orb outline
+      ctx.strokeStyle = isLit ? '#FFD700' : '#555555';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+    }
+
+    // "READY" indicator text when pile is full
+    if (isReadyToTransform) {
+      const textPulse = 0.6 + Math.sin(time * 4) * 0.4;
+      ctx.globalAlpha = textPulse;
+      ctx.fillStyle = '#FFD700';
+      ctx.font = 'bold 8px monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText('READY', 0, pileRadius + 25);
+      ctx.globalAlpha = 1;
+    }
 
     ctx.restore();
   },

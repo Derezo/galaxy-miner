@@ -27,7 +27,7 @@ const FACTION_LOOT = {
       rare:      ['GOLD', 'PLATINUM', 'IRIDIUM'],
       ultrarare: ['EXOTIC_MATTER']
     },
-    relics: ['PIRATE_TREASURE', 'ANCIENT_STAR_MAP'],
+    relics: ['PIRATE_TREASURE', 'ANCIENT_STAR_MAP', 'SCRAP_SIPHON'],
     buffs: ['SHIELD_BOOST', 'SPEED_BURST'],
     components: ['MINING_CAPACITOR', 'ENGINE_CORE']
   },
@@ -165,6 +165,7 @@ const NPC_LOOT_MAPPING = {
   scavenger_salvager:  { faction: 'scavenger', tier: 'low' },
   scavenger_collector: { faction: 'scavenger', tier: 'mid' },
   scavenger_hauler:    { faction: 'scavenger', tier: 'high' },  // NOT boss - they flee
+  scavenger_barnacle_king: { faction: 'scavenger', tier: 'boss' },
   scavenger_yard:      { faction: 'scavenger', tier: 'base' },
 
   // Swarm
@@ -314,6 +315,14 @@ function generateLoot(npcType) {
         relicType
       });
     }
+  }
+
+  // Guaranteed SCRAP_SIPHON drop for Barnacle King
+  if (npcType === 'scavenger_barnacle_king') {
+    contents.push({
+      type: 'relic',
+      relicType: 'SCRAP_SIPHON'
+    });
   }
 
   return contents;

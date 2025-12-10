@@ -385,6 +385,7 @@ const Renderer = {
         if (serverBase && serverBase.position) {
           // Use server position for rendering to match hit detection
           // Also use server type/faction for assimilated bases
+          // Include scrapPile for scavenger bases
           renderBase = {
             ...base,
             x: serverBase.position.x,
@@ -393,6 +394,7 @@ const Renderer = {
             maxHealth: serverBase.maxHealth,
             type: serverBase.type || base.type,
             faction: serverBase.faction || base.faction,
+            scrapPile: serverBase.scrapPile,
           };
         } else {
           // Fallback: check for health state only
@@ -439,6 +441,7 @@ const Renderer = {
           name: serverBase.name,
           health: serverBase.health,
           maxHealth: serverBase.maxHealth,
+          scrapPile: serverBase.scrapPile,
         };
 
         if (!this.isOnScreen(base.x, base.y, base.size)) continue;
@@ -815,6 +818,10 @@ const Renderer = {
       unknown: "#888888",
     };
 
+    // Scrap Siphon copper color
+    const SIPHON_COPPER = "#B87333";
+    const SIPHON_COPPER_GLOW = "#CD7F32";
+
     // Despawn fade constants
     const FADE_START_MS = 10000; // Start fading 10 seconds before despawn
     const FADE_PULSE_SPEED = 3; // Pulses per second when fading
@@ -823,33 +830,69 @@ const Renderer = {
     Entities.updateWreckageRotation(dt);
 
     for (const [id, wreckage] of Entities.wreckage) {
-      if (!this.isOnScreen(wreckage.position.x, wreckage.position.y, 50))
+      // Check if this wreckage is being siphoned
+      const siphonState = Entities.getSiphonAnimationState(id);
+      const isSiphoning = siphonState !== null;
+
+      // Calculate position - interpolate toward player if siphoning
+      let drawX = wreckage.position.x;
+      let drawY = wreckage.position.y;
+      let siphonAlpha = 1.0;
+      let siphonScale = 1.0;
+
+      if (isSiphoning) {
+        const progress = siphonState.progress;
+        // Use easing for smooth movement (ease-in-out cubic)
+        const easedProgress = progress < 0.5
+          ? 4 * progress * progress * progress
+          : 1 - Math.pow(-2 * progress + 2, 3) / 2;
+
+        // Get current player position (tracks player movement during animation)
+        const targetX = Player.position.x;
+        const targetY = Player.position.y;
+
+        // Interpolate position toward current player position
+        drawX = siphonState.startPos.x + (targetX - siphonState.startPos.x) * easedProgress;
+        drawY = siphonState.startPos.y + (targetY - siphonState.startPos.y) * easedProgress;
+
+        // Fade out in the last 30% of animation
+        if (progress > 0.7) {
+          siphonAlpha = 1 - ((progress - 0.7) / 0.3);
+        }
+
+        // Scale down slightly as it gets closer
+        siphonScale = 1 - (progress * 0.5);
+      }
+
+      if (!this.isOnScreen(drawX, drawY, 50))
         continue;
 
-      const screen = this.worldToScreen(
-        wreckage.position.x,
-        wreckage.position.y
-      );
-      const color = FACTION_COLORS[wreckage.faction] || FACTION_COLORS.unknown;
+      const screen = this.worldToScreen(drawX, drawY);
+      const baseColor = FACTION_COLORS[wreckage.faction] || FACTION_COLORS.unknown;
+      // Use copper color when siphoning, otherwise faction color
+      const color = isSiphoning ? SIPHON_COPPER : baseColor;
 
-      // Calculate despawn fade effect
+      // Calculate despawn fade effect (only when not siphoning)
       let despawnAlpha = 1.0;
-      const timeUntilDespawn = wreckage.despawnTime - now;
-      if (timeUntilDespawn <= FADE_START_MS && timeUntilDespawn > 0) {
-        // Progress from 0 (just started fading) to 1 (about to despawn)
-        const fadeProgress = 1 - (timeUntilDespawn / FADE_START_MS);
-        // Pulse faster as we approach despawn (3-8 pulses per second)
-        const pulseSpeed = FADE_PULSE_SPEED + fadeProgress * 5;
-        const fadePhase = (now / 1000 * pulseSpeed) % 1;
-        // Oscillate between (1 - fadeProgress*0.7) and 1, gradually lowering the floor
-        const minAlpha = Math.max(0.1, 1 - fadeProgress * 0.9);
-        const pulseAlpha = minAlpha + (1 - minAlpha) * (0.5 + 0.5 * Math.sin(fadePhase * Math.PI * 2));
-        despawnAlpha = pulseAlpha;
+      if (!isSiphoning) {
+        const timeUntilDespawn = wreckage.despawnTime - now;
+        if (timeUntilDespawn <= FADE_START_MS && timeUntilDespawn > 0) {
+          const fadeProgress = 1 - (timeUntilDespawn / FADE_START_MS);
+          const pulseSpeed = FADE_PULSE_SPEED + fadeProgress * 5;
+          const fadePhase = (now / 1000 * pulseSpeed) % 1;
+          const minAlpha = Math.max(0.1, 1 - fadeProgress * 0.9);
+          const pulseAlpha = minAlpha + (1 - minAlpha) * (0.5 + 0.5 * Math.sin(fadePhase * Math.PI * 2));
+          despawnAlpha = pulseAlpha;
+        }
       }
+
+      // Combine alphas
+      const finalAlpha = despawnAlpha * siphonAlpha;
 
       ctx.save();
       ctx.translate(screen.x, screen.y);
       ctx.rotate(wreckage.rotation);
+      ctx.scale(siphonScale, siphonScale);
 
       // Draw debris pieces (3-5 scattered pieces)
       const pieceCount = 3 + (wreckage.contentCount % 3);
@@ -864,7 +907,7 @@ const Renderer = {
 
         // Draw piece
         ctx.fillStyle = color;
-        ctx.globalAlpha = 0.8 * despawnAlpha;
+        ctx.globalAlpha = 0.8 * finalAlpha;
         ctx.beginPath();
         ctx.moveTo(px, py - size);
         ctx.lineTo(px + size * 0.8, py + size * 0.5);
@@ -872,23 +915,31 @@ const Renderer = {
         ctx.closePath();
         ctx.fill();
 
-        // Outline
-        ctx.strokeStyle = "#ffffff";
-        ctx.lineWidth = 1;
-        ctx.globalAlpha = 0.5 * despawnAlpha;
+        // Outline - copper glow when siphoning
+        ctx.strokeStyle = isSiphoning ? SIPHON_COPPER_GLOW : "#ffffff";
+        ctx.lineWidth = isSiphoning ? 2 : 1;
+        ctx.globalAlpha = (isSiphoning ? 0.9 : 0.5) * finalAlpha;
         ctx.stroke();
       }
 
-      // Pulsing glow to indicate loot value
-      const pulsePhase = (now / 500) % (Math.PI * 2);
-      const pulseIntensity = 0.3 + Math.sin(pulsePhase) * 0.2;
-      const glowRadius = 20 + wreckage.contentCount * 2;
+      // Pulsing glow - enhanced copper glow when siphoning
+      const pulsePhase = (now / (isSiphoning ? 150 : 500)) % (Math.PI * 2);
+      const pulseIntensity = isSiphoning
+        ? 0.6 + Math.sin(pulsePhase) * 0.3  // Stronger pulse when siphoning
+        : 0.3 + Math.sin(pulsePhase) * 0.2;
+      const glowRadius = (20 + wreckage.contentCount * 2) * (isSiphoning ? 1.5 : 1);
 
       const gradient = ctx.createRadialGradient(0, 0, 0, 0, 0, glowRadius);
-      gradient.addColorStop(0, color + "66");
-      gradient.addColorStop(1, "transparent");
+      if (isSiphoning) {
+        gradient.addColorStop(0, SIPHON_COPPER_GLOW + "aa");
+        gradient.addColorStop(0.5, SIPHON_COPPER + "66");
+        gradient.addColorStop(1, "transparent");
+      } else {
+        gradient.addColorStop(0, color + "66");
+        gradient.addColorStop(1, "transparent");
+      }
 
-      ctx.globalAlpha = pulseIntensity * despawnAlpha;
+      ctx.globalAlpha = pulseIntensity * finalAlpha;
       ctx.fillStyle = gradient;
       ctx.beginPath();
       ctx.arc(0, 0, glowRadius, 0, Math.PI * 2);
@@ -896,18 +947,20 @@ const Renderer = {
 
       ctx.restore();
 
-      // Draw label below wreckage
-      ctx.globalAlpha = 0.8 * despawnAlpha;
-      ctx.fillStyle = color;
-      ctx.font = "10px monospace";
-      ctx.textAlign = "center";
-      ctx.fillText(wreckage.npcName || "Wreckage", screen.x, screen.y + 25);
+      // Draw label below wreckage (skip when siphoning far along)
+      if (!isSiphoning || siphonState.progress < 0.5) {
+        ctx.globalAlpha = 0.8 * finalAlpha;
+        ctx.fillStyle = isSiphoning ? SIPHON_COPPER : baseColor;
+        ctx.font = "10px monospace";
+        ctx.textAlign = "center";
+        ctx.fillText(wreckage.npcName || "Wreckage", screen.x, screen.y + 25 * siphonScale);
 
-      // Draw loot count indicator
-      if (wreckage.contentCount > 0) {
-        ctx.fillStyle = "#ffffff";
-        ctx.font = "bold 8px monospace";
-        ctx.fillText(`x${wreckage.contentCount}`, screen.x, screen.y + 35);
+        // Draw loot count indicator
+        if (wreckage.contentCount > 0) {
+          ctx.fillStyle = isSiphoning ? SIPHON_COPPER_GLOW : "#ffffff";
+          ctx.font = "bold 8px monospace";
+          ctx.fillText(`x${wreckage.contentCount}`, screen.x, screen.y + 35 * siphonScale);
+        }
       }
 
       ctx.globalAlpha = 1;
@@ -1050,14 +1103,101 @@ const Renderer = {
           continue; // Skip normal ship rendering
         }
 
+        // Spawn smoke trail for Barnacle King (when moving)
+        // Note: Client NPCs use targetPosition for interpolation, not velocity
+        // Check if NPC is moving by comparing position to targetPosition
+        if (npc.type === 'scavenger_barnacle_king') {
+          let isMoving = false;
+          let speed = 0;
+          if (npc.targetPosition) {
+            const dx = npc.targetPosition.x - npc.position.x;
+            const dy = npc.targetPosition.y - npc.position.y;
+            speed = Math.sqrt(dx * dx + dy * dy);
+            isMoving = speed > 2; // Moving if more than 2 units from target
+          }
+          if (isMoving || npc.state === 'enraged') {
+            // Always emit smoke when enraged, or when moving
+            // Smoke from both stacks
+            const SIZE = NPCShipGeometry.SIZE * 17.5;
+            const cos = Math.cos(npc.rotation);
+            const sin = Math.sin(npc.rotation);
+
+            // Stack positions in world space
+            const stacks = [
+              { x: -SIZE * 0.5, y: -SIZE * 0.5 },
+              { x: -SIZE * 0.5, y: SIZE * 0.5 }
+            ];
+
+            stacks.forEach(stack => {
+              const worldX = npc.position.x + stack.x * cos - stack.y * sin;
+              const worldY = npc.position.y + stack.x * sin + stack.y * cos;
+
+              if (Math.random() < 0.3) { // 30% chance per frame
+                ParticleSystem.spawn({
+                  x: worldX,
+                  y: worldY,
+                  vx: -cos * speed * 0.3 + (Math.random() - 0.5) * 20,
+                  vy: -sin * speed * 0.3 + (Math.random() - 0.5) * 20,
+                  life: 2000 + Math.random() * 1000,
+                  color: '#2a2a2a',
+                  size: 8 + Math.random() * 6,
+                  decay: 0.8,
+                  drag: 0.98,
+                  type: 'smoke',
+                  gravity: -5
+                });
+              }
+            });
+          }
+        }
+
+        // Spawn steam particles for enraged scavengers
+        if (npc.faction === 'scavenger' && npc.state === 'enraged' && Math.random() < 0.2) {
+          const SIZE = NPCShipGeometry.SIZE * (NPCShipGeometry.SIZE_SCALE[NPCShipGeometry.getVariant(npc.type)] || 1);
+          const cos = Math.cos(npc.rotation);
+          const sin = Math.sin(npc.rotation);
+
+          // Steam vents from sides
+          const vents = [
+            { x: -SIZE * 0.3, y: -SIZE * 0.4 },
+            { x: -SIZE * 0.3, y: SIZE * 0.4 }
+          ];
+
+          vents.forEach(vent => {
+            const worldX = npc.position.x + vent.x * cos - vent.y * sin;
+            const worldY = npc.position.y + vent.x * sin + vent.y * cos;
+
+            ParticleSystem.spawn({
+              x: worldX,
+              y: worldY,
+              vx: (Math.random() - 0.5) * 30,
+              vy: (Math.random() - 0.5) * 30 - 20,
+              life: 800 + Math.random() * 400,
+              color: '#ffffff',
+              size: 4 + Math.random() * 3,
+              decay: 0.7,
+              drag: 0.95,
+              type: 'smoke',
+              gravity: -10
+            });
+          });
+        }
+
         NPCShipGeometry.draw(
           ctx,
           npc.position,
           npc.rotation,
           npc.type,
           npc.faction,
-          screen
+          screen,
+          Date.now(),
+          npc
         );
+
+        // Draw tractor beam for scavengers collecting wreckage
+        if (npc.faction === 'scavenger' && npc.collectingWreckagePos && npc.state === 'collecting') {
+          this.drawCollectionTractorBeam(ctx, npc, screen, this.camera, Date.now());
+        }
 
         // Draw shield visual for NPCs with shields
         if (typeof ShieldVisual !== "undefined" && npc.shieldMax > 0) {
@@ -1517,6 +1657,139 @@ const Renderer = {
 
       return true;
     });
+  },
+
+  /**
+   * Draw tractor beam effect for scavengers collecting wreckage
+   */
+  drawCollectionTractorBeam(ctx, npc, npcScreen, camera, time) {
+    const wreckagePos = npc.collectingWreckagePos;
+    if (!wreckagePos) return;
+
+    // Convert wreckage world position to screen position using the same method as NPCs
+    const wreckageScreen = this.worldToScreen(wreckagePos.x, wreckagePos.y);
+
+    // Get NPC colors for scavengers
+    const colors = {
+      beam: '#B8860B',       // Dark goldenrod beam
+      core: '#FFD700',       // Gold core
+      particles: '#8B4513'   // Rust brown particles
+    };
+
+    // Animation phase
+    const phase = (time * 0.003) % (Math.PI * 2);
+    const pulseIntensity = 0.5 + Math.sin(phase) * 0.3;
+
+    ctx.save();
+
+    // Draw the beam from NPC to wreckage
+    const dx = wreckageScreen.x - npcScreen.x;
+    const dy = wreckageScreen.y - npcScreen.y;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    const angle = Math.atan2(dy, dx);
+
+    // Beam gradient (wider at wreckage, narrower at ship)
+    const gradient = ctx.createLinearGradient(
+      npcScreen.x, npcScreen.y,
+      wreckageScreen.x, wreckageScreen.y
+    );
+    gradient.addColorStop(0, `rgba(184, 134, 11, ${0.3 * pulseIntensity})`);
+    gradient.addColorStop(0.5, `rgba(255, 215, 0, ${0.5 * pulseIntensity})`);
+    gradient.addColorStop(1, `rgba(139, 69, 19, ${0.4 * pulseIntensity})`);
+
+    // Draw main beam (tapered shape)
+    ctx.beginPath();
+    const beamWidthShip = 8;
+    const beamWidthWreckage = 25;
+
+    // Calculate perpendicular offsets
+    const perpX = Math.sin(angle);
+    const perpY = -Math.cos(angle);
+
+    ctx.moveTo(
+      npcScreen.x + perpX * beamWidthShip,
+      npcScreen.y + perpY * beamWidthShip
+    );
+    ctx.lineTo(
+      wreckageScreen.x + perpX * beamWidthWreckage,
+      wreckageScreen.y + perpY * beamWidthWreckage
+    );
+    ctx.lineTo(
+      wreckageScreen.x - perpX * beamWidthWreckage,
+      wreckageScreen.y - perpY * beamWidthWreckage
+    );
+    ctx.lineTo(
+      npcScreen.x - perpX * beamWidthShip,
+      npcScreen.y - perpY * beamWidthShip
+    );
+    ctx.closePath();
+    ctx.fillStyle = gradient;
+    ctx.fill();
+
+    // Draw central core line
+    ctx.strokeStyle = `rgba(255, 215, 0, ${0.8 * pulseIntensity})`;
+    ctx.lineWidth = 2;
+    ctx.setLineDash([5, 10]);
+    ctx.lineDashOffset = -time * 0.05; // Moving dash animation
+    ctx.beginPath();
+    ctx.moveTo(npcScreen.x, npcScreen.y);
+    ctx.lineTo(wreckageScreen.x, wreckageScreen.y);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // Draw debris particles flowing toward ship
+    ctx.fillStyle = colors.particles;
+    const particleCount = 5;
+    for (let i = 0; i < particleCount; i++) {
+      // Each particle at different point along beam
+      const t = ((time * 0.001 + i * 0.2) % 1);
+      const px = wreckageScreen.x + (npcScreen.x - wreckageScreen.x) * t;
+      const py = wreckageScreen.y + (npcScreen.y - wreckageScreen.y) * t;
+      // Add some wobble
+      const wobble = Math.sin(time * 0.01 + i * 2) * 5;
+      const particleSize = 3 + (1 - t) * 4; // Larger near wreckage, smaller near ship
+
+      ctx.globalAlpha = 0.6 * (1 - t * 0.5); // Fade as approaches ship
+      ctx.beginPath();
+      ctx.arc(px + wobble * perpX, py + wobble * perpY, particleSize, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // Draw glow around wreckage being collected
+    ctx.globalAlpha = 0.3 * pulseIntensity;
+    const wreckageGlow = ctx.createRadialGradient(
+      wreckageScreen.x, wreckageScreen.y, 0,
+      wreckageScreen.x, wreckageScreen.y, 40
+    );
+    wreckageGlow.addColorStop(0, '#FFD700');
+    wreckageGlow.addColorStop(0.5, '#B8860B80');
+    wreckageGlow.addColorStop(1, 'transparent');
+    ctx.fillStyle = wreckageGlow;
+    ctx.beginPath();
+    ctx.arc(wreckageScreen.x, wreckageScreen.y, 40, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.restore();
+
+    // Spawn debris particles moving toward ship (using particle system)
+    if (Math.random() < 0.15 && typeof ParticleSystem !== 'undefined') {
+      const spawnT = Math.random();
+      const spawnX = wreckagePos.x + (npc.position.x - wreckagePos.x) * spawnT * 0.3;
+      const spawnY = wreckagePos.y + (npc.position.y - wreckagePos.y) * spawnT * 0.3;
+
+      ParticleSystem.spawn({
+        x: spawnX,
+        y: spawnY,
+        vx: (npc.position.x - wreckagePos.x) * 0.05,
+        vy: (npc.position.y - wreckagePos.y) * 0.05,
+        life: 600,
+        color: '#8B4513',
+        size: 4 + Math.random() * 3,
+        decay: 0.9,
+        drag: 0.99,
+        type: 'debris'
+      });
+    }
   },
 };
 

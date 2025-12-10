@@ -48,11 +48,14 @@ const Input = {
       case 'KeyM':
         // Priority: Wormhole > Mining > Loot collection
         Logger.log('[Input] M pressed - wormhole:', Player._nearestWormhole, 'hasGem:', Player.hasRelic('WORMHOLE_GEM'),
-          'mineable:', Player._nearestMineable, 'miningTarget:', Player.miningTarget);
+          'mineable:', Player._nearestMineable, 'miningTarget:', Player.miningTarget, 'hasScrapSiphon:', Player.hasRelic('SCRAP_SIPHON'));
         if (Player._nearestWormhole && Player.hasRelic('WORMHOLE_GEM') && !Player.inWormholeTransit) {
           Player.tryEnterWormhole();
         } else if (Player._nearestMineable && !Player.miningTarget) {
           Player.tryMine();
+        } else if (Player.hasRelic('SCRAP_SIPHON')) {
+          // Scrap Siphon: Multi-collect wreckage
+          Player.tryMultiCollectWreckage();
         } else {
           Player.tryCollectWreckage();
         }

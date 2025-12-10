@@ -92,6 +92,31 @@ const NPCWeaponEffects = {
       trailLength: 35,
       bubbling: true,
       areaRadius: 100
+    },
+    // Scavenger faction weapons
+    dual_laser: {
+      type: 'projectile',
+      color: { primary: '#D4A017', secondary: '#FFD700', glow: '#D4A01760' },
+      size: 4,
+      speed: 500,
+      duration: 600,
+      trail: false,
+      dual: true,          // Fire two parallel projectiles
+      separation: 10       // Distance between dual shots
+    },
+    boring_drill: {
+      type: 'melee',
+      color: { primary: '#999966', secondary: '#666644', glow: '#99996640' },
+      chargeTime: 1500,
+      range: 50,
+      instantKill: true
+    },
+    loader_slam: {
+      type: 'melee',
+      color: { primary: '#666644', secondary: '#D4A017', glow: '#D4A01740' },
+      range: 35,
+      knockback: true,
+      impactSize: 40
     }
   },
 
@@ -115,9 +140,16 @@ const NPCWeaponEffects = {
     const angle = Math.atan2(target.y - source.y, target.x - source.x);
 
     if (config.type === 'projectile') {
-      this.fireProjectile(source, target, angle, config, weaponType, hitInfo);
+      if (config.dual) {
+        // Fire two parallel projectiles
+        this.fireDualProjectile(source, target, angle, config, weaponType, hitInfo);
+      } else {
+        this.fireProjectile(source, target, angle, config, weaponType, hitInfo);
+      }
     } else if (config.type === 'beam') {
       this.fireBeam(source, target, config, weaponType, hitInfo);
+    } else if (config.type === 'melee') {
+      this.fireMeleeAttack(source, target, config, weaponType, hitInfo);
     }
   },
 
@@ -168,6 +200,56 @@ const NPCWeaponEffects = {
     // Beams are instant - trigger hit effect immediately at target
     if (hitInfo && typeof HitEffectRenderer !== 'undefined') {
       HitEffectRenderer.addHit(target.x, target.y, hitInfo.isShieldHit);
+    }
+  },
+
+  fireDualProjectile(source, target, angle, config, weaponType, hitInfo = null) {
+    // Fire two projectiles with offset perpendicular to direction
+    const separation = config.separation || 10;
+    const perpX = Math.cos(angle + Math.PI / 2);
+    const perpY = Math.sin(angle + Math.PI / 2);
+    const halfSep = separation / 2;
+
+    // Offset positions
+    const pos1 = { x: source.x + perpX * halfSep, y: source.y + perpY * halfSep };
+    const pos2 = { x: source.x - perpX * halfSep, y: source.y - perpY * halfSep };
+
+    // Fire both projectiles
+    this.fireProjectile(pos1, target, angle, config, weaponType, hitInfo);
+    this.fireProjectile(pos2, target, angle, config, weaponType, null); // Only one triggers hit
+  },
+
+  fireMeleeAttack(source, target, config, weaponType, hitInfo = null) {
+    // Melee attacks are instant - create impact effect at target
+    const dx = target.x - source.x;
+    const dy = target.y - source.y;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+
+    // Only show effect if within melee range
+    if (dist <= (config.range || 50)) {
+      // Add melee impact to area effects for rendering
+      this.areaEffects.push({
+        type: 'melee_impact',
+        x: target.x,
+        y: target.y,
+        weaponType: weaponType,
+        config: config,
+        startTime: Date.now(),
+        duration: 400, // Quick impact flash
+        size: config.impactSize || 30
+      });
+
+      // Trigger hit effect immediately
+      if (hitInfo && typeof HitEffectRenderer !== 'undefined') {
+        HitEffectRenderer.addHit(target.x, target.y, hitInfo.isShieldHit);
+      }
+
+      // Screen shake for powerful melee (Barnacle King drill)
+      if (config.instantKill && typeof Renderer !== 'undefined' && Renderer.shake) {
+        Renderer.shake(20, 300);
+      } else if (config.knockback && typeof Renderer !== 'undefined' && Renderer.shake) {
+        Renderer.shake(8, 150);
+      }
     }
   },
 
@@ -1075,8 +1157,113 @@ const NPCWeaponEffects = {
         this.drawWebSnareArea(ctx, screenX, screenY, effect, progress);
       } else if (effect.type === 'acid_puddle') {
         this.drawAcidPuddleArea(ctx, screenX, screenY, effect, progress);
+      } else if (effect.type === 'melee_impact') {
+        this.drawMeleeImpact(ctx, screenX, screenY, effect, progress);
       }
     }
+  },
+
+  /**
+   * Draw melee impact effect (loader slam, boring drill)
+   */
+  drawMeleeImpact(ctx, screenX, screenY, effect, progress) {
+    const config = effect.config;
+    const size = effect.size;
+    const fadeOut = 1 - progress;
+
+    ctx.save();
+    ctx.translate(screenX, screenY);
+    ctx.globalAlpha = fadeOut;
+
+    // Different visuals for different weapon types
+    if (effect.weaponType === 'boring_drill') {
+      // Drill impact - spinning drill marks and sparks
+      const spinAngle = progress * Math.PI * 4; // 2 full rotations
+
+      // Drill hole effect
+      const holeGradient = ctx.createRadialGradient(0, 0, 0, 0, 0, size);
+      holeGradient.addColorStop(0, '#333333');
+      holeGradient.addColorStop(0.3, '#999966');
+      holeGradient.addColorStop(0.7, '#666644');
+      holeGradient.addColorStop(1, 'transparent');
+      ctx.fillStyle = holeGradient;
+      ctx.beginPath();
+      ctx.arc(0, 0, size * (1 - progress * 0.3), 0, Math.PI * 2);
+      ctx.fill();
+
+      // Spiral scratch marks
+      ctx.strokeStyle = '#D4A017';
+      ctx.lineWidth = 3 * fadeOut;
+      const spiralCount = 6;
+      for (let i = 0; i < spiralCount; i++) {
+        const angle = (i / spiralCount) * Math.PI * 2 + spinAngle;
+        ctx.beginPath();
+        ctx.moveTo(Math.cos(angle) * 5, Math.sin(angle) * 5);
+        ctx.lineTo(Math.cos(angle) * size, Math.sin(angle) * size);
+        ctx.stroke();
+      }
+
+      // Sparks burst
+      if (progress < 0.3 && typeof ParticleSystem !== 'undefined') {
+        for (let i = 0; i < 3; i++) {
+          const sparkAngle = Math.random() * Math.PI * 2;
+          const sparkSpeed = 100 + Math.random() * 200;
+          ParticleSystem.spawn(
+            effect.x + Math.cos(sparkAngle) * 10,
+            effect.y + Math.sin(sparkAngle) * 10,
+            {
+              type: 'spark',
+              color: '#FFD700',
+              vx: Math.cos(sparkAngle) * sparkSpeed,
+              vy: Math.sin(sparkAngle) * sparkSpeed,
+              life: 300
+            }
+          );
+        }
+      }
+    } else if (effect.weaponType === 'loader_slam') {
+      // Loader slam - ground pound shockwave
+      const shockSize = size * (0.5 + progress * 0.5);
+
+      // Impact crater
+      const craterGradient = ctx.createRadialGradient(0, 0, 0, 0, 0, shockSize);
+      craterGradient.addColorStop(0, '#666644');
+      craterGradient.addColorStop(0.5, '#D4A01780');
+      craterGradient.addColorStop(1, 'transparent');
+      ctx.fillStyle = craterGradient;
+      ctx.beginPath();
+      ctx.arc(0, 0, shockSize, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Shockwave ring
+      ctx.strokeStyle = `rgba(212, 160, 23, ${fadeOut})`;
+      ctx.lineWidth = 4 * fadeOut;
+      ctx.beginPath();
+      ctx.arc(0, 0, shockSize * 1.5, 0, Math.PI * 2);
+      ctx.stroke();
+
+      // Debris particles
+      if (progress < 0.2 && typeof ParticleSystem !== 'undefined') {
+        for (let i = 0; i < 5; i++) {
+          const debrisAngle = Math.random() * Math.PI * 2;
+          ParticleSystem.spawn(
+            effect.x,
+            effect.y,
+            {
+              type: 'debris',
+              color: '#8B4513',
+              vx: Math.cos(debrisAngle) * (50 + Math.random() * 100),
+              vy: Math.sin(debrisAngle) * (50 + Math.random() * 100) - 50,
+              gravity: 200,
+              life: 500,
+              size: 3 + Math.random() * 4
+            }
+          );
+        }
+      }
+    }
+
+    ctx.restore();
   },
 
   /**
