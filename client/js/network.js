@@ -1163,6 +1163,15 @@ const Network = {
       // If death effect is active, queue respawn for after sequence
       if (typeof PlayerDeathEffect !== 'undefined' && PlayerDeathEffect.isActive()) {
         PlayerDeathEffect.queueRespawn(respawnData);
+
+        // Safety: Set a timeout to force respawn if death effect doesn't complete
+        // This handles edge cases where the death sequence gets stuck
+        setTimeout(() => {
+          if (Player.isDead && !PlayerDeathEffect.isActive()) {
+            Logger.log('[Respawn Safety] Forcing respawn - isDead stuck after death effect completed');
+            Player.onRespawn(respawnData);
+          }
+        }, PlayerDeathEffect.TIMINGS.TOTAL_DURATION + 500);
       } else {
         // Apply respawn immediately
         Player.onRespawn(respawnData);

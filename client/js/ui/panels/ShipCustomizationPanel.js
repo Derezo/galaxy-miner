@@ -27,6 +27,9 @@ const ShipCustomizationPanel = {
     const colorOptions = CONSTANTS.PLAYER_COLOR_OPTIONS || [];
     const currentColor = Player.colorId || 'green';
 
+    // Sync selectedColorId with player's actual color on render
+    this.selectedColorId = currentColor;
+
     const html = `
       <div class="customize-panel">
         <div class="customize-section">

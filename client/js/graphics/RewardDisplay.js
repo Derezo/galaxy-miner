@@ -21,6 +21,7 @@ const RewardDisplay = {
 
   // State tracking
   lastSpawnTime: 0,
+  _debugLogged: false,  // Prevent log spam
 
   /**
    * Initialize the reward display system
@@ -161,20 +162,34 @@ const RewardDisplay = {
     const now = Date.now();
     const dtMs = dt * 1000;
 
-    // Update active rewards
-    this.activeRewards = this.activeRewards.filter(reward => {
-      reward.elapsed += dtMs;
-      reward.y -= this.FLOAT_SPEED * dt;
-
-      // Calculate alpha based on elapsed time
-      const totalDuration = this.DISPLAY_DURATION + this.FADE_DURATION;
-      if (reward.elapsed > this.DISPLAY_DURATION) {
-        reward.alpha = 1 - ((reward.elapsed - this.DISPLAY_DURATION) / this.FADE_DURATION);
+    // Guard against bad dt values that could corrupt reward state
+    const dtValid = Number.isFinite(dtMs) && dtMs >= 0 && dtMs <= 1000;
+    if (!dtValid) {
+      // Log bad dt values (once to avoid spam)
+      if (!this._debugLogged && (this.activeRewards.length > 0 || this.pendingQueue.length > 0)) {
+        console.warn('[RewardDisplay] Invalid dt detected:', dt, 'dtMs:', dtMs,
+          '| activeRewards:', this.activeRewards.length,
+          '| pendingQueue:', this.pendingQueue.length);
+        this._debugLogged = true;
       }
+    }
 
-      // Keep if not fully faded
-      return reward.elapsed < totalDuration && reward.alpha > 0;
-    });
+    // Update active rewards (only if dt is valid to prevent corruption)
+    if (dtValid) {
+      this.activeRewards = this.activeRewards.filter(reward => {
+        reward.elapsed += dtMs;
+        reward.y -= this.FLOAT_SPEED * dt;
+
+        // Calculate alpha based on elapsed time
+        const totalDuration = this.DISPLAY_DURATION + this.FADE_DURATION;
+        if (reward.elapsed > this.DISPLAY_DURATION) {
+          reward.alpha = 1 - ((reward.elapsed - this.DISPLAY_DURATION) / this.FADE_DURATION);
+        }
+
+        // Keep if not fully faded
+        return reward.elapsed < totalDuration && reward.alpha > 0;
+      });
+    }
 
     // Spawn next reward from queue if ready
     if (this.pendingQueue.length > 0 &&
@@ -265,11 +280,37 @@ const RewardDisplay = {
    * @param {Object} camera - Camera position {x, y}
    */
   draw(ctx, camera) {
-    // Skip if player doesn't exist or is dead
-    if (typeof Player === 'undefined' || !Player.position || Player.isDead) return;
+    // Skip if player doesn't exist
+    if (typeof Player === 'undefined' || !Player.position) {
+      return;
+    }
+
+    // Skip if player is dead AND death effect is still active (cinematic playing)
+    // But allow rendering if isDead is stuck true (death effect completed but isDead not reset)
+    const deathEffectActive = typeof PlayerDeathEffect !== 'undefined' && PlayerDeathEffect.isActive();
+    if (Player.isDead && deathEffectActive) {
+      return;
+    }
+
+    // Debug: Warn if isDead is stuck (death effect done but isDead still true)
+    if (Player.isDead && !deathEffectActive && !this._debugLogged) {
+      console.warn('[RewardDisplay] Player.isDead=true but death effect not active - possible stuck state');
+      this._debugLogged = true;
+    }
 
     // Skip if no active rewards
-    if (this.activeRewards.length === 0) return;
+    if (this.activeRewards.length === 0) {
+      // Debug: Log if queue has items but activeRewards is empty
+      if (this.pendingQueue.length > 0 && !this._debugLogged) {
+        console.warn('[RewardDisplay] draw() has empty activeRewards but queue has items:',
+          this.pendingQueue.length, '| Check if update() is being called');
+        this._debugLogged = true;
+      }
+      return;
+    }
+
+    // Reset debug flag when successfully drawing
+    this._debugLogged = false;
 
     // Calculate player screen position
     const playerScreenX = Player.position.x - camera.x;

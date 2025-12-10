@@ -47,10 +47,7 @@ const TerminalUI = {
       RelicsPanel.init();
     }
 
-    // Initialize SettingsPanel
-    if (typeof SettingsPanel !== 'undefined') {
-      SettingsPanel.init();
-    }
+    // SettingsPanel is now initialized by ProfileModal, not Terminal
 
     Logger.log('Terminal UI initialized');
   },
@@ -132,9 +129,7 @@ const TerminalUI = {
       case 'relics':
         document.getElementById('relics-content').classList.add('active');
         break;
-      case 'settings':
-        document.getElementById('settings-content').classList.add('active');
-        break;
+      // Settings tab removed - now in Profile Modal
     }
 
     this.refreshCurrentTab();
@@ -190,11 +185,7 @@ const TerminalUI = {
           RelicsPanel.refresh();
         }
         break;
-      case 'settings':
-        if (typeof SettingsPanel !== 'undefined') {
-          SettingsPanel.refresh();
-        }
-        break;
+      // Settings tab removed - now in Profile Modal
     }
   },
 

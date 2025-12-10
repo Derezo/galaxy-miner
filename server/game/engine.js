@@ -1239,6 +1239,10 @@ function updateNPCs(deltaTime) {
 
   // Remove any NPCs that need to despawn (outside the iteration loop)
   for (const npcId of npcsToRemove) {
+    const npcToRemove = npc.activeNPCs.get(npcId);
+    if (npcToRemove && npcToRemove.attachedToBase) {
+      logger.warn(`[WORM_DESPAWN] Attached worm ${npcId} being despawned while attached to base ${npcToRemove.attachedToBase}`);
+    }
     npc.activeNPCs.delete(npcId);
   }
 

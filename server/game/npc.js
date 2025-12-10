@@ -483,6 +483,7 @@ function attachDroneToBase(droneId, baseId) {
   drone.y = drone.position.y;
 
   progress.attachedDrones.add(droneId);
+  logger.info(`[WORM_ATTACH] Drone ${droneId} attached to base ${baseId}. Total attached: ${progress.attachedDrones.size}`);
 
   const threshold = CONSTANTS.SWARM_ASSIMILATION.ASSIMILATION_THRESHOLD;
   const attachedCount = progress.attachedDrones.size;
@@ -616,6 +617,9 @@ function convertBaseToSwarm(baseId, base) {
   const progress = assimilationProgress.get(baseId);
   if (progress && progress.attachedDrones && progress.attachedDrones.size > 0) {
     base.attachedDroneIds = Array.from(progress.attachedDrones);
+    logger.info(`[WORM_CONVERSION] Storing ${base.attachedDroneIds.length} attached drone IDs on base ${baseId}: ${JSON.stringify(base.attachedDroneIds)}`);
+  } else {
+    logger.warn(`[WORM_CONVERSION] No attached drones found in assimilationProgress for base ${baseId}`);
   }
 
   // Clear assimilation progress
@@ -1278,8 +1282,15 @@ function deactivateBase(baseId) {
   const base = activeBases.get(baseId);
   if (!base) return;
 
-  // Remove all NPCs spawned by this base
+  // Remove all NPCs spawned by this base, EXCEPT worms attached to other bases
   for (const npcId of base.spawnedNPCs) {
+    const npc = activeNPCs.get(npcId);
+    // Don't remove worms that are attached to another base - they'll be cleaned up
+    // when that base is destroyed
+    if (npc && npc.attachedToBase && npc.attachedToBase !== baseId) {
+      logger.info(`[NPC] Skipping worm ${npcId} during deactivation - attached to ${npc.attachedToBase}`);
+      continue;
+    }
     activeNPCs.delete(npcId);
   }
 
@@ -1501,7 +1512,12 @@ function damageBase(baseId, damage, attackerId = null) {
     // Destroy any attached assimilation drones - they die with the base
     const progress = assimilationProgress.get(baseId);
     const destroyedDrones = [];
+
+    // Debug: Log what we're looking for
+    logger.info(`[WORM_CLEANUP] Base ${baseId} destroyed. isAssimilated=${base.isAssimilated}, attachedDroneIds=${JSON.stringify(base.attachedDroneIds || [])}`);
+
     if (progress && progress.attachedDrones) {
+      logger.info(`[WORM_CLEANUP] Method 1: Found ${progress.attachedDrones.size} drones in assimilationProgress`);
       for (const droneId of progress.attachedDrones) {
         activeNPCs.delete(droneId);
         destroyedDrones.push(droneId);
@@ -1511,27 +1527,37 @@ function damageBase(baseId, damage, attackerId = null) {
 
     // Method 2: Scan for any NPCs still attached to this base (catches edge cases)
     // Some worms may have attachedToBase set but not be tracked in assimilationProgress
+    let method2Count = 0;
     for (const [npcId, npc] of activeNPCs) {
       if (npc.attachedToBase === baseId) {
+        method2Count++;
         activeNPCs.delete(npcId);
         if (!destroyedDrones.includes(npcId)) {
           destroyedDrones.push(npcId);
         }
       }
     }
+    if (method2Count > 0) {
+      logger.info(`[WORM_CLEANUP] Method 2: Found ${method2Count} drones with attachedToBase=${baseId}`);
+    }
 
     // Method 3: Use stored attached drone IDs from assimilation (for assimilated bases)
     // These were preserved in convertBaseToSwarm() before assimilationProgress was cleared
     if (base.attachedDroneIds && base.attachedDroneIds.length > 0) {
+      let method3Count = 0;
       for (const droneId of base.attachedDroneIds) {
         if (activeNPCs.has(droneId)) {
+          method3Count++;
           activeNPCs.delete(droneId);
           if (!destroyedDrones.includes(droneId)) {
             destroyedDrones.push(droneId);
           }
         }
       }
+      logger.info(`[WORM_CLEANUP] Method 3: Found ${method3Count} of ${base.attachedDroneIds.length} stored drone IDs still in activeNPCs`);
     }
+
+    logger.info(`[WORM_CLEANUP] Total destroyedDrones: ${destroyedDrones.length} - IDs: ${JSON.stringify(destroyedDrones)}`);
 
     // Orphan all NPCs from this base - enter rage mode instead of deletion
     const orphanedNpcIds = [];
@@ -2157,6 +2183,11 @@ function damageNPC(npcId, damage, attackerId = null) {
       }
     }
 
+    // Log if this was an attached worm being killed
+    if (npc.attachedToBase) {
+      logger.warn(`[WORM_KILLED] Attached worm ${npcId} killed while attached to base ${npc.attachedToBase}. Killer: ${attackerId}`);
+    }
+
     activeNPCs.delete(npcId);
 
     return {
@@ -2277,6 +2308,10 @@ function applySwarmLinkedDamage(damagedNpc, damage) {
 
       // Remove destroyed NPCs
       if (npc.hull <= 0) {
+        // Log if this was an attached worm being killed by linked damage
+        if (npc.attachedToBase) {
+          logger.warn(`[WORM_KILLED_LINKED] Attached worm ${id} killed by linked damage while attached to base ${npc.attachedToBase}`);
+        }
         activeNPCs.delete(id);
       }
     }

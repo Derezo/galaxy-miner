@@ -1,12 +1,14 @@
 /**
  * Profile Modal
- * Allows players to select their profile avatar from preset options
+ * Allows players to select their profile avatar and manage settings
+ * Has two tabs: Avatar and Settings
  */
 
 const ProfileModal = {
   modal: null,
   isOpen: false,
   selectedProfileId: null,
+  activeTab: 'avatar',
 
   /**
    * Initialize the profile modal
@@ -27,12 +29,21 @@ const ProfileModal = {
     this.modal.innerHTML = `
       <div class="modal-content profile-modal-content">
         <div class="modal-header">
-          <h2>Choose Your Avatar</h2>
+          <h2>Profile</h2>
           <button class="modal-close">&times;</button>
         </div>
+        <div class="profile-tabs">
+          <button class="profile-tab active" data-tab="avatar">Avatar</button>
+          <button class="profile-tab" data-tab="settings">Settings</button>
+        </div>
         <div class="modal-body">
-          <div class="profile-options-grid">
-            ${this.renderProfileOptions()}
+          <div class="tab-content" data-tab="avatar">
+            <div class="profile-options-grid">
+              ${this.renderProfileOptions()}
+            </div>
+          </div>
+          <div class="tab-content" data-tab="settings" style="display: none;">
+            <div id="profile-settings-content"></div>
           </div>
         </div>
         <div class="modal-footer">
@@ -76,6 +87,52 @@ const ProfileModal = {
   },
 
   /**
+   * Render settings content
+   */
+  renderSettings() {
+    const container = this.modal.querySelector('#profile-settings-content');
+    if (!container) return;
+
+    // Use SettingsPanel to generate the HTML
+    if (typeof SettingsPanel !== 'undefined') {
+      container.innerHTML = SettingsPanel.renderForModal();
+      SettingsPanel.bindModalEvents(container);
+    } else {
+      container.innerHTML = '<p style="color: var(--color-text-muted);">Settings unavailable</p>';
+    }
+  },
+
+  /**
+   * Switch to a tab
+   * @param {string} tabName - 'avatar' or 'settings'
+   */
+  switchTab(tabName) {
+    this.activeTab = tabName;
+
+    // Update tab buttons
+    this.modal.querySelectorAll('.profile-tab').forEach(tab => {
+      tab.classList.toggle('active', tab.dataset.tab === tabName);
+    });
+
+    // Update tab content visibility
+    this.modal.querySelectorAll('.tab-content').forEach(content => {
+      content.style.display = content.dataset.tab === tabName ? 'block' : 'none';
+    });
+
+    // Render settings on first switch to settings tab
+    if (tabName === 'settings') {
+      this.renderSettings();
+    }
+
+    // Update footer buttons based on tab
+    const saveBtn = this.modal.querySelector('#profile-save');
+    if (saveBtn) {
+      // Hide save button on settings tab (settings auto-save)
+      saveBtn.style.display = tabName === 'avatar' ? 'block' : 'none';
+    }
+  },
+
+  /**
    * Inject modal styles
    */
   injectStyles() {
@@ -107,7 +164,7 @@ const ProfileModal = {
         background: var(--color-bg-dark, #0a0a28);
         border: 2px solid var(--color-border, #334);
         border-radius: 12px;
-        width: 400px;
+        width: 420px;
         max-width: 90vw;
         max-height: 90vh;
         overflow: hidden;
@@ -119,7 +176,7 @@ const ProfileModal = {
         transform: scale(1);
       }
 
-      .modal-header {
+      #profile-modal .modal-header {
         display: flex;
         justify-content: space-between;
         align-items: center;
@@ -127,13 +184,13 @@ const ProfileModal = {
         border-bottom: 1px solid var(--color-border, #334);
       }
 
-      .modal-header h2 {
+      #profile-modal .modal-header h2 {
         margin: 0;
         font-size: 18px;
         color: var(--color-text, #eee);
       }
 
-      .modal-close {
+      #profile-modal .modal-close {
         background: none;
         border: none;
         font-size: 24px;
@@ -143,12 +200,51 @@ const ProfileModal = {
         line-height: 1;
       }
 
-      .modal-close:hover {
+      #profile-modal .modal-close:hover {
         color: var(--color-text, #eee);
       }
 
-      .modal-body {
+      /* Pill-style tabs */
+      .profile-tabs {
+        display: flex;
+        gap: 8px;
+        padding: 12px 20px;
+        background: rgba(0, 0, 0, 0.3);
+        border-bottom: 1px solid var(--color-border, #334);
+      }
+
+      .profile-tab {
+        flex: 1;
+        padding: 10px 16px;
+        background: rgba(100, 100, 100, 0.2);
+        border: 1px solid var(--color-border, #334);
+        border-radius: 20px;
+        color: var(--color-text-muted, #888);
+        font-size: 13px;
+        font-weight: 600;
+        cursor: pointer;
+        transition: all 0.2s ease;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+      }
+
+      .profile-tab:hover {
+        background: rgba(68, 102, 255, 0.2);
+        border-color: var(--color-primary, #4466ff);
+        color: var(--color-text, #eee);
+      }
+
+      .profile-tab.active {
+        background: var(--color-primary, #4466ff);
+        border-color: var(--color-primary, #4466ff);
+        color: white;
+        box-shadow: 0 0 12px rgba(68, 102, 255, 0.4);
+      }
+
+      #profile-modal .modal-body {
         padding: 20px;
+        max-height: 400px;
+        overflow-y: auto;
       }
 
       .profile-options-grid {
@@ -197,7 +293,7 @@ const ProfileModal = {
         color: var(--color-success, #66ff88);
       }
 
-      .modal-footer {
+      #profile-modal .modal-footer {
         display: flex;
         justify-content: flex-end;
         gap: 12px;
@@ -205,7 +301,7 @@ const ProfileModal = {
         border-top: 1px solid var(--color-border, #334);
       }
 
-      .modal-footer .btn {
+      #profile-modal .modal-footer .btn {
         padding: 10px 20px;
         border: none;
         border-radius: 6px;
@@ -215,30 +311,43 @@ const ProfileModal = {
         transition: all 0.2s ease;
       }
 
-      .modal-footer .btn-secondary {
+      #profile-modal .modal-footer .btn-secondary {
         background: rgba(100, 100, 100, 0.3);
         color: var(--color-text-muted, #888);
         border: 1px solid var(--color-border, #334);
       }
 
-      .modal-footer .btn-secondary:hover {
+      #profile-modal .modal-footer .btn-secondary:hover {
         background: rgba(100, 100, 100, 0.5);
         color: var(--color-text, #eee);
       }
 
-      .modal-footer .btn-primary {
+      #profile-modal .modal-footer .btn-primary {
         background: var(--color-primary, #4466ff);
         color: white;
       }
 
-      .modal-footer .btn-primary:hover {
+      #profile-modal .modal-footer .btn-primary:hover {
         background: #5577ff;
         box-shadow: 0 0 15px rgba(68, 102, 255, 0.5);
       }
 
-      .modal-footer .btn-primary:disabled {
+      #profile-modal .modal-footer .btn-primary:disabled {
         background: rgba(68, 102, 255, 0.3);
         cursor: not-allowed;
+      }
+
+      /* Settings tab content adjustments */
+      #profile-settings-content {
+        min-height: 200px;
+      }
+
+      #profile-settings-content .settings-panel {
+        padding: 0;
+      }
+
+      #profile-settings-content .settings-section {
+        margin-bottom: 0;
       }
     `;
 
@@ -257,6 +366,13 @@ const ProfileModal = {
 
     // Save button
     this.modal.querySelector('#profile-save').addEventListener('click', () => this.save());
+
+    // Tab switching
+    this.modal.querySelectorAll('.profile-tab').forEach(tab => {
+      tab.addEventListener('click', () => {
+        this.switchTab(tab.dataset.tab);
+      });
+    });
 
     // Click outside to close
     this.modal.addEventListener('click', (e) => {
@@ -286,8 +402,9 @@ const ProfileModal = {
 
   /**
    * Show the modal
+   * @param {string} [tab='avatar'] - Tab to open ('avatar' or 'settings')
    */
-  show() {
+  show(tab = 'avatar') {
     if (!this.modal) {
       this.init();
     }
@@ -300,6 +417,9 @@ const ProfileModal = {
     this.modal.querySelectorAll('.profile-option').forEach(opt => {
       opt.classList.toggle('selected', opt.dataset.profileId === currentProfile);
     });
+
+    // Switch to requested tab
+    this.switchTab(tab);
 
     // Show modal
     this.modal.classList.remove('hidden');

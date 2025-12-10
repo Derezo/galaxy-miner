@@ -195,6 +195,7 @@ function getPlayerData(userId) {
     energy_core_tier: ship.energy_core_tier || 1,
     hull_tier: hullTier,
     ship_color_id: ship.ship_color_id || 'green',
+    profile_id: ship.profile_id || 'pilot',
     inventory,
     relics
   };

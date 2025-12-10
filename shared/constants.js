@@ -880,17 +880,32 @@ const CONSTANTS = {
     }
   },
 
-  // Player ship color options (preset palette)
+  // Player ship color options (preset palette - 21 colors in 7x3 grid)
   PLAYER_COLOR_OPTIONS: [
-    { id: 'green', name: 'Default Green', primary: '#00ff00', accent: '#00cc00', glow: '#00ff0060' },
+    // Row 1: Greens, Cyans, Blues
+    { id: 'green', name: 'Green', primary: '#00ff00', accent: '#00cc00', glow: '#00ff0060' },
+    { id: 'lime', name: 'Lime', primary: '#32cd32', accent: '#228b22', glow: '#32cd3260' },
+    { id: 'teal', name: 'Teal', primary: '#20b2aa', accent: '#008080', glow: '#20b2aa60' },
     { id: 'cyan', name: 'Cyan', primary: '#00ffff', accent: '#00cccc', glow: '#00ffff60' },
-    { id: 'blue', name: 'Royal Blue', primary: '#4466ff', accent: '#3355cc', glow: '#4466ff60' },
-    { id: 'purple', name: 'Purple', primary: '#aa44ff', accent: '#8833cc', glow: '#aa44ff60' },
-    { id: 'red', name: 'Crimson', primary: '#ff4444', accent: '#cc3333', glow: '#ff444460' },
+    { id: 'sky', name: 'Sky', primary: '#00bfff', accent: '#0099cc', glow: '#00bfff60' },
+    { id: 'blue', name: 'Blue', primary: '#4466ff', accent: '#3355dd', glow: '#4466ff60' },
+    { id: 'deeppurple', name: 'Deep Purple', primary: '#4b0082', accent: '#380062', glow: '#4b008260' },
+    // Row 2: Purples, Reds, Oranges
+    { id: 'purple', name: 'Purple', primary: '#9932cc', accent: '#7722aa', glow: '#9932cc60' },
+    { id: 'violet', name: 'Violet', primary: '#8a2be2', accent: '#6a1bb2', glow: '#8a2be260' },
+    { id: 'magenta', name: 'Magenta', primary: '#ff00ff', accent: '#cc00cc', glow: '#ff00ff60' },
+    { id: 'red', name: 'Red', primary: '#ff4444', accent: '#cc3333', glow: '#ff444460' },
+    { id: 'crimson', name: 'Crimson', primary: '#dc143c', accent: '#b01030', glow: '#dc143c60' },
     { id: 'orange', name: 'Orange', primary: '#ff8800', accent: '#cc6600', glow: '#ff880060' },
-    { id: 'gold', name: 'Gold', primary: '#ffcc00', accent: '#cc9900', glow: '#ffcc0060' },
-    { id: 'white', name: 'Silver', primary: '#dddddd', accent: '#aaaaaa', glow: '#dddddd60' },
-    { id: 'pink', name: 'Pink', primary: '#ff66aa', accent: '#cc5588', glow: '#ff66aa60' }
+    { id: 'amber', name: 'Amber', primary: '#ffbf00', accent: '#cc9900', glow: '#ffbf0060' },
+    // Row 3: Yellows, Neutrals, Pinks
+    { id: 'gold', name: 'Gold', primary: '#ffd700', accent: '#ccac00', glow: '#ffd70060' },
+    { id: 'yellow', name: 'Yellow', primary: '#ffff00', accent: '#cccc00', glow: '#ffff0060' },
+    { id: 'white', name: 'White', primary: '#ffffff', accent: '#cccccc', glow: '#ffffff60' },
+    { id: 'silver', name: 'Silver', primary: '#c0c0c0', accent: '#a0a0a0', glow: '#c0c0c060' },
+    { id: 'stealth', name: 'Stealth', primary: '#3a3a3a', accent: '#2a2a2a', glow: '#3a3a3a40' },
+    { id: 'pink', name: 'Pink', primary: '#ff69b4', accent: '#cc5590', glow: '#ff69b460' },
+    { id: 'coral', name: 'Coral', primary: '#ff7f50', accent: '#cc6640', glow: '#ff7f5060' }
   ],
 
   // Shield visual configuration by tier

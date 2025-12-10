@@ -87,7 +87,7 @@ const SOUNDS = {
         filename: "weapon_player_t5.mp3",
         duration: 0.6,
         prompt:
-          "Electrical tesla coil discharge with crackling arc lightning, buzzing electricity with lightning sparks, high voltage",
+          "Smooth electrical discharge with crackling arc lightning, buzzing electricity with lightning sparks, high voltage hum softly fading out",
       },
       // NPC weapons - faction specific visuals
       {
@@ -452,9 +452,9 @@ const SOUNDS = {
       {
         id: "wormhole_transit",
         filename: "wormhole_transit.mp3",
-        duration: 2.0,
+        duration: 6.0,
         prompt:
-          "Wormhole travel sound, swirling doppler whoosh with dimensional shift, reality bending passage through space",
+          "swirling doppler whoosh with dimensional shift, reality bending passage through space, increasing intensity and variance with deep humming growth",
       },
       {
         id: "comet_warning",
@@ -888,16 +888,16 @@ const SOUNDS = {
       {
         id: "base_destruction_void",
         filename: "base_void.mp3",
-        duration: 8.0,
+        duration: 10.0,
         prompt:
-          "implosion of interdimensional rift begins with portal destabilization crackling and zapping and distortion hum for one and a half seconds, then space fragmentation with sparks and arcs and increasing gravitational pull sounds for two and a half seconds, violent implosion sucking everything inward with dimensional collapse for two seconds, ending with flash of energy and ethereal release as portal bursts for final second, otherworldly",
+          "interdimensional rift begins imploding with portal destabilization crackling sparks and gravitational whirring and distortion gradually increasing for three and a half seconds, violent implosion sucking everything inward with dimensional collapse, brief pause before massive explosion",
       },
       {
         id: "base_destruction_mining",
         filename: "base_mining.mp3",
         duration: 8.0,
         prompt:
-          "electrical equipment malfunction with sparking and power surge for one and a half seconds, then fuel tank ruptures with smaller explosions and growing fire sounds for two and a half seconds, main reactor cascade explosion with massive blast and expanding shockwave for two seconds, ending with industrial machinery winding down for two seconds, then finally an electrical and chemical explosion",
+          "electrical equipment malfunction with sparking and power surge for one and a half seconds, industrial machinery winding down for 1 second, then fireworks factory ignites and rapidly explodes",
       },
     ],
   },
