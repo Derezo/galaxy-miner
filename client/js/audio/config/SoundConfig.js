@@ -415,6 +415,12 @@ const SoundConfig = {
     priority: 50,
     category: "sfx",
   },
+  foreman_spawn: {
+    file: "bosses/foreman_spawn.mp3",
+    baseVolume: 0.9,
+    priority: 100,
+    category: "sfx",
+  },
   cargo_warning: {
     file: "mining/cargo_warning.mp3",
     baseVolume: 0.7,

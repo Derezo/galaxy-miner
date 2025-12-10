@@ -22,6 +22,46 @@ This roadmap outlines the planned development direction for Galaxy Miner, organi
 
 These items address existing systems that are partially implemented or need immediate attention.
 
+### Technical Debt: Duplicate Network Handler Definitions
+
+**Status:** Critical architectural issue identified
+**Priority:** Critical
+**Estimated Effort:** 1-2 days
+
+**Description:**
+The client networking code has duplicate socket event handlers defined in two locations:
+- `/client/js/network.js` - Main network module (actively used)
+- `/client/js/network/npc.js` - Modular handler file (NOT being used)
+
+This caused a significant bug where `miningTargetPos` was being sent correctly by the server but silently dropped on the client because `network.js:276` builds its own `npcData` object and was missing the `miningTargetPos` field. The `network/npc.js` file had the correct implementation but wasn't being loaded.
+
+**Issues Caused:**
+- Rogue miner mining beams not rendering (took extensive debugging to identify)
+- Confusion about which handler is authoritative
+- Risk of similar bugs when adding new NPC properties
+
+**Resolution Options:**
+
+**Option A: Consolidate to network.js (Quick fix)**
+- Remove `/client/js/network/` directory entirely
+- Ensure all socket handlers are in `/client/js/network.js`
+- Simpler architecture, single source of truth
+
+**Option B: Migrate to modular handlers (Better long-term)**
+- Update `network.js` to import and register handlers from `/client/js/network/*.js`
+- Remove duplicate handler definitions from `network.js`
+- Each module handles its own events (npc.js, player.js, combat.js, etc.)
+- Better separation of concerns, easier to maintain
+
+**Recommended:** Option B - The modular structure is cleaner, but requires ensuring the module files are actually loaded and registered.
+
+**Files Affected:**
+- `/client/js/network.js` - Remove duplicate handlers or convert to import-based
+- `/client/js/network/npc.js` - Already has correct handler, needs to be loaded
+- `/client/index.html` - May need script imports for network modules
+
+---
+
 ### Fleet/Party System UI and Mechanics
 
 **Status:** Foundation exists (team damage tracking), needs UI and formal mechanics

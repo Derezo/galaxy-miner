@@ -139,7 +139,14 @@ function completeMining(playerId) {
   // Calculate yield (based on mining tier)
   const yieldMultiplier = Math.pow(config.TIER_MULTIPLIER, session.miningTier - 1);
   const baseYield = config.BASE_MINING_YIELD;
-  const quantity = Math.max(1, Math.floor(baseYield * yieldMultiplier));
+  let quantity = Math.max(1, Math.floor(baseYield * yieldMultiplier));
+
+  // Apply Mining Rites relic bonus (5x yield)
+  const hasMiningRites = statements.hasRelic.get(playerId, 'MINING_RITES');
+  if (hasMiningRites) {
+    quantity *= 5;
+    logger.log(`[Mining] Mining Rites active for player ${playerId}, yield multiplied 5x to ${quantity}`);
+  }
 
   // Check cargo space
   const cargoUsed = statements.getTotalCargoCount.get(playerId).total;

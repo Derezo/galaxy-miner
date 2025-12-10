@@ -294,6 +294,10 @@ const Network = {
       if (data.collectingWreckagePos) {
         npcData.collectingWreckagePos = data.collectingWreckagePos;
       }
+      // Include mining target position for rogue miner beam animation
+      if (data.miningTargetPos) {
+        npcData.miningTargetPos = data.miningTargetPos;
+      }
       Entities.updateNPC(npcData);
     });
 

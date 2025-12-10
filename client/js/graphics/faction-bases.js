@@ -57,7 +57,7 @@ const FactionBases = {
       color: '#ff9900',
       secondaryColor: '#664400',
       accentColor: '#ffcc00',
-      glowColor: '#ff990050'
+      glowColor: 'rgba(255, 255, 255, 0.15)'
     },
     // ============================================
     // ASSIMILATED BASES - Swarm-converted versions
@@ -174,7 +174,7 @@ const FactionBases = {
         this.drawVoidRift(ctx, config);
         break;
       case 'mining_claim':
-        this.drawMiningClaim(ctx, config);
+        this.drawMiningClaim(ctx, config, base);
         break;
       // Assimilated bases - swarm-corrupted versions
       case 'assimilated_pirate_outpost':
@@ -1147,7 +1147,7 @@ const FactionBases = {
     ctx.fill();
   },
 
-  drawMiningClaim(ctx, config) {
+  drawMiningClaim(ctx, config, base = {}) {
     const time = this.animationTime;
     const size = config.size;
 
@@ -1206,6 +1206,11 @@ const FactionBases = {
     ctx.lineTo(size * 0.3, 0);
     ctx.stroke();
 
+    // Draw coin pile if claimCredits > 0
+    if (base.claimCredits && base.claimCredits > 0) {
+      this.drawCoinPile(ctx, size, base.claimCredits, time);
+    }
+
     // Mining laser beam (animated)
     const laserActive = Math.floor(time * 2) % 3 !== 0;
     if (laserActive) {
@@ -1235,6 +1240,234 @@ const FactionBases = {
       const x = -size * 0.7 + i * size * 0.35;
       ctx.fillRect(x, size * 0.35, stripeWidth, size * 0.15);
     }
+  },
+
+  /**
+   * Draw coin pile on mining platform based on accumulated credits
+   * 10 progressive phases from scattered coins to glowing hoard
+   * @param {CanvasRenderingContext2D} ctx
+   * @param {number} size - Base size for scaling
+   * @param {number} credits - Accumulated claimCredits
+   * @param {number} time - Animation time
+   */
+  drawCoinPile(ctx, size, credits, time) {
+    // Determine phase (0-10) based on credits
+    let phase;
+    if (credits <= 0) phase = 0;
+    else if (credits <= 10) phase = 1;
+    else if (credits <= 25) phase = 2;
+    else if (credits <= 50) phase = 3;
+    else if (credits <= 100) phase = 4;
+    else if (credits <= 200) phase = 5;
+    else if (credits <= 350) phase = 6;
+    else if (credits <= 500) phase = 7;
+    else if (credits <= 750) phase = 8;
+    else if (credits <= 1000) phase = 9;
+    else phase = 10;
+
+    if (phase === 0) return;
+
+    // Gold colors
+    const goldLight = '#FFD700';
+    const goldMid = '#DAA520';
+    const goldDark = '#B8860B';
+    const coinRadius = 3;
+
+    // Two pile locations - left and right sides of platform
+    // Higher on platform (lower Y value = higher on screen)
+    const leftPileX = size * -0.64;
+    const rightPileX = size * 0.64;
+    const pileY = size * 0.23; // Higher position on platform
+
+    // Progressive golden glow that increases with phase (starts from phase 1)
+    const glowIntensity = phase / 10;
+    const baseGlowRadius = 6 + phase * 1.4;
+
+    // Draw both piles
+    const pileOffsets = [
+      { x: leftPileX, y: pileY },
+      { x: rightPileX, y: pileY }
+    ];
+
+    for (let pileIdx = 0; pileIdx < pileOffsets.length; pileIdx++) {
+      const pileOffset = pileOffsets[pileIdx];
+      ctx.save();
+      ctx.translate(pileOffset.x, pileOffset.y);
+
+      // Progressive golden glow effect (visible from phase 1, stronger each phase)
+      const glowRadius = baseGlowRadius + Math.sin(time * 3 + pileIdx) * 2;
+      const glowGradient = ctx.createRadialGradient(0, -4, 0, 0, -4, glowRadius);
+      glowGradient.addColorStop(0, `rgba(255, 215, 0, ${0.05 + glowIntensity * 0.4})`);
+      glowGradient.addColorStop(0.5, `rgba(255, 200, 50, ${0.04 + glowIntensity * 0.2})`);
+      glowGradient.addColorStop(1, 'transparent');
+      ctx.fillStyle = glowGradient;
+      ctx.beginPath();
+      ctx.arc(0, -4, glowRadius, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Get coin positions for this pile (8 coins per pile per phase = 16 total per phase)
+      const coinData = this.getCoinPositions(phase, pileIdx);
+
+      // Draw coins
+      for (const coin of coinData) {
+        // Coin body (ellipse for perspective)
+        const coinGradient = ctx.createLinearGradient(
+          coin.x - coinRadius, coin.y,
+          coin.x + coinRadius, coin.y
+        );
+        coinGradient.addColorStop(0, goldDark);
+        coinGradient.addColorStop(0.3, goldLight);
+        coinGradient.addColorStop(0.7, goldMid);
+        coinGradient.addColorStop(1, goldDark);
+
+        ctx.fillStyle = coinGradient;
+        ctx.beginPath();
+        ctx.ellipse(coin.x, coin.y, coinRadius, coinRadius * 0.5, 0, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Coin edge (darker bottom)
+        ctx.fillStyle = goldDark;
+        ctx.beginPath();
+        ctx.ellipse(coin.x, coin.y + 1, coinRadius, coinRadius * 0.3, 0, 0, Math.PI);
+        ctx.fill();
+
+        // Highlight on coin
+        ctx.fillStyle = 'rgba(255, 255, 200, 0.6)';
+        ctx.beginPath();
+        ctx.ellipse(coin.x - 1, coin.y - 1, coinRadius * 0.4, coinRadius * 0.2, -0.3, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      // Sparkle effects - visible from phase 1, more sparkles at higher phases
+      const sparkleCount = 2 + Math.floor(phase * 0.8);
+      for (let i = 0; i < sparkleCount; i++) {
+        // Staggered timing for each sparkle
+        const sparkleTime = time * 2.5 + i * 1.3 + pileIdx * 0.7;
+        const sparklePhase = (sparkleTime % 2) / 2; // 0 to 1 cycle
+
+        // Sparkle visibility pulses
+        const sparkleAlpha = Math.pow(Math.sin(sparklePhase * Math.PI), 2) * (0.6 + glowIntensity * 0.4);
+
+        if (sparkleAlpha > 0.1) {
+          // Position sparkles around the pile
+          const sparkleAngle = (i / sparkleCount) * Math.PI * 2 + time * 0.3;
+          const sparkleRadius = 5 + phase * 0.5;
+          const sparkleX = Math.cos(sparkleAngle) * sparkleRadius * 0.8;
+          const sparkleY = -3 - phase * 0.3 + Math.sin(sparkleAngle) * sparkleRadius * 0.4;
+
+          // 4-pointed star sparkle
+          ctx.save();
+          ctx.translate(sparkleX, sparkleY);
+          ctx.fillStyle = `rgba(255, 255, 220, ${sparkleAlpha})`;
+
+          const starSize = 1.5 + Math.sin(sparkleTime * 3) * 0.5;
+          ctx.beginPath();
+          ctx.moveTo(0, -starSize);
+          ctx.lineTo(starSize * 0.3, 0);
+          ctx.lineTo(0, starSize);
+          ctx.lineTo(-starSize * 0.3, 0);
+          ctx.closePath();
+          ctx.fill();
+
+          ctx.beginPath();
+          ctx.moveTo(-starSize, 0);
+          ctx.lineTo(0, starSize * 0.3);
+          ctx.lineTo(starSize, 0);
+          ctx.lineTo(0, -starSize * 0.3);
+          ctx.closePath();
+          ctx.fill();
+
+          ctx.restore();
+        }
+      }
+
+      ctx.restore();
+    }
+  },
+
+  /**
+   * Get coin positions for each pile phase
+   * Returns array of {x, y} positions for coins
+   * 8 coins per pile per phase, scaling to 80 per pile (160 total) at phase 10
+   */
+  getCoinPositions(phase, pileIndex) {
+    const positions = [];
+    const mirror = pileIndex === 0 ? -1 : 1; // Mirror positions for left pile
+
+    // Base layer positions (spread out for pile foundation)
+    const baseLayer = [
+      { x: -4, y: 2 }, { x: 0, y: 2 }, { x: 4, y: 2 }, { x: -2, y: 3 },
+      { x: 2, y: 3 }, { x: -5, y: 1 }, { x: 5, y: 1 }, { x: 0, y: 4 }
+    ];
+
+    // Second layer
+    const layer2 = [
+      { x: -3, y: 0 }, { x: 1, y: 0 }, { x: 3, y: 1 }, { x: -1, y: 1 },
+      { x: -4, y: 0 }, { x: 4, y: 0 }, { x: 0, y: 1 }, { x: 2, y: 2 }
+    ];
+
+    // Third layer
+    const layer3 = [
+      { x: -2, y: -1 }, { x: 2, y: -1 }, { x: 0, y: -1 }, { x: -3, y: -2 },
+      { x: 3, y: -2 }, { x: 1, y: -2 }, { x: -1, y: 0 }, { x: 4, y: -1 }
+    ];
+
+    // Fourth layer
+    const layer4 = [
+      { x: -1, y: -3 }, { x: 1, y: -3 }, { x: 0, y: -2 }, { x: 2, y: -3 },
+      { x: -2, y: -3 }, { x: 3, y: -4 }, { x: -3, y: -4 }, { x: 0, y: -4 }
+    ];
+
+    // Fifth layer
+    const layer5 = [
+      { x: 0, y: -5 }, { x: -1, y: -5 }, { x: 1, y: -5 }, { x: 2, y: -5 },
+      { x: -2, y: -5 }, { x: 0, y: -6 }, { x: 1, y: -6 }, { x: -1, y: -6 }
+    ];
+
+    // Sixth layer
+    const layer6 = [
+      { x: 0, y: -7 }, { x: 1, y: -7 }, { x: -1, y: -7 }, { x: 2, y: -6 },
+      { x: -2, y: -6 }, { x: 0, y: -8 }, { x: -6, y: 2 }, { x: 6, y: 2 }
+    ];
+
+    // Seventh layer
+    const layer7 = [
+      { x: 1, y: -8 }, { x: -1, y: -8 }, { x: 0, y: -9 }, { x: -7, y: 1 },
+      { x: 7, y: 1 }, { x: -6, y: 0 }, { x: 6, y: 0 }, { x: 2, y: -8 }
+    ];
+
+    // Eighth layer
+    const layer8 = [
+      { x: -2, y: -8 }, { x: 1, y: -9 }, { x: -1, y: -9 }, { x: 0, y: -10 },
+      { x: -8, y: 2 }, { x: 8, y: 2 }, { x: -7, y: 3 }, { x: 7, y: 3 }
+    ];
+
+    // Ninth layer
+    const layer9 = [
+      { x: 1, y: -10 }, { x: -1, y: -10 }, { x: 0, y: -11 }, { x: 2, y: -9 },
+      { x: -2, y: -9 }, { x: -8, y: 0 }, { x: 8, y: 0 }, { x: -9, y: 1 }
+    ];
+
+    // Tenth layer (crown)
+    const layer10 = [
+      { x: 9, y: 1 }, { x: 0, y: -12 }, { x: 1, y: -11 }, { x: -1, y: -11 },
+      { x: -9, y: 2 }, { x: 9, y: 2 }, { x: -10, y: 1 }, { x: 10, y: 1 }
+    ];
+
+    const layers = [baseLayer, layer2, layer3, layer4, layer5, layer6, layer7, layer8, layer9, layer10];
+
+    // Add coins from each layer based on phase
+    for (let layerIdx = 0; layerIdx < phase; layerIdx++) {
+      const layer = layers[layerIdx];
+      for (const pos of layer) {
+        positions.push({
+          x: pos.x * mirror * 0.9, // Slight compression for tighter pile
+          y: pos.y
+        });
+      }
+    }
+
+    return positions;
   },
 
   drawGenericBase(ctx, config) {

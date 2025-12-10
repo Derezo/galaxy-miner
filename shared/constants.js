@@ -1244,6 +1244,19 @@ const CONSTANTS = {
         multiWreckageRange: 300,
         scavengerWreckageImmunity: true
       }
+    },
+    MINING_RITES: {
+      id: 'mining_rites',
+      name: 'Mining Rites',
+      rarity: 'legendary',
+      value: 2500,
+      description: 'An ancient amethyst pickaxe blessed by the Rogue Foremen. Multiplies mining yield by 5x.',
+      iconType: 'mining_rites',
+      glyphVariant: 'mining',
+      glowColor: '#9b59b6',
+      effects: {
+        miningYieldMultiplier: 5
+      }
     }
   },
 
@@ -1353,6 +1366,15 @@ const CONSTANTS = {
         orbitsWithBelt: true
       }
     }
+  },
+
+  // Mining claim asteroid generation (for NPC mining targets)
+  MINING_CLAIM_ASTEROIDS: {
+    COUNT_MIN: 3,           // Minimum asteroids/planets near a mining claim
+    COUNT_MAX: 5,           // Maximum asteroids/planets near a mining claim
+    SPAWN_RADIUS: 1000,     // Generate within 1000 units of mining claim
+    MIN_SPACING: 100,       // Minimum distance between spawned objects
+    PLANET_CHANCE: 0.2      // 20% chance each object is a planet vs asteroid
   },
 
   // Swarm Assimilation System

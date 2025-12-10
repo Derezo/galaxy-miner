@@ -215,6 +215,32 @@ function generateSectorFromStarSystem(sectorX, sectorY) {
         });
       }
     }
+
+    // Add mining claim objects (asteroids/planets generated near mining claims)
+    if (system.miningClaimObjects) {
+      for (const obj of system.miningClaimObjects) {
+        if (isInSector(obj.x, obj.y)) {
+          if (obj.type === 'planet') {
+            sector.planets.push({
+              ...obj,
+              starX: system.primaryStar.x,
+              starY: system.primaryStar.y,
+              systemId: system.id,
+              isOrbital: false  // Mining claim objects don't orbit
+            });
+          } else {
+            // Asteroid
+            sector.asteroids.push({
+              ...obj,
+              starX: system.primaryStar.x,
+              starY: system.primaryStar.y,
+              systemId: system.id,
+              isOrbital: false  // Mining claim objects don't orbit
+            });
+          }
+        }
+      }
+    }
   }
 
   // Generate deep-space content (void rifts, scavenger yards) if no systems nearby
@@ -681,9 +707,19 @@ function getStarSystemObjectById(objectId, debug = false) {
   let result = null;
   if (type === 'planet') {
     result = system.planets.find(p => p.id === objectId);
+    // Also check miningClaimObjects for mining claim planets
+    if (!result && system.miningClaimObjects) {
+      result = system.miningClaimObjects.find(obj => obj.id === objectId && obj.type === 'planet');
+    }
   } else if (type === 'asteroid') {
-    // Belt asteroids are generated per-sector, search nearby sectors
-    return findStarSystemObjectInSectors(objectId, type, superX, superY, debug);
+    // First check miningClaimObjects for mining claim asteroids
+    if (system.miningClaimObjects) {
+      result = system.miningClaimObjects.find(obj => obj.id === objectId && obj.type === 'asteroid');
+    }
+    // Belt asteroids are generated per-sector, search nearby sectors if not found
+    if (!result) {
+      return findStarSystemObjectInSectors(objectId, type, superX, superY, debug);
+    }
   } else if (type === 'star') {
     if (system.primaryStar.id === objectId) {
       result = system.primaryStar;
@@ -707,17 +743,25 @@ function getStarSystemObjectById(objectId, debug = false) {
 function findStarSystemObjectInSectors(objectId, type, superX, superY, debug = false) {
   // Super-sectors are larger, convert to approximate regular sector coordinates
   // Super-sector coordinates map to multiple regular sectors
+  // Regular sectors are 1000x1000 units, super-sectors are ~6000x6000 units
   const superSectorSize = config.SUPER_SECTOR_SIZE || 6000;
-  const baseSectorX = superX * superSectorSize;
-  const baseSectorY = superY * superSectorSize;
+  const sectorSize = config.SECTOR_SIZE || 1000;
+
+  // Convert super-sector origin to regular sector coordinates
+  const baseSectorX = Math.floor((superX * superSectorSize) / sectorSize);
+  const baseSectorY = Math.floor((superY * superSectorSize) / sectorSize);
+
+  // Calculate how many regular sectors span a super-sector
+  const sectorsPerSuperSector = Math.ceil(superSectorSize / sectorSize);
 
   if (debug) {
-    logger.log('[World] Searching sectors around:', { baseSectorX, baseSectorY });
+    logger.log('[World] Searching sectors around:', { baseSectorX, baseSectorY, sectorsPerSuperSector });
   }
 
-  // Search a grid of sectors that could contain objects from this super-sector
-  for (let dx = -2; dx <= superSectorSize + 2; dx++) {
-    for (let dy = -2; dy <= superSectorSize + 2; dy++) {
+  // Search a grid of sectors within and around the super-sector
+  // Add small margin (-2 to +sectorsPerSuperSector+2)
+  for (let dx = -2; dx <= sectorsPerSuperSector + 2; dx++) {
+    for (let dy = -2; dy <= sectorsPerSuperSector + 2; dy++) {
       const sector = generateSector(baseSectorX + dx, baseSectorY + dy);
       const result = findInSector(sector, type, objectId);
       if (result) {

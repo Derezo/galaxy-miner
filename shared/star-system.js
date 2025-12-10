@@ -13,6 +13,13 @@ const getConfig = () => {
   return {};
 };
 
+// Get logger - works in both Node.js and browser
+const getLogger = () => {
+  if (typeof window !== 'undefined' && window.Logger) return window.Logger;
+  if (typeof module !== 'undefined') return require('./logger');
+  return { category: () => {}, error: console.error };
+};
+
 // Define StarSystem and immediately attach to window for browser
 const StarSystem = (typeof window !== 'undefined') ? (window.StarSystem = {}) : {};
 
@@ -66,7 +73,7 @@ Object.assign(StarSystem, {
 
     // Debug: log params on first generation only
     if (!this._debugLogged) {
-      console.log('[StarSystem] Config:', {
+      getLogger().category('worldGeneration', 'StarSystem Config:', {
         SUPER_SECTOR_SIZE: superSectorSize,
         MIN_STAR_SEPARATION: minStarSeparation,
         SYSTEMS_MIN: systemCountMin,
@@ -216,6 +223,9 @@ Object.assign(StarSystem, {
     // Generate bases (faction-specific placement)
     const bases = this.generateBases(primaryStar, asteroidBelts, influenceRadius, rng, id);
 
+    // Generate asteroids/planets near mining claims for NPC mining targets
+    const miningClaimObjects = this.generateMiningClaimObjects(bases, primaryStar, binaryInfo, rng, id);
+
     // Generate wormholes
     const wormholes = this.generateWormholes(primaryStar, binaryInfo, influenceRadius, rng, id);
 
@@ -231,6 +241,7 @@ Object.assign(StarSystem, {
       asteroidBelts,
       planets,
       bases,
+      miningClaimObjects,
       wormholes,
       comets
     };
@@ -586,6 +597,163 @@ Object.assign(StarSystem, {
     return bases;
   },
 
+  // Generate asteroids and planets near mining claims for NPC mining targets
+  generateMiningClaimObjects(bases, primaryStar, binaryInfo, rng, systemId) {
+    const config = getConfig();
+    const CONSTANTS = config.CONSTANTS || (typeof window !== 'undefined' ? window.CONSTANTS : require('./constants.js'));
+
+    // Mining claim object generation parameters
+    const claimConfig = {
+      MIN_DISTANCE: 300,      // Minimum distance from claim base
+      MAX_DISTANCE: 4500,     // Maximum distance from claim base
+      PLANET_MIN: 2,          // Minimum planets per claim
+      PLANET_MAX: 5,          // Maximum planets per claim
+      ASTEROID_MIN: 4,        // Minimum asteroids per claim
+      ASTEROID_MAX: 9,        // Maximum asteroids per claim
+      MIN_SPACING: 100        // Minimum spacing between objects
+    };
+
+    // Sun danger zone multiplier (WARM zone where damage starts)
+    const SUN_DANGER_ZONE = CONSTANTS?.STAR_ZONES?.WARM || 1.3;
+
+    const miningObjects = [];
+
+    // Find all mining claims in this system
+    const miningClaims = bases.filter(b => b.type === 'mining_claim');
+
+    // Helper to check if position is within sun danger zone
+    const isInSunDanger = (x, y) => {
+      // Check primary star
+      const dxPrimary = x - primaryStar.x;
+      const dyPrimary = y - primaryStar.y;
+      const distPrimary = Math.sqrt(dxPrimary * dxPrimary + dyPrimary * dyPrimary);
+      if (distPrimary < primaryStar.size * SUN_DANGER_ZONE) {
+        return true;
+      }
+
+      // Check binary star if present
+      if (binaryInfo && binaryInfo.secondary) {
+        const dxSecondary = x - binaryInfo.secondary.x;
+        const dySecondary = y - binaryInfo.secondary.y;
+        const distSecondary = Math.sqrt(dxSecondary * dxSecondary + dySecondary * dySecondary);
+        if (distSecondary < binaryInfo.secondary.size * SUN_DANGER_ZONE) {
+          return true;
+        }
+      }
+
+      return false;
+    };
+
+    // Helper to try placing an object with spacing and sun checks
+    const tryPlaceObject = (claim, claimObjects) => {
+      for (let attempt = 0; attempt < 30; attempt++) {
+        // Random angle and distance from claim (300-4500 units)
+        const angle = rng() * Math.PI * 2;
+        const dist = claimConfig.MIN_DISTANCE + rng() * (claimConfig.MAX_DISTANCE - claimConfig.MIN_DISTANCE);
+        const x = claim.x + Math.cos(angle) * dist;
+        const y = claim.y + Math.sin(angle) * dist;
+
+        // Check if in sun danger zone
+        if (isInSunDanger(x, y)) {
+          continue;
+        }
+
+        // Check spacing from other objects in this claim
+        let tooClose = false;
+        for (const existing of claimObjects) {
+          const dx = x - existing.x;
+          const dy = y - existing.y;
+          if (Math.sqrt(dx * dx + dy * dy) < claimConfig.MIN_SPACING) {
+            tooClose = true;
+            break;
+          }
+        }
+
+        if (!tooClose) {
+          return { x, y };
+        }
+      }
+      return null;
+    };
+
+    for (let claimIdx = 0; claimIdx < miningClaims.length; claimIdx++) {
+      const claim = miningClaims[claimIdx];
+      const claimObjects = [];
+
+      // Determine counts for this claim
+      const planetCount = claimConfig.PLANET_MIN +
+        Math.floor(rng() * (claimConfig.PLANET_MAX - claimConfig.PLANET_MIN + 1));
+      const asteroidCount = claimConfig.ASTEROID_MIN +
+        Math.floor(rng() * (claimConfig.ASTEROID_MAX - claimConfig.ASTEROID_MIN + 1));
+
+      // Generate planets (2-5)
+      for (let i = 0; i < planetCount; i++) {
+        const pos = tryPlaceObject(claim, claimObjects);
+        if (!pos) continue;
+
+        const planetType = this.selectPlanetType(rng);
+        const typeData = config.PLANET_TYPES?.[planetType] || {
+          colors: ['#8B4513', '#A0522D'],
+          sizeRange: [20, 40]
+        };
+        const [sizeMin, sizeMax] = typeData.sizeRange;
+        const size = sizeMin + rng() * (sizeMax - sizeMin) * 0.5; // Smaller than normal
+
+        claimObjects.push({
+          id: `${systemId}_planet_clm${claimIdx}p${i}`,
+          type: 'planet',
+          planetType,
+          x: pos.x,
+          y: pos.y,
+          size,
+          colors: typeData.colors,
+          resources: this.getPlanetResources(rng),
+          claimId: claim.id
+        });
+      }
+
+      // Generate asteroids (4-9)
+      for (let i = 0; i < asteroidCount; i++) {
+        const pos = tryPlaceObject(claim, claimObjects);
+        if (!pos) continue;
+
+        const asteroidType = this.selectAsteroidType(rng);
+        const sizeClass = this.selectAsteroidSizeClass(rng);
+        const sizeClassData = config.ASTEROID_SIZE_CLASSES?.[sizeClass] || {
+          sizeRange: [10, 30],
+          rotationSpeed: [0.2, 0.8],
+          vertices: [6, 9],
+          irregularity: 0.25
+        };
+
+        const [sizeMin, sizeMax] = sizeClassData.sizeRange;
+        const size = sizeMin + rng() * (sizeMax - sizeMin);
+        const [rotMin, rotMax] = sizeClassData.rotationSpeed;
+        const rotationSpeed = (rotMin + rng() * (rotMax - rotMin)) * (rng() > 0.5 ? 1 : -1);
+        const shapeSeed = this.hash(`${systemId}_claim_asteroid_${claimIdx}_${i}`, claim.x, claim.y);
+        const shape = this.generateAsteroidShape(shapeSeed, sizeClassData);
+
+        claimObjects.push({
+          id: `${systemId}_asteroid_clm${claimIdx}a${i}`,
+          type: 'asteroid',
+          asteroidType,
+          sizeClass,
+          x: pos.x,
+          y: pos.y,
+          size,
+          rotationSpeed,
+          shape,
+          resources: this.getAsteroidResources(rng, 'uncommon'), // Mining claims have decent resources
+          claimId: claim.id
+        });
+      }
+
+      miningObjects.push(...claimObjects);
+    }
+
+    return miningObjects;
+  },
+
   // Find valid base position based on placement strategy
   findBasePosition(star, belts, influenceRadius, placement, rng) {
     const minDist = influenceRadius * placement.minDistFromStar;
@@ -854,10 +1022,10 @@ Object.assign(StarSystem, {
     for (let i = 0; i < vertexCount; i++) {
       const angle = (i / vertexCount) * Math.PI * 2;
       // Radius varies from 0.7 to 1.3 based on irregularity
-      const radiusOffset = 1 + (shapeRng() - 0.5) * 2 * irregularity;
+      const radius = 1 + (shapeRng() - 0.5) * 2 * irregularity;
       vertices.push({
         angle,
-        radiusOffset
+        radius
       });
     }
 

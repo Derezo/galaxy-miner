@@ -316,6 +316,11 @@ const Renderer = {
   drawWorld() {
     this.updateCamera();
 
+    // DEBUG: Draw sector grid first (background layer)
+    if (typeof DebugSettings !== 'undefined' && DebugSettings.get('rendering', 'sectorGrid')) {
+      this.drawSectorGrid();
+    }
+
     const objects = World.getVisibleObjects(
       Player.position,
       Math.max(this.canvas.width, this.canvas.height)
@@ -395,6 +400,7 @@ const Renderer = {
             type: serverBase.type || base.type,
             faction: serverBase.faction || base.faction,
             scrapPile: serverBase.scrapPile,
+            claimCredits: serverBase.claimCredits,
           };
         } else {
           // Fallback: check for health state only
@@ -442,6 +448,7 @@ const Renderer = {
           health: serverBase.health,
           maxHealth: serverBase.maxHealth,
           scrapPile: serverBase.scrapPile,
+          claimCredits: serverBase.claimCredits,
         };
 
         if (!this.isOnScreen(base.x, base.y, base.size)) continue;
@@ -452,6 +459,27 @@ const Renderer = {
           this.drawBase(base);
         }
       }
+    }
+
+    // DEBUG: Draw collision hitboxes as overlay
+    if (typeof DebugSettings !== 'undefined' && DebugSettings.get('rendering', 'collisionHitboxes')) {
+      const npcsArray = typeof Entities !== 'undefined' ? Array.from(Entities.npcs.values()) : [];
+      // Combine procedural bases with server-tracked bases for hitbox rendering
+      let allBases = [...(objects.bases || [])];
+      if (typeof Entities !== 'undefined') {
+        for (const [baseId, serverBase] of Entities.bases) {
+          if (Entities.isBaseDestroyed(baseId)) continue;
+          // Convert server base format to have flat x/y
+          allBases.push({
+            id: baseId,
+            x: serverBase.position?.x ?? serverBase.x,
+            y: serverBase.position?.y ?? serverBase.y,
+            size: serverBase.size || 100,
+            faction: serverBase.faction
+          });
+        }
+      }
+      this.drawCollisionHitboxes({ ...objects, bases: allBases }, npcsArray);
     }
   },
 
@@ -557,6 +585,11 @@ const Renderer = {
     // Use CelestialRenderer if available for enhanced visuals
     if (typeof CelestialRenderer !== "undefined") {
       CelestialRenderer.drawPlanet(ctx, planet, screen, depleted);
+
+      // DEBUG: Draw planet ID label
+      if (typeof DebugSettings !== 'undefined' && DebugSettings.get('rendering', 'planetIds') && planet.id) {
+        this.drawObjectIdLabel(planet.id, screen, planet.size);
+      }
       return;
     }
 
@@ -580,6 +613,11 @@ const Renderer = {
     ctx.strokeStyle = depleted ? "#333333" : "#666666";
     ctx.lineWidth = 2;
     ctx.stroke();
+
+    // DEBUG: Draw planet ID label (fallback path)
+    if (typeof DebugSettings !== 'undefined' && DebugSettings.get('rendering', 'planetIds') && planet.id) {
+      this.drawObjectIdLabel(planet.id, screen, planet.size);
+    }
   },
 
   drawAsteroid(asteroid) {
@@ -590,6 +628,29 @@ const Renderer = {
     // Use CelestialRenderer if available for enhanced visuals
     if (typeof CelestialRenderer !== "undefined") {
       CelestialRenderer.drawAsteroid(ctx, asteroid, screen, depleted);
+
+      // DEBUG: Draw bright indicator for mining claim asteroids
+      if (typeof DebugSettings !== 'undefined' && DebugSettings.get('rendering', 'miningClaimRings') &&
+          (asteroid.claimId || asteroid.id?.includes('clm'))) {
+        ctx.save();
+        ctx.strokeStyle = '#00FF00'; // Bright green
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.arc(screen.x, screen.y, asteroid.size + 10, 0, Math.PI * 2);
+        ctx.stroke();
+        // Also draw a second ring
+        ctx.strokeStyle = '#FFFF00'; // Yellow
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(screen.x, screen.y, asteroid.size + 15, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.restore();
+      }
+
+      // DEBUG: Draw asteroid ID label
+      if (typeof DebugSettings !== 'undefined' && DebugSettings.get('rendering', 'asteroidIds') && asteroid.id) {
+        this.drawObjectIdLabel(asteroid.id, screen, asteroid.size);
+      }
       return;
     }
 
@@ -603,6 +664,11 @@ const Renderer = {
     ctx.strokeStyle = depleted ? "#222222" : "#666666";
     ctx.lineWidth = 1;
     ctx.stroke();
+
+    // DEBUG: Draw asteroid ID label (fallback path)
+    if (typeof DebugSettings !== 'undefined' && DebugSettings.get('rendering', 'asteroidIds') && asteroid.id) {
+      this.drawObjectIdLabel(asteroid.id, screen, asteroid.size);
+    }
   },
 
   drawWormhole(wormhole) {
@@ -1199,6 +1265,30 @@ const Renderer = {
           this.drawCollectionTractorBeam(ctx, npc, screen, this.camera, Date.now());
         }
 
+        // Draw mining beam for rogue miners actively mining
+        const willDrawBeam = npc.faction === 'rogue_miner' && npc.state === 'mining' && npc.miningTargetPos;
+
+        // State-change only logging to reduce noise
+        if (npc.faction === 'rogue_miner' && npc.state === 'mining') {
+          const hasMtp = !!npc.miningTargetPos;
+          const prevHadMtp = npc._debugPrevHasMtp;
+          if (hasMtp !== prevHadMtp) {
+            if (hasMtp) {
+              Logger.category('rogue_miners', `${id}: miningTargetPos SET (${npc.miningTargetPos.x.toFixed(0)}, ${npc.miningTargetPos.y.toFixed(0)})`);
+            } else {
+              Logger.category('rogue_miners', `${id}: miningTargetPos MISSING while mining`);
+            }
+            npc._debugPrevHasMtp = hasMtp;
+          }
+        } else if (npc.faction === 'rogue_miner' && npc._debugPrevHasMtp !== undefined) {
+          // Reset tracking when no longer mining
+          npc._debugPrevHasMtp = undefined;
+        }
+
+        if (willDrawBeam) {
+          NPCShipGeometry.drawMiningBeam(ctx, screen, npc, this.camera, Date.now());
+        }
+
         // Draw shield visual for NPCs with shields
         if (typeof ShieldVisual !== "undefined" && npc.shieldMax > 0) {
           const shieldPercent = (npc.shield / npc.shieldMax) * 100;
@@ -1246,6 +1336,11 @@ const Renderer = {
         } else if (npc.hull < npc.hullMax || npc.shield < npc.shieldMax) {
           // Fallback to old health bar if new renderer not available
           this.drawNPCHealthBar(npc, screen);
+        }
+
+        // DEBUG: Draw NPC state indicator
+        if (typeof DebugSettings !== 'undefined' && DebugSettings.get('rendering', 'npcStateIndicators')) {
+          this.drawNPCStateLabel(npc, screen);
         }
       } else {
         // Fallback to generic ship
@@ -1790,6 +1885,252 @@ const Renderer = {
         type: 'debris'
       });
     }
+  },
+
+  // ============================================
+  // DEBUG RENDERING METHODS
+  // ============================================
+
+  /**
+   * Draw sector grid lines showing 1000-unit boundaries
+   */
+  drawSectorGrid() {
+    const ctx = this.ctx;
+    const SECTOR_SIZE = 1000;
+
+    // Calculate visible area in world coordinates
+    const viewLeft = this.camera.x - this.canvas.width / 2;
+    const viewRight = this.camera.x + this.canvas.width / 2;
+    const viewTop = this.camera.y - this.canvas.height / 2;
+    const viewBottom = this.camera.y + this.canvas.height / 2;
+
+    // Find first/last sector boundaries in view
+    const firstSectorX = Math.floor(viewLeft / SECTOR_SIZE) * SECTOR_SIZE;
+    const lastSectorX = Math.ceil(viewRight / SECTOR_SIZE) * SECTOR_SIZE;
+    const firstSectorY = Math.floor(viewTop / SECTOR_SIZE) * SECTOR_SIZE;
+    const lastSectorY = Math.ceil(viewBottom / SECTOR_SIZE) * SECTOR_SIZE;
+
+    ctx.save();
+    ctx.strokeStyle = 'rgba(100, 100, 100, 0.5)';
+    ctx.lineWidth = 1;
+    ctx.setLineDash([5, 10]);
+    ctx.font = '12px monospace';
+    ctx.fillStyle = 'rgba(150, 150, 150, 0.8)';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'top';
+
+    // Draw vertical lines
+    for (let worldX = firstSectorX; worldX <= lastSectorX; worldX += SECTOR_SIZE) {
+      const screenX = worldX - this.camera.x + this.canvas.width / 2;
+      ctx.beginPath();
+      ctx.moveTo(screenX, 0);
+      ctx.lineTo(screenX, this.canvas.height);
+      ctx.stroke();
+    }
+
+    // Draw horizontal lines
+    for (let worldY = firstSectorY; worldY <= lastSectorY; worldY += SECTOR_SIZE) {
+      const screenY = worldY - this.camera.y + this.canvas.height / 2;
+      ctx.beginPath();
+      ctx.moveTo(0, screenY);
+      ctx.lineTo(this.canvas.width, screenY);
+      ctx.stroke();
+    }
+
+    // Draw sector labels at intersections
+    ctx.setLineDash([]);
+    for (let worldX = firstSectorX; worldX <= lastSectorX; worldX += SECTOR_SIZE) {
+      for (let worldY = firstSectorY; worldY <= lastSectorY; worldY += SECTOR_SIZE) {
+        const screenX = worldX - this.camera.x + this.canvas.width / 2;
+        const screenY = worldY - this.camera.y + this.canvas.height / 2;
+        const sectorX = Math.floor(worldX / SECTOR_SIZE);
+        const sectorY = Math.floor(worldY / SECTOR_SIZE);
+        ctx.fillText(`(${sectorX}, ${sectorY})`, screenX + 5, screenY + 5);
+      }
+    }
+
+    ctx.restore();
+  },
+
+  /**
+   * Draw hitbox label with ID and coordinates
+   * @param {CanvasRenderingContext2D} ctx - Canvas context
+   * @param {number} screenX - Screen X coordinate
+   * @param {number} screenY - Screen Y coordinate
+   * @param {number} size - Object size (radius)
+   * @param {string} id - Object ID
+   * @param {number} worldX - World X coordinate
+   * @param {number} worldY - World Y coordinate
+   * @param {string} typePrefix - Type prefix (AST, PLN, NPC, BASE, SELF)
+   * @param {string} [color] - Text color override
+   */
+  drawHitboxLabel(ctx, screenX, screenY, size, id, worldX, worldY, typePrefix, color) {
+    ctx.save();
+    ctx.font = '9px monospace';
+    ctx.fillStyle = color || 'rgba(255, 255, 255, 0.9)';
+
+    // Truncate ID to last 4 characters
+    const shortId = String(id || '????').slice(-4);
+
+    // Top-left: Type + ID
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'bottom';
+    ctx.fillText(`${typePrefix}-${shortId}`, screenX - size, screenY - size - 3);
+
+    // Top-right: Screen coords
+    ctx.textAlign = 'right';
+    ctx.fillText(`s:${Math.round(screenX)},${Math.round(screenY)}`, screenX + size, screenY - size - 3);
+
+    // Bottom-right: World coords
+    ctx.textBaseline = 'top';
+    ctx.fillText(`w:${Math.round(worldX)},${Math.round(worldY)}`, screenX + size, screenY + size + 3);
+
+    ctx.restore();
+  },
+
+  /**
+   * Draw collision hitboxes around objects
+   */
+  drawCollisionHitboxes(objects, npcs) {
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.lineWidth = 1;
+
+    // Asteroids - cyan circles
+    ctx.strokeStyle = 'rgba(0, 255, 255, 0.6)';
+    for (const asteroid of objects.asteroids || []) {
+      const screen = this.worldToScreen(asteroid.x, asteroid.y);
+      ctx.beginPath();
+      ctx.arc(screen.x, screen.y, asteroid.size, 0, Math.PI * 2);
+      ctx.stroke();
+      this.drawHitboxLabel(ctx, screen.x, screen.y, asteroid.size, asteroid.id, asteroid.x, asteroid.y, 'AST', 'rgba(0, 255, 255, 0.9)');
+    }
+
+    // Planets - magenta circles
+    ctx.strokeStyle = 'rgba(255, 0, 255, 0.6)';
+    for (const planet of objects.planets || []) {
+      const screen = this.worldToScreen(planet.x, planet.y);
+      ctx.beginPath();
+      ctx.arc(screen.x, screen.y, planet.size, 0, Math.PI * 2);
+      ctx.stroke();
+      this.drawHitboxLabel(ctx, screen.x, screen.y, planet.size, planet.id, planet.x, planet.y, 'PLN', 'rgba(255, 0, 255, 0.9)');
+    }
+
+    // Bases - orange rectangles
+    ctx.strokeStyle = 'rgba(255, 165, 0, 0.6)';
+    for (const base of objects.bases || []) {
+      // Skip bases with invalid coordinates
+      if (base.x === undefined || base.y === undefined) continue;
+      if (!Number.isFinite(base.x) || !Number.isFinite(base.y)) continue;
+      const screen = this.worldToScreen(base.x, base.y);
+      const size = base.size || 30;
+      ctx.strokeRect(screen.x - size, screen.y - size, size * 2, size * 2);
+      this.drawHitboxLabel(ctx, screen.x, screen.y, size, base.id, base.x, base.y, 'BASE', 'rgba(255, 165, 0, 0.9)');
+    }
+
+    // NPCs - faction colored circles
+    const factionColors = {
+      pirates: 'rgba(255, 0, 0, 0.6)',
+      scavengers: 'rgba(139, 69, 19, 0.6)',
+      swarm: 'rgba(128, 0, 128, 0.6)',
+      void: 'rgba(75, 0, 130, 0.6)',
+      rogue_miners: 'rgba(255, 215, 0, 0.6)'
+    };
+    const factionLabelColors = {
+      pirates: 'rgba(255, 100, 100, 0.9)',
+      scavengers: 'rgba(200, 130, 80, 0.9)',
+      swarm: 'rgba(180, 100, 180, 0.9)',
+      void: 'rgba(130, 80, 180, 0.9)',
+      rogue_miners: 'rgba(255, 230, 100, 0.9)'
+    };
+    for (const npc of npcs || []) {
+      // NPCs have position.x/y, not flat x/y
+      const pos = npc.position || { x: npc.x, y: npc.y };
+      if (!pos || pos.x === undefined || pos.y === undefined) continue;
+      const screen = this.worldToScreen(pos.x, pos.y);
+      const npcSize = npc.size || 15;
+      ctx.strokeStyle = factionColors[npc.faction] || 'rgba(255, 255, 255, 0.6)';
+      ctx.beginPath();
+      ctx.arc(screen.x, screen.y, npcSize, 0, Math.PI * 2);
+      ctx.stroke();
+      this.drawHitboxLabel(ctx, screen.x, screen.y, npcSize, npc.id, pos.x, pos.y, 'NPC', factionLabelColors[npc.faction] || 'rgba(255, 255, 255, 0.9)');
+    }
+
+    // Player - white circle
+    if (typeof Player !== 'undefined' && Player.position) {
+      const screen = this.worldToScreen(Player.position.x, Player.position.y);
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.8)';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(screen.x, screen.y, 15, 0, Math.PI * 2);
+      ctx.stroke();
+      this.drawHitboxLabel(ctx, screen.x, screen.y, 15, 'SELF', Player.position.x, Player.position.y, 'SELF', 'rgba(255, 255, 255, 0.9)');
+    }
+
+    ctx.restore();
+  },
+
+  /**
+   * Draw NPC state label above an NPC
+   */
+  drawNPCStateLabel(npc, screenPos) {
+    const ctx = this.ctx;
+    const state = npc.state || npc.aiState || 'unknown';
+
+    // Color code by state
+    const stateColors = {
+      idle: '#888888',
+      patrol: '#888888',
+      mining: '#FFFF00',
+      attacking: '#FF0000',
+      fleeing: '#00FFFF',
+      retreating: '#00FFFF',
+      chasing: '#FF6600',
+      defending: '#00FF00',
+      formation: '#9966FF',
+      returning: '#66CCFF'
+    };
+
+    ctx.save();
+    ctx.font = '10px monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'bottom';
+
+    // Background for readability
+    const text = state.toUpperCase();
+    const metrics = ctx.measureText(text);
+    const padding = 2;
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+    ctx.fillRect(
+      screenPos.x - metrics.width / 2 - padding,
+      screenPos.y - (npc.size || 15) - 20 - padding,
+      metrics.width + padding * 2,
+      14
+    );
+
+    // State text
+    ctx.fillStyle = stateColors[state] || '#FFFFFF';
+    ctx.fillText(text, screenPos.x, screenPos.y - (npc.size || 15) - 8);
+
+    ctx.restore();
+  },
+
+  /**
+   * Draw object ID label below an object
+   */
+  drawObjectIdLabel(id, screenPos, offset = 0) {
+    const ctx = this.ctx;
+
+    ctx.save();
+    ctx.font = '9px monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'top';
+    ctx.fillStyle = 'rgba(136, 136, 136, 0.8)';
+
+    // Display full ID
+    ctx.fillText(id, screenPos.x, screenPos.y + offset + 5);
+
+    ctx.restore();
   },
 };
 

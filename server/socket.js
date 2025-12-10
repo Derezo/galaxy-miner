@@ -1085,7 +1085,7 @@ module.exports = function(io) {
         engine.startWreckageCollection(w.id, authenticatedUserId);
       }
 
-      console.log('[SIPHON SERVER] Emitting loot:multiStarted with wreckageIds:', wreckageIds, 'totalTime:', collectSpeed * 1000);
+      logger.category('relics', 'Siphon multi-collect started:', wreckageIds, 'totalTime:', collectSpeed * 1000);
       socket.emit('loot:multiStarted', {
         wreckageIds,
         totalTime: collectSpeed * 1000

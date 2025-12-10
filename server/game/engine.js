@@ -789,6 +789,12 @@ function updateNPCs(deltaTime) {
       }
     }
 
+    // Pre-set miningTargetPos for startMining action BEFORE broadcast
+    // This ensures the first npc:update with state='mining' includes the target position
+    if (action && action.action === 'rogueMiner:startMining' && action.targetPos) {
+      npcEntity.miningTargetPos = action.targetPos;
+    }
+
     // Broadcast NPC position update
     // Include name/type/faction so players who just entered range get full data
     const npcUpdateData = {
@@ -809,6 +815,11 @@ function updateNPCs(deltaTime) {
     // Include wreckage collection position for tractor beam animation
     if (npcEntity.collectingWreckagePos) {
       npcUpdateData.collectingWreckagePos = npcEntity.collectingWreckagePos;
+    }
+
+    // Include mining target position for rogue miner beam animation
+    if (npcEntity.miningTargetPos) {
+      npcUpdateData.miningTargetPos = npcEntity.miningTargetPos;
     }
 
     broadcastNearNpc(npcEntity, 'npc:update', npcUpdateData);
@@ -1234,6 +1245,95 @@ function updateNPCs(deltaTime) {
           }
         }
       }
+    } else if (action && action.action === 'rogueMiner:startMining') {
+      // ============================================
+      // ROGUE MINER: Started mining an asteroid/planet
+      // ============================================
+      // Note: miningTargetPos already set above (line ~795) before npc:update broadcast
+      broadcastNearNpc(npcEntity, 'npc:action', {
+        npcId: npcId,
+        action: 'startMining',
+        targetId: action.targetId,
+        targetPos: action.targetPos,
+        duration: action.duration
+      });
+    } else if (action && action.action === 'rogueMiner:miningProgress') {
+      // ============================================
+      // ROGUE MINER: Mining in progress (for beam rendering)
+      // ============================================
+      // Update NPC's mining target position for client rendering
+      npcEntity.miningTargetPos = action.targetPos;
+      // Progress updates are sent with NPC data, no need for separate event
+    } else if (action && action.action === 'rogueMiner:miningComplete') {
+      // ============================================
+      // ROGUE MINER: Mining complete, returning to base
+      // ============================================
+      npcEntity.miningTargetPos = null; // Clear beam
+      broadcastNearNpc(npcEntity, 'npc:action', {
+        npcId: npcId,
+        action: 'miningComplete',
+        targetId: action.targetId
+      });
+    } else if (action && action.action === 'rogueMiner:deposited') {
+      // ============================================
+      // ROGUE MINER: Deposited haul at base
+      // May trigger Excavator or Foreman spawn
+      // ============================================
+      const depositResult = npc.handleRogueMinerDeposit(action.baseId, action.npcType, action.creditBonus);
+
+      if (depositResult && depositResult.spawnResult) {
+        const spawnedNPC = depositResult.spawnResult;
+        // Broadcast new NPC spawn
+        broadcastNearNpc(spawnedNPC, 'npc:spawn', {
+          npc: {
+            id: spawnedNPC.id,
+            type: spawnedNPC.type,
+            name: spawnedNPC.name,
+            faction: spawnedNPC.faction,
+            x: spawnedNPC.position.x,
+            y: spawnedNPC.position.y,
+            rotation: spawnedNPC.rotation,
+            hull: spawnedNPC.hull,
+            hullMax: spawnedNPC.hullMax,
+            shield: spawnedNPC.shield,
+            shieldMax: spawnedNPC.shieldMax,
+            isBoss: spawnedNPC.isBoss
+          }
+        });
+
+        // Special announcement for Foreman spawn (5000 unit radius)
+        if (spawnedNPC.isForeman || spawnedNPC.type === 'rogue_foreman') {
+          broadcastInRange(spawnedNPC.position, 5000, 'rogueMiner:foremanSpawn', {
+            id: spawnedNPC.id,
+            x: spawnedNPC.position.x,
+            y: spawnedNPC.position.y,
+            timestamp: Date.now()
+          });
+          logger.info(`[ROGUE_MINER] Foreman ${spawnedNPC.id} spawned at (${Math.round(spawnedNPC.position.x)}, ${Math.round(spawnedNPC.position.y)})`);
+        }
+      }
+    } else if (action && action.action === 'rogueMiner:rage') {
+      // ============================================
+      // ROGUE MINER: Rage mode triggered
+      // ============================================
+      broadcastNearNpc(npcEntity, 'npc:action', {
+        action: 'rage',
+        faction: 'rogue_miner',
+        triggeredBy: action.triggeredBy,
+        targetId: action.targetId,
+        enragedNPCs: action.enragedNPCs,
+        rageRange: action.rageRange
+      });
+      logger.info(`[ROGUE_MINER] ${npcEntity.name} triggered rage - ${action.enragedNPCs.length} miners enraged`);
+    } else if (action && action.action === 'rogueMiner:rageClear') {
+      // ============================================
+      // ROGUE MINER: Rage cleared for this NPC
+      // ============================================
+      broadcastNearNpc(npcEntity, 'npc:action', {
+        action: 'rageClear',
+        faction: 'rogue_miner',
+        npcId: action.npcId
+      });
     }
   }
 
@@ -1469,6 +1569,21 @@ function broadcastNearNpc(npcEntity, event, data) {
     // Use player's tier-based broadcast range
     const broadcastRange = getPlayerBroadcastRange(player);
     if (dist <= broadcastRange) {
+      io.to(socketId).emit(event, data);
+    }
+  }
+}
+
+// Broadcast to all players within a fixed range of a position
+function broadcastInRange(position, range, event, data) {
+  if (!connectedPlayers) return;
+
+  for (const [socketId, player] of connectedPlayers) {
+    const dx = player.position.x - position.x;
+    const dy = player.position.y - position.y;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+
+    if (dist <= range) {
       io.to(socketId).emit(event, data);
     }
   }

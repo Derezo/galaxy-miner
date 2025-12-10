@@ -225,12 +225,14 @@
 
   <!-- Scripts -->
   <script src="/socket.io/socket.io.js"></script>
-  <script src="/shared/constants.js?v=9"></script>
-  <script src="/shared/physics.js?v=9"></script>
-  <script src="/shared/star-system.js?v=9"></script>
-  <script src="/shared/logger.js?v=9"></script>
-  <script src="/shared/utils.js?v=9"></script>
+  <script src="/shared/constants.js?v=10"></script>
+  <script src="/shared/physics.js?v=10"></script>
+  <script src="/shared/star-system.js?v=12"></script>
+  <script src="/shared/logger.js?v=10"></script>
+  <script src="/shared/utils.js?v=10"></script>
   <script src="/shared/debug-sync.js?v=1"></script>
+  <!-- Debug settings (loads early for rendering/logging access) -->
+  <script src="js/debug/DebugSettings.js?v=3"></script>
   <!-- DOM Cache (loads early for optimal performance) -->
   <script src="js/dom-cache.js"></script>
   <!-- Audio system -->
@@ -240,7 +242,7 @@
   <script src="js/audio/config/SoundConfig.js"></script>
   <script src="js/audio/AudioManager.js"></script>
   <script src="js/network.js?v=16"></script>
-  <script src="js/world.js?v=8"></script>
+  <script src="js/world.js?v=12"></script>
   <script src="js/input.js"></script>
   <script src="js/player.js?v=2"></script>
   <script src="js/entities.js?v=10"></script>
@@ -270,7 +272,7 @@
   <script src="js/graphics/shield-visual.js"></script>
   <script src="js/graphics/hull-bar.js"></script>
   <script src="js/graphics/boost-indicator.js"></script>
-  <script src="js/renderer.js?v=2"></script>
+  <script src="js/renderer.js?v=4"></script>
   <!-- Core UI infrastructure -->
   <script src="js/ui/core/Component.js"></script>
   <script src="js/ui/core/Modal.js"></script>
@@ -285,6 +287,7 @@
   <script src="js/ui/icons/shapes/RelicShape.js"></script>
   <script src="js/ui/icons/shapes/WormholeGemShape.js"></script>
   <script src="js/ui/icons/shapes/ScrapSiphonShape.js"></script>
+  <script src="js/ui/icons/shapes/MiningRitesShape.js"></script>
   <script src="js/ui/icons/IconFactory.js"></script>
   <script src="js/ui/icons/IconCache.js"></script>
   <!-- Graphics: Reward display -->
@@ -318,7 +321,7 @@
   <script src="js/ui/panels/SettingsPanel.js"></script>
   <script src="js/ui/WormholeTransitUI.js"></script>
   <script src="js/ui/credit-animation.js"></script>
-  <script src="js/ui/profile-modal.js"></script>
+  <script src="js/ui/profile-modal.js?v=2"></script>
   <script src="js/ui/terminal.js"></script>
   <script src="js/ui/emote-wheel.js"></script>
   <script src="js/game.js"></script>

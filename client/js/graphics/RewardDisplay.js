@@ -167,7 +167,7 @@ const RewardDisplay = {
     if (!dtValid) {
       // Log bad dt values (once to avoid spam)
       if (!this._debugLogged && (this.activeRewards.length > 0 || this.pendingQueue.length > 0)) {
-        console.warn('[RewardDisplay] Invalid dt detected:', dt, 'dtMs:', dtMs,
+        Logger.category('ui', 'RewardDisplay: Invalid dt detected:', dt, 'dtMs:', dtMs,
           '| activeRewards:', this.activeRewards.length,
           '| pendingQueue:', this.pendingQueue.length);
         this._debugLogged = true;
@@ -294,7 +294,7 @@ const RewardDisplay = {
 
     // Debug: Warn if isDead is stuck (death effect done but isDead still true)
     if (Player.isDead && !deathEffectActive && !this._debugLogged) {
-      console.warn('[RewardDisplay] Player.isDead=true but death effect not active - possible stuck state');
+      Logger.category('ui', 'RewardDisplay: Player.isDead=true but death effect not active - possible stuck state');
       this._debugLogged = true;
     }
 
@@ -302,7 +302,7 @@ const RewardDisplay = {
     if (this.activeRewards.length === 0) {
       // Debug: Log if queue has items but activeRewards is empty
       if (this.pendingQueue.length > 0 && !this._debugLogged) {
-        console.warn('[RewardDisplay] draw() has empty activeRewards but queue has items:',
+        Logger.category('ui', 'RewardDisplay: draw() has empty activeRewards but queue has items:',
           this.pendingQueue.length, '| Check if update() is being called');
         this._debugLogged = true;
       }

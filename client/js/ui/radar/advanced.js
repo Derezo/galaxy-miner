@@ -64,23 +64,38 @@ const RadarAdvanced = {
 
     // Draw cached threat zones as gradient overlays
     for (const zone of this.cachedThreatZones) {
+      // Skip zones with invalid coordinates
+      if (!Number.isFinite(zone.x) || !Number.isFinite(zone.y) || !Number.isFinite(zone.radius)) {
+        continue;
+      }
+
       const pos = RadarBaseRenderer.worldToRadar(
         zone.x, zone.y,
         playerPos.x, playerPos.y,
         center, scale
       );
 
+      // Skip if resulting position is not finite
+      if (!Number.isFinite(pos.x) || !Number.isFinite(pos.y)) {
+        continue;
+      }
+
+      const scaledRadius = zone.radius * scale;
+      if (!Number.isFinite(scaledRadius) || scaledRadius <= 0) {
+        continue;
+      }
+
       // Draw gradient circle
       const gradient = ctx.createRadialGradient(
         pos.x, pos.y, 0,
-        pos.x, pos.y, zone.radius * scale
+        pos.x, pos.y, scaledRadius
       );
       gradient.addColorStop(0, zone.color);
       gradient.addColorStop(1, 'transparent');
 
       ctx.fillStyle = gradient;
       ctx.beginPath();
-      ctx.arc(pos.x, pos.y, zone.radius * scale, 0, Math.PI * 2);
+      ctx.arc(pos.x, pos.y, scaledRadius, 0, Math.PI * 2);
       ctx.fill();
     }
   },
@@ -94,6 +109,11 @@ const RadarAdvanced = {
     const npcGroups = new Map(); // Grid-based grouping
 
     for (const [id, npc] of Entities.npcs) {
+      // Skip NPCs with invalid positions
+      if (!npc.position || !Number.isFinite(npc.position.x) || !Number.isFinite(npc.position.y)) {
+        continue;
+      }
+
       const distance = RadarBaseRenderer.getDistance(
         npc.position.x, npc.position.y,
         playerPos.x, playerPos.y
@@ -121,6 +141,11 @@ const RadarAdvanced = {
 
     // Check for bases
     for (const [id, base] of Entities.bases) {
+      // Skip bases with invalid positions
+      if (!base.position || !Number.isFinite(base.position.x) || !Number.isFinite(base.position.y)) {
+        continue;
+      }
+
       const distance = RadarBaseRenderer.getDistance(
         base.position.x, base.position.y,
         playerPos.x, playerPos.y

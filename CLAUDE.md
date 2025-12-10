@@ -11,8 +11,21 @@ Galaxy Miner is a multiplayer browser-based space mining game. Players navigate 
 ## Commands
 
 ```bash
-npm start          # Production server on port 3388
-npm run dev        # Development with auto-reload (--watch)
+npm start              # Production server on port 3388
+npm run dev            # Development with auto-reload (--watch)
+npm test               # Run test suite (vitest)
+npm run test:watch     # Run tests in watch mode
+npm run test:coverage  # Generate coverage report
+```
+
+Run a single test file:
+```bash
+npx vitest run tests/unit/server/auth.test.js
+```
+
+Run tests matching a pattern:
+```bash
+npx vitest run -t "username validation"
 ```
 
 Server runs at `http://0.0.0.0:3388`. No build step required - vanilla JS served directly.
@@ -135,17 +148,38 @@ Updates only broadcast to players within radar range (base 500 units, scales wit
 
 - `/tools/audio-generator/` - ElevenLabs-based sound effect generation scripts
 
+### Testing
+
+Tests use Vitest with in-memory SQLite databases. Test utilities in `/tests/setup.js` provide:
+- `createTestDatabase()` - In-memory SQLite with schema applied
+- `createTestUser(db, { username, passwordHash })` - Create test user
+- `createTestShip(db, userId, shipData)` - Create test ship with defaults
+- `addInventory(db, userId, resourceType, quantity)` - Add resources to inventory
+- `MOCK_CONSTANTS` - Test-safe constants for unit tests
+
+Tests are organized under `/tests/unit/` by module (server, shared).
+
+## Configuration
+
+Environment variables can be set in `.env` (copy from `.env.example`). The server uses defaults if not specified.
+
 ## Game Systems Reference
 
 **Resources**: 26 types across 4 rarities (common/uncommon/rare/ultrarare) and 4 categories (metal/gas/crystal/exotic)
 
 **NPC Factions**: Pirates (flanking), Scavengers (retreat), Swarm (linked health), Void (formation), Rogue Miners (territorial)
 
-**Ship Upgrades**: 6 components (engine, weapon, shield, mining, cargo, radar), max tier 5, costs $500→$15000
+**Ship Upgrades**: 8 components (engine, weapon, shield, mining, cargo, radar, energy_core, hull), max tier 5, costs $500→$15000
 
 **Combat**: Weapon types (kinetic/energy/explosive), shield recharge with delay, 50% cargo drop on death
 
 **Mining**: Range 50 units, base time 3000ms, resources respawn 30-60 min
+
+**Loot System**: NPC deaths drop wreckage containing buffs (temporary power-ups), components (tier 6+ upgrades), and relics (permanent collectibles). See `/docs/systems/loot-pools.md`
+
+**Teams**: Players can form teams with shared credits and friendly fire protection. See `/docs/systems/team-multiplayer.md`
+
+**Wormholes**: 8% of star systems have wormholes enabling instant travel between linked systems. See `/docs/systems/wormhole-transit.md`
 
 ## Node Version
 

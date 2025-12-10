@@ -194,6 +194,19 @@ const Entities = {
   updateNPC(data) {
     const now = Date.now();
 
+    // Get previous state for transition detection
+    const existingNpc = this.npcs.get(data.id);
+    const previousState = existingNpc ? existingNpc.state : null;
+
+    // Debug logging for rogue miner mining beam data flow
+    if (data.faction === 'rogue_miner') {
+      const hasMTP = !!data.miningTargetPos;
+      const stateChanged = previousState !== data.state;
+      if (stateChanged) {
+        Logger.category('rogue_miners', `${data.id}: ${previousState || 'NEW'} → ${data.state} mtp=${hasMTP}`);
+      }
+    }
+
     if (!this.npcs.has(data.id)) {
       // New NPC - track spawn time for swarm egg hatching animation
       const isSwarm = (data.faction === 'swarm');
@@ -214,8 +227,12 @@ const Entities = {
         // Swarm egg hatching - track spawn time for 2.5 second hatch animation
         spawnTime: isSwarm ? now : null,
         hatchDuration: isSwarm ? (data.type === 'swarm_queen' ? 4000 : 2500) : 0,
-        lastUpdateTime: now
+        lastUpdateTime: now,
+        // Mining/collection beam targets (must be captured on initial creation)
+        miningTargetPos: data.miningTargetPos || null,
+        collectingWreckagePos: data.collectingWreckagePos || null
       });
+
     } else {
       const npc = this.npcs.get(data.id);
 
@@ -251,6 +268,11 @@ const Entities = {
       if (data.name) npc.name = data.name;
       // Update wreckage collection position for tractor beam animation
       npc.collectingWreckagePos = data.collectingWreckagePos || null;
+      // Update mining target position for mining beam animation (rogue miners)
+      // Only update if explicitly provided - don't overwrite existing value from npc:action
+      if (data.miningTargetPos !== undefined) {
+        npc.miningTargetPos = data.miningTargetPos;
+      }
       if (data.faction) npc.faction = data.faction;
     }
   },
@@ -466,7 +488,8 @@ const Entities = {
         health: base.health,
         maxHealth: base.maxHealth,
         size: base.size,
-        scrapPile: base.scrapPile || null
+        scrapPile: base.scrapPile || null,
+        claimCredits: base.claimCredits || 0
       });
     }
   },

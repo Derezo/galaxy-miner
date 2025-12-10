@@ -46,7 +46,7 @@ function register(socket) {
   });
 
   socket.on('loot:error', (data) => {
-    console.error('Loot error:', data.message);
+    window.Logger.error('Loot error:', data.message);
     if (typeof NotificationManager !== 'undefined') {
       NotificationManager.error(data.message);
     }
@@ -61,7 +61,7 @@ function register(socket) {
 
   // Scrap Siphon multi-collect events
   socket.on('loot:multiStarted', (data) => {
-    window.Logger.log('[SIPHON] Multi-collect started:', data.wreckageIds, 'totalTime:', data.totalTime);
+    window.Logger.category('relics', 'Siphon multi-collect started:', data.wreckageIds, 'totalTime:', data.totalTime);
     Player.onMultiCollectStarted(data);
 
     // Start siphon animation for each wreckage piece
@@ -69,20 +69,20 @@ function register(socket) {
     if (typeof Entities !== 'undefined' && typeof Player !== 'undefined') {
       const playerPos = { x: Player.x, y: Player.y };
       const animDuration = Math.max(600, data.totalTime);
-      window.Logger.log('[SIPHON] Starting animation at player pos:', playerPos, 'duration:', animDuration);
+      window.Logger.category('relics', 'Siphon animation starting at player pos:', playerPos, 'duration:', animDuration);
       Entities.startSiphonAnimation(data.wreckageIds, playerPos, animDuration);
     }
   });
 
   socket.on('loot:multiComplete', (data) => {
-    window.Logger.log('[SIPHON] Multi-collect complete:', data.wreckageIds);
+    window.Logger.category('relics', 'Siphon multi-collect complete:', data.wreckageIds);
     Player.onMultiCollectComplete(data);
 
     // Delay wreckage removal to let animation complete (minimum 600ms animation)
     // The animation was started with Math.max(600, totalTime), so wait that long
     const animDelay = 650; // slightly longer than min animation duration
     setTimeout(() => {
-      window.Logger.log('[SIPHON] Removing wreckage after animation delay');
+      window.Logger.category('relics', 'Siphon removing wreckage after animation delay');
       if (typeof Entities !== 'undefined') {
         Entities.clearSiphonAnimations(data.wreckageIds);
       }
@@ -94,7 +94,7 @@ function register(socket) {
 
   // Team credit reward - when another player collects scrap we contributed damage to
   socket.on('team:creditReward', (data) => {
-    window.Logger.log('[TEAM] Received credit share:', data.credits, 'from team kill');
+    window.Logger.category('teams', 'Received credit share:', data.credits, 'from team kill');
 
     // Show reward pop-up
     if (typeof NotificationManager !== 'undefined') {
@@ -109,7 +109,7 @@ function register(socket) {
 
   // Team resource share - when another player collects scrap with shared resources
   socket.on('team:lootShare', (data) => {
-    window.Logger.log('[TEAM] Received resource share from team kill');
+    window.Logger.category('teams', 'Received resource share from team kill');
 
     // Show resources received
     if (data.resources && data.resources.length > 0 && typeof NotificationManager !== 'undefined') {
@@ -119,7 +119,7 @@ function register(socket) {
     // Notify about rare drops that went to collector
     if (data.rareDropNotification && data.rareDropNotification.length > 0) {
       for (const rareDrop of data.rareDropNotification) {
-        window.Logger.log('[TEAM] Teammate collected rare:', rareDrop.resourceType, '(' + rareDrop.rarity + ')');
+        window.Logger.category('teams', 'Teammate collected rare:', rareDrop.resourceType, '(' + rareDrop.rarity + ')');
         if (typeof NotificationManager !== 'undefined') {
           NotificationManager.info(
             'Teammate collected ' + rareDrop.quantity + 'x ' + rareDrop.resourceType.replace(/_/g, ' ')
@@ -149,7 +149,7 @@ function register(socket) {
 
   // Relic collection events
   socket.on('relic:collected', (data) => {
-    window.Logger.log('Relic collected:', data.relicType);
+    window.Logger.category('relics', 'Relic collected:', data.relicType);
 
     // Add relic to player's collection
     if (typeof Player !== 'undefined') {

@@ -7,6 +7,7 @@ const FormationStrategy = require('./formation');
 const TerritorialStrategy = require('./territorial');
 const RetreatStrategy = require('./retreat');
 const ScavengerStrategy = require('./scavenger');
+const MiningStrategy = require('./mining');
 
 // Map faction to AI strategy
 const FACTION_STRATEGIES = {
@@ -14,7 +15,7 @@ const FACTION_STRATEGIES = {
   scavenger: 'scavenger', // Changed from 'retreat' to new scavenger strategy
   swarm: 'swarm',
   void: 'formation',
-  rogue_miner: 'territorial'
+  rogue_miner: 'mining'   // Changed from 'territorial' to new mining strategy
 };
 
 // Strategy instances
@@ -24,7 +25,8 @@ const strategies = {
   formation: new FormationStrategy(),
   territorial: new TerritorialStrategy(),
   retreat: new RetreatStrategy(),
-  scavenger: new ScavengerStrategy()
+  scavenger: new ScavengerStrategy(),
+  mining: new MiningStrategy()
 };
 
 // Retreat thresholds by faction
@@ -337,8 +339,9 @@ function updateNPCAI(npc, allPlayers, allNPCs, deltaTime, getActiveBase = null) 
   }
 
   // Build context for strategy
-  // For scavengers, get the full base object (needed for scrap pile dumps)
+  // For scavengers and rogue miners, get the full base object
   let homeBase = null;
+  let hasForeman = false;
   if (npc.homeBaseId && getActiveBase) {
     const base = getActiveBase(npc.homeBaseId);
     if (base) {
@@ -349,6 +352,10 @@ function updateNPCAI(npc, allPlayers, allNPCs, deltaTime, getActiveBase = null) 
         type: base.type,
         name: base.name
       };
+      // Check for Foreman presence at mining claims
+      if (base.type === 'mining_claim') {
+        hasForeman = base.hasForeman || false;
+      }
     }
   }
   // Fallback to position-only if no base ID or no lookup function
@@ -359,7 +366,8 @@ function updateNPCAI(npc, allPlayers, allNPCs, deltaTime, getActiveBase = null) 
   const context = {
     homeBase,
     patrolRadius: npc.patrolRadius || 600,
-    territoryRadius: npc.territoryRadius || 500
+    territoryRadius: npc.territoryRadius || 500,
+    hasForeman  // For rogue miner Foreman buff
   };
 
   // Execute faction-specific AI
@@ -408,10 +416,19 @@ function getScavengerStrategy() {
   return strategies.scavenger;
 }
 
+/**
+ * Get the mining strategy instance for external calls (rage triggering, etc.)
+ * @returns {MiningStrategy} The mining strategy instance
+ */
+function getMiningStrategy() {
+  return strategies.mining;
+}
+
 module.exports = {
   AIStrategy,
   getStrategy,
   getScavengerStrategy,
+  getMiningStrategy,
   updateNPCAI,
   getNPCsByFaction,
   findFormationLeader,

@@ -629,6 +629,11 @@ const NPCShipGeometry = {
       return;
     }
 
+    // Draw golden shield aura BEFORE ship for rogue miners (renders behind)
+    if (actualFaction === 'rogue_miner' && npc) {
+      this.drawGoldenShieldAura(ctx, screenPos, scale, npc, time);
+    }
+
     ctx.save();
     ctx.translate(screenPos.x, screenPos.y);
     ctx.rotate(rotation);
@@ -678,12 +683,23 @@ const NPCShipGeometry = {
       this.drawScavengerEffects(ctx, variant, variantNum, colors, time, npc);
     }
 
+    // Special Rogue Miner rendering: ore veins, drill glow, industrial accents
+    if (actualFaction === 'rogue_miner') {
+      this.drawRogueMinerShipEffects(ctx, variant, variantNum, colors, time, npc);
+    }
+
     ctx.restore();
 
     // Draw rage indicators AFTER restore (in screen space) for all scavengers
     if (actualFaction === 'scavenger' && npc && npc.state === 'enraged') {
       const effectSize = this.SIZE * scale;
       this.drawScavengerRageEffects(ctx, screenPos, effectSize, time);
+    }
+
+    // Draw rage indicators for rogue miners
+    if (actualFaction === 'rogue_miner' && npc && npc.state === 'enraged') {
+      const effectSize = this.SIZE * scale;
+      this.drawRogueMinerRageEffects(ctx, screenPos, effectSize, time);
     }
   },
 
@@ -1198,6 +1214,148 @@ const NPCShipGeometry = {
   },
 
   /**
+   * Draw Rogue Miner-specific effects: ore veins, drill glow, industrial accents
+   * Gives mining ships their distinctive industrial/mining appearance
+   */
+  drawRogueMinerShipEffects(ctx, variant, variantNum, colors, time, npc) {
+    const SIZE = this.SIZE;
+    const currentTime = time || Date.now();
+    const pulsePhase = (Math.sin(currentTime * 0.004) + 1) / 2; // 0-1 pulsing
+
+    // Draw pulsing ore vein lines (golden/amber) on all variants
+    ctx.strokeStyle = `rgba(255, 200, 50, ${0.3 + pulsePhase * 0.4})`;
+    ctx.lineWidth = 1.5;
+    ctx.lineCap = 'round';
+
+    if (variant === 'rogue_1') {
+      // Prospector: Scanner probe accent with pulsing tip
+      ctx.beginPath();
+      ctx.moveTo(SIZE * 0.6, -SIZE * 0.2);
+      ctx.lineTo(SIZE * 0.8, -SIZE * 0.35);
+      ctx.stroke();
+
+      // Scanning light
+      const scanPulse = (Math.sin(currentTime * 0.008) + 1) / 2;
+      ctx.fillStyle = `rgba(100, 255, 100, ${0.4 + scanPulse * 0.5})`;
+      ctx.beginPath();
+      ctx.arc(SIZE * 0.8, -SIZE * 0.35, 3 + scanPulse * 2, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    if (variant === 'rogue_2') {
+      // Driller: Glowing drill bit
+      const drillGlow = (Math.sin(currentTime * 0.01) + 1) / 2;
+      const drillGradient = ctx.createRadialGradient(
+        SIZE * 0.85, 0, 0,
+        SIZE * 0.85, 0, SIZE * 0.25
+      );
+      drillGradient.addColorStop(0, `rgba(255, 150, 50, ${0.6 + drillGlow * 0.3})`);
+      drillGradient.addColorStop(0.5, `rgba(255, 100, 0, ${0.3 + drillGlow * 0.2})`);
+      drillGradient.addColorStop(1, 'transparent');
+
+      ctx.fillStyle = drillGradient;
+      ctx.beginPath();
+      ctx.arc(SIZE * 0.85, 0, SIZE * 0.25, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Ore chunk attached to side
+      ctx.fillStyle = `rgba(180, 140, 60, ${0.8})`;
+      ctx.beginPath();
+      ctx.moveTo(-SIZE * 0.3, -SIZE * 0.45);
+      ctx.lineTo(-SIZE * 0.15, -SIZE * 0.5);
+      ctx.lineTo(-SIZE * 0.2, -SIZE * 0.35);
+      ctx.closePath();
+      ctx.fill();
+    }
+
+    if (variant === 'rogue_3') {
+      // Excavator: Heavy bucket scoop outline, warning stripes glow
+      const warningPulse = (Math.sin(currentTime * 0.006) + 1) / 2;
+
+      // Warning stripe glow
+      ctx.strokeStyle = `rgba(255, 200, 0, ${0.2 + warningPulse * 0.3})`;
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(-SIZE * 0.1, -SIZE * 0.5);
+      ctx.lineTo(-SIZE * 0.1, SIZE * 0.5);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(SIZE * 0.1, -SIZE * 0.5);
+      ctx.lineTo(SIZE * 0.1, SIZE * 0.5);
+      ctx.stroke();
+
+      // Bucket scoop accent at front
+      ctx.strokeStyle = `rgba(150, 150, 150, 0.6)`;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(SIZE * 0.7, 0, SIZE * 0.2, -Math.PI * 0.4, Math.PI * 0.4);
+      ctx.stroke();
+    }
+
+    if (variant === 'rogue_4') {
+      // Foreman: Command bridge highlight, supervisor badge
+      const badgePulse = (Math.sin(currentTime * 0.005) + 1) / 2;
+
+      // Bridge glow
+      const bridgeGlow = ctx.createRadialGradient(
+        SIZE * 0.2, 0, 0,
+        SIZE * 0.2, 0, SIZE * 0.3
+      );
+      bridgeGlow.addColorStop(0, `rgba(255, 215, 100, ${0.4 + badgePulse * 0.3})`);
+      bridgeGlow.addColorStop(1, 'transparent');
+
+      ctx.fillStyle = bridgeGlow;
+      ctx.beginPath();
+      ctx.arc(SIZE * 0.2, 0, SIZE * 0.3, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Supervisor badge (star shape)
+      ctx.fillStyle = `rgba(255, 215, 0, ${0.7 + badgePulse * 0.3})`;
+      ctx.beginPath();
+      const badgeX = -SIZE * 0.5;
+      const badgeY = -SIZE * 0.3;
+      const badgeSize = 5;
+      for (let i = 0; i < 5; i++) {
+        const angle = (i * 4 * Math.PI / 5) - Math.PI / 2;
+        const x = badgeX + Math.cos(angle) * badgeSize;
+        const y = badgeY + Math.sin(angle) * badgeSize;
+        if (i === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      }
+      ctx.closePath();
+      ctx.fill();
+
+      // Second badge on other side
+      ctx.beginPath();
+      const badge2Y = SIZE * 0.3;
+      for (let i = 0; i < 5; i++) {
+        const angle = (i * 4 * Math.PI / 5) - Math.PI / 2;
+        const x = badgeX + Math.cos(angle) * badgeSize;
+        const y = badge2Y + Math.sin(angle) * badgeSize;
+        if (i === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      }
+      ctx.closePath();
+      ctx.fill();
+    }
+
+    // Add ore sparkles for all variants when they have cargo (just returned from mining)
+    if (npc && npc.state === 'returning') {
+      const sparkleCount = Math.min(variantNum + 1, 4);
+      ctx.fillStyle = `rgba(255, 220, 100, ${0.5 + pulsePhase * 0.4})`;
+      for (let i = 0; i < sparkleCount; i++) {
+        const angle = currentTime * 0.002 + (i * Math.PI * 2 / sparkleCount);
+        const dist = SIZE * 0.3;
+        const sx = Math.cos(angle) * dist;
+        const sy = Math.sin(angle) * dist;
+        ctx.beginPath();
+        ctx.arc(sx, sy, 1.5, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+  },
+
+  /**
    * Draw Swarm-specific effects: pulsing crimson veins and glowing red eyes
    */
   drawSwarmEffects(ctx, variant, variantNum, colors, time) {
@@ -1691,5 +1849,273 @@ const NPCShipGeometry = {
     }
 
     return elapsed / npc.hatchDuration;
+  },
+
+  // ============================================================================
+  // ROGUE MINER VISUAL EFFECTS
+  // ============================================================================
+
+  /**
+   * Draw golden shield aura for rogue miner NPCs
+   * Pulsing golden glow that fades as shields deplete
+   * @param {CanvasRenderingContext2D} ctx - Canvas context
+   * @param {Object} screenPos - Screen position {x, y}
+   * @param {number} scale - Ship scale multiplier
+   * @param {Object} npc - NPC data with shield/shieldMax
+   * @param {number} time - Current timestamp for animations
+   */
+  drawGoldenShieldAura(ctx, screenPos, scale, npc, time) {
+    if (!npc || !npc.shieldMax || npc.shieldMax <= 0) return;
+
+    const shieldPercent = Math.max(0, npc.shield / npc.shieldMax);
+    if (shieldPercent <= 0) return;
+
+    const SIZE = this.SIZE * scale;
+    const baseRadius = SIZE * 1.8;
+
+    // Pulsing animation - faster pulse when shields are full
+    const pulseSpeed = 2 + shieldPercent * 2;
+    const pulse = 0.7 + Math.sin(time * 0.001 * pulseSpeed) * 0.3;
+
+    // Aura intensity based on shield percentage
+    const intensity = shieldPercent * pulse;
+
+    ctx.save();
+
+    // Outer glow layer - golden radial gradient
+    const outerGradient = ctx.createRadialGradient(
+      screenPos.x, screenPos.y, SIZE * 0.5,
+      screenPos.x, screenPos.y, baseRadius * (1 + pulse * 0.1)
+    );
+    outerGradient.addColorStop(0, `rgba(255, 215, 0, ${intensity * 0.15})`);    // Gold
+    outerGradient.addColorStop(0.5, `rgba(255, 180, 0, ${intensity * 0.1})`);   // Deeper gold
+    outerGradient.addColorStop(1, 'transparent');
+
+    ctx.fillStyle = outerGradient;
+    ctx.beginPath();
+    ctx.arc(screenPos.x, screenPos.y, baseRadius * (1 + pulse * 0.1), 0, Math.PI * 2);
+    ctx.fill();
+
+    // Inner shield ring (more visible when shields are >30%)
+    if (shieldPercent > 0.3) {
+      const ringRadius = SIZE * 1.3;
+      const ringPulse = 0.8 + Math.sin(time * 0.003 + 0.5) * 0.2;
+
+      ctx.strokeStyle = `rgba(255, 200, 50, ${intensity * 0.4})`;
+      ctx.lineWidth = 2 + shieldPercent * 2;
+      ctx.beginPath();
+      ctx.arc(screenPos.x, screenPos.y, ringRadius * ringPulse, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+
+    // Sparkle particles when shields are >70%
+    if (shieldPercent > 0.7) {
+      const sparkleCount = Math.floor(shieldPercent * 5);
+      ctx.fillStyle = `rgba(255, 255, 200, ${intensity * 0.8})`;
+      for (let i = 0; i < sparkleCount; i++) {
+        const angle = (time * 0.0005 + i * Math.PI * 2 / sparkleCount) % (Math.PI * 2);
+        const sparkleRadius = SIZE * 1.4;
+        const sx = screenPos.x + Math.cos(angle) * sparkleRadius;
+        const sy = screenPos.y + Math.sin(angle) * sparkleRadius;
+
+        ctx.beginPath();
+        ctx.arc(sx, sy, 2, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+
+    ctx.restore();
+  },
+
+  /**
+   * Draw mining laser beam for rogue miner NPCs when they're mining
+   * Orange/gold colored beam similar to player tractor beam
+   * @param {CanvasRenderingContext2D} ctx - Canvas context
+   * @param {Object} screenPos - NPC screen position {x, y}
+   * @param {Object} npc - NPC data with miningTargetPos
+   * @param {Object} camera - Camera position for target conversion
+   * @param {number} time - Current timestamp for animations
+   */
+  drawMiningBeam(ctx, screenPos, npc, camera, time) {
+    if (!npc || !npc.miningTargetPos) return;
+
+    // Convert target world position to screen position
+    const targetScreen = {
+      x: npc.miningTargetPos.x - camera.x,
+      y: npc.miningTargetPos.y - camera.y
+    };
+
+    // Calculate beam intensity (could be based on mining progress if available)
+    const intensity = 0.7 + Math.sin(time * 0.005) * 0.2;
+    const pulseWidth = 1 + Math.sin(time * 0.008) * 0.2;
+
+    // Calculate beam length for particle positioning
+    const beamDx = targetScreen.x - screenPos.x;
+    const beamDy = targetScreen.y - screenPos.y;
+    const beamLength = Math.sqrt(beamDx * beamDx + beamDy * beamDy);
+
+    ctx.save();
+
+    // Outer glow layer (new - makes beam more visible)
+    const outerGlowGradient = ctx.createLinearGradient(
+      screenPos.x, screenPos.y,
+      targetScreen.x, targetScreen.y
+    );
+    outerGlowGradient.addColorStop(0, `rgba(255, 150, 0, ${intensity * 0.3})`);
+    outerGlowGradient.addColorStop(0.5, `rgba(255, 120, 0, ${intensity * 0.4})`);
+    outerGlowGradient.addColorStop(1, `rgba(255, 180, 50, ${intensity * 0.25})`);
+
+    ctx.strokeStyle = outerGlowGradient;
+    ctx.lineWidth = 14 * pulseWidth * intensity;
+    ctx.lineCap = 'round';
+    ctx.globalAlpha = 0.5;
+
+    ctx.beginPath();
+    ctx.moveTo(screenPos.x, screenPos.y);
+    ctx.lineTo(targetScreen.x, targetScreen.y);
+    ctx.stroke();
+
+    // Orange/gold beam gradient (main beam - thicker)
+    const gradient = ctx.createLinearGradient(
+      screenPos.x, screenPos.y,
+      targetScreen.x, targetScreen.y
+    );
+    gradient.addColorStop(0, `rgba(255, 180, 0, ${intensity * 0.8})`);
+    gradient.addColorStop(0.5, `rgba(255, 140, 0, ${intensity})`);
+    gradient.addColorStop(1, `rgba(255, 200, 50, ${intensity * 0.6})`);
+
+    // Main beam (thicker: 6 -> 8)
+    ctx.strokeStyle = gradient;
+    ctx.lineWidth = 8 * pulseWidth * intensity;
+    ctx.globalAlpha = intensity * 0.9;
+
+    ctx.beginPath();
+    ctx.moveTo(screenPos.x, screenPos.y);
+    ctx.lineTo(targetScreen.x, targetScreen.y);
+    ctx.stroke();
+
+    // Core beam (brighter white center)
+    ctx.strokeStyle = `rgba(255, 255, 200, ${intensity * 0.7})`;
+    ctx.lineWidth = 3 * pulseWidth;
+    ctx.stroke();
+
+    ctx.globalAlpha = 1;
+
+    // Energy particles along beam length
+    const particleCount = 5;
+    for (let i = 0; i < particleCount; i++) {
+      // Animate particles flowing from source to target
+      const baseT = (i / particleCount);
+      const animOffset = (time * 0.002) % 1;
+      const t = (baseT + animOffset) % 1;
+
+      const px = screenPos.x + beamDx * t;
+      const py = screenPos.y + beamDy * t;
+
+      // Particle size varies
+      const particleSize = 2 + Math.sin(time * 0.01 + i) * 1;
+
+      // Bright yellow-orange particles
+      const particleGradient = ctx.createRadialGradient(px, py, 0, px, py, particleSize * 2);
+      particleGradient.addColorStop(0, `rgba(255, 255, 150, ${intensity})`);
+      particleGradient.addColorStop(0.5, `rgba(255, 200, 50, ${intensity * 0.7})`);
+      particleGradient.addColorStop(1, 'transparent');
+
+      ctx.fillStyle = particleGradient;
+      ctx.beginPath();
+      ctx.arc(px, py, particleSize * 2, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // Terminus glow at target (larger: 8 -> 12)
+    const terminusRadius = 12 * (1 + Math.sin(time * 0.004) * 0.3);
+    const terminusGradient = ctx.createRadialGradient(
+      targetScreen.x, targetScreen.y, 0,
+      targetScreen.x, targetScreen.y, terminusRadius
+    );
+    terminusGradient.addColorStop(0, `rgba(255, 220, 100, ${intensity})`);
+    terminusGradient.addColorStop(0.4, `rgba(255, 180, 0, ${intensity * 0.7})`);
+    terminusGradient.addColorStop(0.7, `rgba(255, 140, 0, ${intensity * 0.4})`);
+    terminusGradient.addColorStop(1, 'transparent');
+
+    ctx.fillStyle = terminusGradient;
+    ctx.beginPath();
+    ctx.arc(targetScreen.x, targetScreen.y, terminusRadius, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Particle sparks at terminus (more sparks)
+    const sparkCount = 5;
+    ctx.fillStyle = `rgba(255, 200, 50, ${intensity})`;
+    for (let i = 0; i < sparkCount; i++) {
+      const angle = time * 0.003 + (i * Math.PI * 2 / sparkCount);
+      const sparkDist = terminusRadius * 0.8;
+      const sx = targetScreen.x + Math.cos(angle) * sparkDist;
+      const sy = targetScreen.y + Math.sin(angle) * sparkDist;
+      ctx.beginPath();
+      ctx.arc(sx, sy, 2, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // Source glow (new - makes beam origin visible too)
+    const sourceRadius = 6 * (1 + Math.sin(time * 0.006) * 0.2);
+    const sourceGradient = ctx.createRadialGradient(
+      screenPos.x, screenPos.y, 0,
+      screenPos.x, screenPos.y, sourceRadius
+    );
+    sourceGradient.addColorStop(0, `rgba(255, 200, 100, ${intensity * 0.8})`);
+    sourceGradient.addColorStop(0.6, `rgba(255, 150, 0, ${intensity * 0.4})`);
+    sourceGradient.addColorStop(1, 'transparent');
+
+    ctx.fillStyle = sourceGradient;
+    ctx.beginPath();
+    ctx.arc(screenPos.x, screenPos.y, sourceRadius, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.restore();
+  },
+
+  /**
+   * Draw rage visual effects for rogue miners (unified with scavenger rage system)
+   * @param {CanvasRenderingContext2D} ctx - Canvas context
+   * @param {Object} screenPos - Screen position {x, y}
+   * @param {number} SIZE - Ship size for scaling
+   * @param {number} time - Current timestamp for animations
+   */
+  drawRogueMinerRageEffects(ctx, screenPos, SIZE, time) {
+    // Red/orange pulsing warning ring
+    const pulsePhase = (Math.sin(time * 0.008) + 1) / 2;
+    const rageRadius = SIZE * 1.2;
+
+    ctx.save();
+
+    // Pulsing red/orange glow
+    const rageGradient = ctx.createRadialGradient(
+      screenPos.x, screenPos.y, SIZE * 0.5,
+      screenPos.x, screenPos.y, rageRadius * (1 + pulsePhase * 0.2)
+    );
+    rageGradient.addColorStop(0, 'rgba(255, 50, 0, 0.4)');
+    rageGradient.addColorStop(0.5, 'rgba(255, 100, 0, 0.2)');
+    rageGradient.addColorStop(1, 'transparent');
+
+    ctx.fillStyle = rageGradient;
+    ctx.beginPath();
+    ctx.arc(screenPos.x, screenPos.y, rageRadius * (1 + pulsePhase * 0.2), 0, Math.PI * 2);
+    ctx.fill();
+
+    // Warning ring
+    ctx.strokeStyle = `rgba(255, 80, 0, ${0.4 + pulsePhase * 0.3})`;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(screenPos.x, screenPos.y, SIZE * 1.1, 0, Math.PI * 2);
+    ctx.stroke();
+
+    // Small rage indicator above ship
+    const indicatorY = screenPos.y - SIZE - 10;
+    ctx.fillStyle = `rgba(255, 50, 0, ${0.6 + pulsePhase * 0.4})`;
+    ctx.beginPath();
+    ctx.arc(screenPos.x, indicatorY, 4, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.restore();
   }
 };

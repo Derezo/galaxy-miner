@@ -75,6 +75,41 @@ const logger = {
   isDebug: function () {
     return DEBUG;
   },
+
+  /**
+   * Log network events (always logs, even in production)
+   * Use for connection/disconnection, auth events, rate limits
+   * @param {...any} args - Arguments to log
+   */
+  network: function (...args) {
+    console.log('[NETWORK]', ...args);
+  },
+
+  /**
+   * Log messages for a specific category (controlled by DebugSettings)
+   * Server: Only logs if DEBUG is enabled
+   * Client: Only logs if the category is enabled in Developer Settings
+   * @param {string} category - Category name (e.g., 'pirates', 'relics', 'worldGeneration')
+   * @param {...any} args - Arguments to log
+   */
+  category: function (category, ...args) {
+    // Server-side: respect DEBUG flag
+    if (typeof window === 'undefined') {
+      if (!DEBUG) {
+        return;
+      }
+      console.log(`[${category.toUpperCase()}]`, ...args);
+      return;
+    }
+
+    // Client-side: check DebugSettings
+    if (typeof window.DebugSettings !== 'undefined') {
+      if (!window.DebugSettings.get('logging', category)) {
+        return;
+      }
+    }
+    console.log(`[${category.toUpperCase()}]`, ...args);
+  },
 };
 
 // Universal export pattern

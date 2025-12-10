@@ -364,6 +364,16 @@ const IconFactory = {
       } else {
         icon = this._createFallbackRelicIcon(size);
       }
+    } else if (relicInfo.iconType === 'mining_rites') {
+      // Use MiningRitesShape for the Mining Rites relic
+      if (typeof MiningRitesShape !== 'undefined') {
+        icon = MiningRitesShape.create({
+          size,
+          glowIntensity: 0.7
+        });
+      } else {
+        icon = this._createFallbackRelicIcon(size);
+      }
     } else {
       // Default: use RelicShape (stone monument)
       if (typeof RelicShape !== 'undefined') {

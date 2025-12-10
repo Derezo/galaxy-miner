@@ -63,7 +63,7 @@ const FACTION_LOOT = {
       rare:      ['GOLD', 'URANIUM', 'IRIDIUM', 'PLATINUM'],
       ultrarare: ['EXOTIC_MATTER', 'QUANTUM_CRYSTALS']
     },
-    relics: ['ANCIENT_STAR_MAP', 'PIRATE_TREASURE'],
+    relics: ['ANCIENT_STAR_MAP', 'PIRATE_TREASURE', 'MINING_RITES'],
     buffs: ['SHIELD_BOOST', 'RADAR_PULSE'],
     components: ['MINING_CAPACITOR', 'SHIELD_CELL']
   }
@@ -322,6 +322,14 @@ function generateLoot(npcType) {
     contents.push({
       type: 'relic',
       relicType: 'SCRAP_SIPHON'
+    });
+  }
+
+  // Guaranteed MINING_RITES drop for Rogue Foreman
+  if (npcType === 'rogue_foreman') {
+    contents.push({
+      type: 'relic',
+      relicType: 'MINING_RITES'
     });
   }
 

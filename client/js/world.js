@@ -19,11 +19,11 @@ const World = {
     if (typeof StarSystem !== 'undefined') {
       StarSystem.clearCache();
       StarSystem._debugLogged = false;  // Reset debug flag
-      Logger.log('[World] StarSystem loaded and cache cleared (v7)');
+      Logger.category('worldGeneration', 'StarSystem loaded and cache cleared');
     } else {
-      Logger.error('[World] StarSystem NOT LOADED! Check for JS errors above.');
+      Logger.error('StarSystem NOT LOADED! Check for JS errors above.');
     }
-    Logger.log('World initialized with seed:', seed);
+    Logger.category('worldGeneration', 'World initialized with seed:', seed);
   },
 
   update(playerPosition) {
@@ -59,14 +59,14 @@ const World = {
     if (this.useStarSystemModel && typeof StarSystem !== 'undefined') {
       // Log once to confirm we're using new generation
       if (!this._confirmedStarSystem) {
-        Logger.log('%c[World] Using NEW StarSystem generation (v4)', 'color: green; font-weight: bold');
+        Logger.category('worldGeneration', 'Using StarSystem generation');
         this._confirmedStarSystem = true;
       }
       return this.generateSectorFromStarSystem(sectorX, sectorY);
     }
 
     // Fallback to legacy generation - log warning
-    Logger.warn('%c[World] Using LEGACY generation - StarSystem not available!', 'color: red; font-weight: bold');
+    Logger.category('worldGeneration', 'Using LEGACY generation - StarSystem not available!');
     return this.generateSectorLegacy(sectorX, sectorY);
   },
 
@@ -79,7 +79,7 @@ const World = {
     if (!this._debugLogCount) this._debugLogCount = 0;
     if (this._debugLogCount < 5) {
       const systems = StarSystem.getStarSystemsForSector(sectorX, sectorY);
-      Logger.log(`[World] Sector (${sectorX},${sectorY}): ${systems.length} systems from StarSystem`);
+      Logger.category('worldGeneration', `Sector (${sectorX},${sectorY}): ${systems.length} systems from StarSystem`);
       this._debugLogCount++;
     }
 
@@ -206,6 +206,40 @@ const World = {
               y: wormhole.destinationSectorY
             }
           });
+        }
+      }
+
+      // Add mining claim objects (asteroids/planets generated near mining claims)
+      if (system.miningClaimObjects) {
+        // DEBUG: Log mining claim objects for troubleshooting
+        if (system.miningClaimObjects.length > 0 && !this._debugMiningClaimLogged) {
+          Logger.category('worldGeneration', 'System', system.id, 'has', system.miningClaimObjects.length, 'miningClaimObjects');
+          Logger.category('worldGeneration', 'Current sector:', sectorX, sectorY);
+          Logger.category('worldGeneration', 'First object:', system.miningClaimObjects[0]);
+          this._debugMiningClaimLogged = true;
+        }
+        for (const obj of system.miningClaimObjects) {
+          if (isInSector(obj.x, obj.y)) {
+            Logger.category('worldGeneration', 'Adding mining claim object to sector:', obj.id, 'at', obj.x?.toFixed(0), obj.y?.toFixed(0));
+            if (obj.type === 'planet') {
+              sector.planets.push({
+                ...obj,
+                starX: system.primaryStar.x,
+                starY: system.primaryStar.y,
+                systemId: system.id,
+                isOrbital: false  // Mining claim objects don't orbit
+              });
+            } else {
+              // Asteroid
+              sector.asteroids.push({
+                ...obj,
+                starX: system.primaryStar.x,
+                starY: system.primaryStar.y,
+                systemId: system.id,
+                isOrbital: false  // Mining claim objects don't orbit
+              });
+            }
+          }
         }
       }
     }
@@ -728,12 +762,6 @@ const World = {
           });
         }
       }
-    }
-
-    // Debug: log star count occasionally
-    if (!this._lastStarLog || Date.now() - this._lastStarLog > 5000) {
-      Logger.log(`[World] getVisibleObjects: ${objects.stars.length} stars, ${objects.planets.length} planets`);
-      this._lastStarLog = Date.now();
     }
 
     return objects;

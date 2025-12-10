@@ -37,8 +37,33 @@ function register(socket) {
       hull: data.hull,
       hullMax: data.hullMax,
       shield: data.shield,
-      shieldMax: data.shieldMax
+      shieldMax: data.shieldMax,
+      // Mining beam target position for rogue miners
+      miningTargetPos: data.miningTargetPos
     });
+  });
+
+  // NPC action events - used for immediate state updates like mining beam
+  socket.on('npc:action', (data) => {
+    const npc = Entities.npcs.get(data.npcId);
+
+    // Log mining-related actions for diagnostics (rogue miners specific)
+    if (data.action === 'startMining' || data.action === 'miningComplete') {
+      const npcExists = !!npc;
+      const hasTargetPos = !!data.targetPos;
+      Logger.category('rogue_miners', `npc:action received: ${data.action} npc=${data.npcId} exists=${npcExists} hasTargetPos=${hasTargetPos}`);
+    }
+
+    if (!npc) return;
+
+    // Handle mining-related actions for rogue miners
+    if (data.action === 'startMining' && data.targetPos) {
+      npc.miningTargetPos = data.targetPos;
+      Logger.category('rogue_miners', `npc:action APPLIED: ${data.npcId} miningTargetPos set to (${data.targetPos.x.toFixed(0)}, ${data.targetPos.y.toFixed(0)})`);
+    } else if (data.action === 'miningComplete') {
+      npc.miningTargetPos = null;
+      Logger.category('rogue_miners', `npc:action APPLIED: ${data.npcId} miningTargetPos cleared`);
+    }
   });
 
   socket.on('npc:destroyed', (data) => {
@@ -140,7 +165,7 @@ function register(socket) {
 
   // Swarm assimilation events
   socket.on('swarm:droneSacrifice', (data) => {
-    window.Logger.log('Swarm drone sacrifice at', data.position);
+    window.Logger.category('swarm', 'Drone sacrifice at', data.position);
 
     if (typeof ParticleSystem !== 'undefined') {
       // Red organic burst
@@ -181,7 +206,7 @@ function register(socket) {
   });
 
   socket.on('swarm:assimilationProgress', (data) => {
-    window.Logger.log('Assimilation progress:', data.baseId, data.progress + '/' + data.threshold);
+    window.Logger.category('swarm', 'Assimilation progress:', data.baseId, data.progress + '/' + data.threshold);
 
     // Update base state with assimilation progress
     if (typeof Entities !== 'undefined') {
@@ -215,7 +240,7 @@ function register(socket) {
   });
 
   socket.on('swarm:baseAssimilated', (data) => {
-    window.Logger.log('Base assimilated!', data.baseId, '-> type:', data.newType);
+    window.Logger.category('swarm', 'Base assimilated:', data.baseId, '-> type:', data.newType);
 
     // Update base in Entities.bases to use new assimilated type
     if (typeof Entities !== 'undefined') {
@@ -271,7 +296,7 @@ function register(socket) {
       for (const droneId of data.consumedDroneIds) {
         Entities.npcs.delete(droneId);
       }
-      window.Logger.log('Removed', data.consumedDroneIds.length, 'consumed drones from assimilation');
+      window.Logger.category('swarm', 'Removed', data.consumedDroneIds.length, 'consumed drones from assimilation');
     }
 
     // Show notification
@@ -282,7 +307,7 @@ function register(socket) {
 
   // Queen events
   socket.on('swarm:queenSpawn', (data) => {
-    window.Logger.log('Swarm Queen has emerged at', data.x, data.y);
+    window.Logger.category('swarm', 'Queen has emerged at', data.x, data.y);
 
     // Massive visual effect for queen emergence
     if (typeof ParticleSystem !== 'undefined') {
@@ -336,7 +361,7 @@ function register(socket) {
   });
 
   socket.on('swarm:queenDeath', (data) => {
-    window.Logger.log('Swarm Queen destroyed!');
+    window.Logger.category('swarm', 'Queen destroyed!');
 
     // Play epic queen death sound
     if (typeof AudioManager !== 'undefined' && AudioManager.isReady && AudioManager.isReady()) {
@@ -376,7 +401,7 @@ function register(socket) {
 
   // Queen special attacks
   socket.on('queen:webSnare', (data) => {
-    window.Logger.log('Queen web snare fired!', data);
+    window.Logger.category('swarm', 'Queen web snare fired at', data.targetX, data.targetY);
 
     // Play web snare sound
     if (typeof AudioManager !== 'undefined' && AudioManager.isReady && AudioManager.isReady()) {
@@ -446,7 +471,7 @@ function register(socket) {
   });
 
   socket.on('queen:acidBurst', (data) => {
-    window.Logger.log('Queen acid burst fired!', data);
+    window.Logger.category('swarm', 'Queen acid burst fired at', data.targetX, data.targetY);
 
     // Play acid burst sound
     if (typeof AudioManager !== 'undefined' && AudioManager.isReady && AudioManager.isReady()) {
@@ -526,7 +551,7 @@ function register(socket) {
   });
 
   socket.on('queen:phaseChange', (data) => {
-    window.Logger.log('Queen phase changed to:', data.phase);
+    window.Logger.category('swarm', 'Queen phase changed to:', data.phase);
 
     // Play phase change sound
     if (typeof AudioManager !== 'undefined' && AudioManager.isReady && AudioManager.isReady()) {
@@ -604,7 +629,7 @@ function register(socket) {
 
   // Formation leader succession (Void faction)
   socket.on('formation:leaderChange', (data) => {
-    window.Logger.log('Formation leader changed:', data);
+    window.Logger.category('void', 'Formation leader changed:', data.newLeaderId);
 
     // Trigger visual effect
     if (typeof FormationSuccessionEffect !== 'undefined') {
@@ -618,6 +643,92 @@ function register(socket) {
         newLeader.isFormationLeader = true;
         newLeader.formationLeader = true;
       }
+    }
+  });
+
+  // Rogue Miner Foreman spawn - dramatic announcement
+  socket.on('rogueMiner:foremanSpawn', (data) => {
+    window.Logger.category('rogue_miners', 'Foreman has emerged at', data.x, data.y);
+
+    // Dramatic visual effects
+    if (typeof ParticleSystem !== 'undefined') {
+      // Industrial spark burst (40 orange/yellow particles)
+      for (let i = 0; i < 40; i++) {
+        const angle = (Math.PI * 2 * i) / 40 + Math.random() * 0.2;
+        const speed = 80 + Math.random() * 120;
+        ParticleSystem.spawn({
+          x: data.x,
+          y: data.y,
+          vx: Math.cos(angle) * speed,
+          vy: Math.sin(angle) * speed,
+          life: 600 + Math.random() * 400,
+          color: i % 2 === 0 ? '#ff9900' : '#ffcc00',
+          size: 3 + Math.random() * 4,
+          type: 'spark',
+          drag: 0.92,
+          decay: 1.2
+        });
+      }
+
+      // Ore chunk debris (15 particles)
+      for (let i = 0; i < 15; i++) {
+        const angle = Math.random() * Math.PI * 2;
+        const speed = 30 + Math.random() * 60;
+        ParticleSystem.spawn({
+          x: data.x + (Math.random() - 0.5) * 40,
+          y: data.y + (Math.random() - 0.5) * 40,
+          vx: Math.cos(angle) * speed,
+          vy: Math.sin(angle) * speed,
+          life: 800 + Math.random() * 400,
+          color: '#8B7355', // Brown/ore colored
+          size: 4 + Math.random() * 5,
+          type: 'debris',
+          drag: 0.94,
+          decay: 0.8
+        });
+      }
+
+      // Golden glow burst in center
+      for (let i = 0; i < 12; i++) {
+        const angle = (Math.PI * 2 * i) / 12;
+        ParticleSystem.spawn({
+          x: data.x,
+          y: data.y,
+          vx: Math.cos(angle) * 40,
+          vy: Math.sin(angle) * 40,
+          life: 500,
+          color: '#ffd700',
+          size: 6 + Math.random() * 4,
+          type: 'glow',
+          drag: 0.96,
+          decay: 1
+        });
+      }
+    }
+
+    // Screen shake
+    if (typeof Camera !== 'undefined' && Camera.shake) {
+      Camera.shake(8, 500);
+    }
+
+    // Golden flash overlay
+    if (typeof ScreenEffects !== 'undefined' && ScreenEffects.flash) {
+      ScreenEffects.flash('#ffd70040', 300);
+    }
+
+    // Play foreman spawn sound
+    if (typeof AudioManager !== 'undefined' && AudioManager.isReady && AudioManager.isReady()) {
+      AudioManager.playAt('foreman_spawn', data.x, data.y);
+    }
+
+    // Chat system message
+    if (typeof Chat !== 'undefined' && Chat.addSystemMessage) {
+      Chat.addSystemMessage('A ROGUE FOREMAN HAS EMERGED!', 'warning');
+    }
+
+    // Warning notification
+    if (typeof NotificationManager !== 'undefined') {
+      NotificationManager.warning('⚠ A ROGUE FOREMAN HAS EMERGED!');
     }
   });
 
@@ -720,7 +831,7 @@ function register(socket) {
 
   socket.on('base:reward', (data) => {
     // Display notification for base destruction rewards
-    window.Logger.log(`Base destroyed! Earned ${data.credits} credits (${data.teamMultiplier}x team bonus)`);
+    window.Logger.category('combat', `Base destroyed! Earned ${data.credits} credits (${data.teamMultiplier}x team bonus)`);
 
     // Animate credit gain
     if (typeof CreditAnimation !== 'undefined' && data.credits > 0) {

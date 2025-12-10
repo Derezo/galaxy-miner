@@ -270,12 +270,12 @@ const NPC_TYPES = {
     formationLeader: true
   },
 
-  // === ROGUE MINERS (Territorial AI, Retreat at 50%) ===
+  // === ROGUE MINERS (Mining AI, Retreat at 50%) ===
   rogue_prospector: {
     name: 'Rogue Prospector',
     faction: 'rogue_miner',
     hull: 60,
-    shield: 30,
+    shield: 300,  // Heavy shields (was 150, orig 30)
     speed: 100,
     weaponType: 'energy',
     weaponTier: 1,
@@ -290,7 +290,7 @@ const NPC_TYPES = {
     name: 'Rogue Driller',
     faction: 'rogue_miner',
     hull: 90,
-    shield: 45,
+    shield: 450,  // Heavy shields (was 225, orig 45)
     speed: 85,
     weaponType: 'energy',
     weaponTier: 2,
@@ -305,11 +305,11 @@ const NPC_TYPES = {
     name: 'Rogue Excavator',
     faction: 'rogue_miner',
     hull: 140,
-    shield: 70,
+    shield: 875,  // Heavy shields (+25%, was 700)
     speed: 70,
     weaponType: 'energy',
     weaponTier: 3,
-    weaponDamage: 16,
+    weaponDamage: 20,  // Buffed +25% (was 16)
     weaponRange: 270,
     aggroRange: 450,
     creditReward: 160,  // Tier: high
@@ -320,7 +320,7 @@ const NPC_TYPES = {
     name: 'Rogue Foreman',
     faction: 'rogue_miner',
     hull: 250,
-    shield: 120,
+    shield: 1200,  // Heavy shields (was 600, orig 120)
     speed: 55,
     weaponType: 'energy',
     weaponTier: 4,
@@ -1207,7 +1207,7 @@ const BASE_NPC_SPAWNS = {
   mining_claim: {
     npcs: ['rogue_prospector', 'rogue_driller', 'rogue_excavator'],
     weights: [0.5, 0.35, 0.15],
-    maxNPCs: 3,
+    maxNPCs: 5,                  // Increased to allow dynamic spawns + Foreman
     spawnCooldown: 60000,        // Slower spawning (territorial)
     respawnDelay: 300000,        // 5 minutes
     initialSpawn: 2
@@ -1874,7 +1874,8 @@ function getBasesInRange(position, range) {
         faction: base.faction,
         type: base.type,
         name: base.name,
-        scrapPile: base.scrapPile || null
+        scrapPile: base.scrapPile || null,
+        claimCredits: base.claimCredits || 0
       });
     }
   }
@@ -2141,6 +2142,14 @@ function damageNPC(npcId, damage, attackerId = null) {
     }
   }
 
+  // Trigger rogue miner rage when damaged (spreads to ALL miners within 3000 units)
+  if (npc.faction === 'rogue_miner' && attackerId) {
+    const miningStrategy = ai.getMiningStrategy();
+    if (miningStrategy && miningStrategy.onDamaged) {
+      rageAction = miningStrategy.onDamaged(npc, attackerId, activeNPCs);
+    }
+  }
+
   // Apply damage to shield first
   if (npc.shield > 0) {
     if (damage <= npc.shield) {
@@ -2180,6 +2189,23 @@ function damageNPC(npcId, damage, attackerId = null) {
       if (base && base.hasHauler) {
         base.hasHauler = false;
         logger.log(`[SCAVENGER] Hauler ${npcId} died, base ${base.name} can spawn new Hauler`);
+      }
+    }
+
+    // Reset hasForeman flag if a Foreman died
+    if (npc.type === 'rogue_foreman' && npc.homeBaseId) {
+      const base = activeBases.get(npc.homeBaseId);
+      if (base && base.hasForeman) {
+        base.hasForeman = false;
+        logger.log(`[ROGUE_MINER] Foreman ${npcId} died, base ${base.name} can spawn new Foreman`);
+      }
+    }
+
+    // Clean up mining strategy state
+    if (npc.faction === 'rogue_miner') {
+      const miningStrategy = ai.getMiningStrategy();
+      if (miningStrategy && miningStrategy.cleanup) {
+        miningStrategy.cleanup(npcId);
       }
     }
 
@@ -2550,6 +2576,157 @@ function isHatching(npcEntity) {
   return elapsed < (npcEntity.hatchDuration || config.SWARM_HATCHING?.HATCH_DURATION || 2500);
 }
 
+// ============================================================================
+// ROGUE MINER DEPOSIT AND DYNAMIC SPAWNING SYSTEM
+// ============================================================================
+
+/**
+ * Handle rogue miner haul deposit - may trigger spawns
+ * @param {string} baseId - The mining claim base ID
+ * @param {string} npcType - Type of NPC that deposited ('rogue_prospector', 'rogue_driller', 'rogue_excavator')
+ * @param {number} creditBonus - Credits added to claim reward
+ * @returns {Object} Result with spawn info if applicable
+ */
+function handleRogueMinerDeposit(baseId, npcType, creditBonus) {
+  const base = activeBases.get(baseId);
+  if (!base || base.type !== 'mining_claim') {
+    return { success: false, reason: 'Invalid base' };
+  }
+
+  // Initialize tracking if needed
+  if (typeof base.claimCredits !== 'number') base.claimCredits = 0;
+  if (typeof base.hasForeman !== 'boolean') base.hasForeman = false;
+
+  // Add credits to claim
+  base.claimCredits += creditBonus;
+
+  logger.log(`[ROGUE_MINER] ${npcType} deposited at ${base.name}: +${creditBonus} credits (total: ${base.claimCredits})`);
+
+  // Check for spawn conditions
+  let spawnResult = null;
+
+  if (npcType === 'rogue_prospector' || npcType === 'rogue_driller') {
+    // 5-10% chance to spawn Excavator
+    const spawnChance = 0.05 + Math.random() * 0.05; // 5-10%
+    if (Math.random() < spawnChance) {
+      spawnResult = spawnRogueMinerNPC(baseId, 'rogue_excavator');
+      if (spawnResult) {
+        logger.log(`[ROGUE_MINER] Excavator spawned from ${npcType} deposit!`);
+      }
+    }
+  } else if (npcType === 'rogue_excavator') {
+    // 10% chance to spawn Foreman (only if none exists)
+    if (!base.hasForeman && Math.random() < 0.10) {
+      spawnResult = spawnRogueMinerNPC(baseId, 'rogue_foreman');
+      if (spawnResult) {
+        base.hasForeman = true;
+        spawnResult.isForeman = true;
+        logger.log(`[ROGUE_MINER] FOREMAN spawned from Excavator deposit!`);
+      }
+    }
+  }
+
+  return {
+    success: true,
+    baseId,
+    claimCredits: base.claimCredits,
+    spawnResult
+  };
+}
+
+/**
+ * Spawn a specific rogue miner NPC type at a mining claim
+ * @param {string} baseId - The mining claim base ID
+ * @param {string} npcType - The NPC type to spawn
+ * @returns {Object|null} The spawned NPC or null
+ */
+function spawnRogueMinerNPC(baseId, npcType) {
+  const base = activeBases.get(baseId);
+  if (!base || base.type !== 'mining_claim') {
+    return null;
+  }
+
+  const spawnConfig = BASE_NPC_SPAWNS[base.type];
+  if (!spawnConfig) return null;
+
+  // Check max capacity (allow +1 for Foreman)
+  const maxAllowed = npcType === 'rogue_foreman' ? spawnConfig.maxNPCs + 1 : spawnConfig.maxNPCs;
+  if (base.spawnedNPCs && base.spawnedNPCs.length >= maxAllowed) {
+    return null;
+  }
+
+  const npcTypeData = NPC_TYPES[npcType];
+  if (!npcTypeData) {
+    logger.error(`[ROGUE_MINER] Unknown NPC type: ${npcType}`);
+    return null;
+  }
+
+  const npcId = `npc_${++npcIdCounter}`;
+
+  // Get current position for base (may be orbital)
+  const currentPos = world.getObjectPosition(baseId);
+  const baseX = currentPos ? currentPos.x : base.x;
+  const baseY = currentPos ? currentPos.y : base.y;
+
+  // Spawn near base
+  const spawnAngle = Math.random() * Math.PI * 2;
+  const spawnDist = 50 + Math.random() * 50; // 50-100 units from base
+  const spawnX = baseX + Math.cos(spawnAngle) * spawnDist;
+  const spawnY = baseY + Math.sin(spawnAngle) * spawnDist;
+
+  const npc = {
+    id: npcId,
+    type: npcType,
+    name: npcTypeData.name,
+    faction: npcTypeData.faction,
+    position: { x: spawnX, y: spawnY },
+    velocity: { x: 0, y: 0 },
+    rotation: Math.random() * Math.PI * 2,
+    hull: npcTypeData.hull,
+    hullMax: npcTypeData.hull,
+    shield: npcTypeData.shield,
+    shieldMax: npcTypeData.shield,
+    speed: npcTypeData.speed,
+    weaponType: npcTypeData.weaponType,
+    weaponTier: npcTypeData.weaponTier,
+    weaponDamage: npcTypeData.weaponDamage,
+    weaponRange: npcTypeData.weaponRange,
+    aggroRange: npcTypeData.aggroRange,
+    creditReward: npcTypeData.creditReward,
+    deathEffect: npcTypeData.deathEffect || 'industrial_explosion',
+    // Link to home base
+    homeBaseId: baseId,
+    homeBasePosition: { x: baseX, y: baseY },
+    patrolRadius: (base.patrolRadius || 3) * config.SECTOR_SIZE,
+    spawnPoint: { x: spawnX, y: spawnY },
+    targetPlayer: null,
+    lastFireTime: 0,
+    lastDamageTime: 0,
+    patrolAngle: Math.random() * Math.PI * 2,
+    damageContributors: new Map(),
+    state: 'idle',
+    // Mining state
+    miningTargetId: null,
+    miningTargetPos: null,
+    hasHaul: false
+  };
+
+  // Boss properties for Foreman
+  if (npcType === 'rogue_foreman') {
+    npc.isBoss = true;
+    npc.sizeMultiplier = 1.5;
+  }
+
+  activeNPCs.set(npcId, npc);
+
+  // Track in base spawned list
+  if (!base.spawnedNPCs) base.spawnedNPCs = [];
+  base.spawnedNPCs.push(npcId);
+  base.lastSpawnTime = Date.now();
+
+  return npc;
+}
+
 module.exports = {
   NPC_TYPES,
   TEAM_MULTIPLIERS,
@@ -2618,5 +2795,8 @@ module.exports = {
   isAttachedDrone,
   // Scavenger scrap pile and Hauler system
   handleScavengerDump,
-  spawnHauler
+  spawnHauler,
+  // Rogue Miner deposit and dynamic spawning
+  handleRogueMinerDeposit,
+  spawnRogueMinerNPC
 };
