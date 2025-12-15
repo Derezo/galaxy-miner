@@ -117,6 +117,43 @@ const NPCWeaponEffects = {
       range: 35,
       knockback: true,
       impactSize: 40
+    },
+    // Pirate faction weapons - space pirates with 10% shield piercing
+    pirate_light_blaster: {
+      type: 'projectile',
+      color: { primary: '#ff4400', secondary: '#ff8800', glow: '#ff440060', core: '#ffffff' },
+      size: 5,
+      speed: 500,
+      duration: 600,
+      trail: true,
+      trailColor: '#ff4400',
+      trailLength: 20,
+      shieldPiercing: 0.1
+    },
+    pirate_heavy_blaster: {
+      type: 'projectile',
+      color: { primary: '#ff2200', secondary: '#ffaa00', glow: '#ff220080', core: '#ffffff' },
+      size: 8,
+      speed: 450,
+      duration: 700,
+      trail: true,
+      trailColor: '#ff2200',
+      trailLength: 30,
+      hasGlow: true,
+      shieldPiercing: 0.1
+    },
+    pirate_cannon: {
+      type: 'projectile',
+      color: { primary: '#333333', secondary: '#ff6600', glow: '#ff660050', smoke: '#666666', sparks: '#ffcc00' },
+      size: 12,
+      speed: 350,
+      duration: 900,
+      trail: true,
+      trailColor: '#ff6600',
+      trailLength: 40,
+      isCannonball: true,
+      hasSmoke: true,
+      shieldPiercing: 0.1
     }
   },
 
@@ -200,6 +237,10 @@ const NPCWeaponEffects = {
     // Beams are instant - trigger hit effect immediately at target
     if (hitInfo && typeof HitEffectRenderer !== 'undefined') {
       HitEffectRenderer.addHit(target.x, target.y, hitInfo.isShieldHit);
+      // Shield pierce effect for pirate weapons
+      if (hitInfo.shieldPiercing && hitInfo.isShieldHit) {
+        HitEffectRenderer.addShieldPierceEffect(target.x, target.y);
+      }
     }
   },
 
@@ -242,6 +283,10 @@ const NPCWeaponEffects = {
       // Trigger hit effect immediately
       if (hitInfo && typeof HitEffectRenderer !== 'undefined') {
         HitEffectRenderer.addHit(target.x, target.y, hitInfo.isShieldHit);
+        // Shield pierce effect for pirate weapons
+        if (hitInfo.shieldPiercing && hitInfo.isShieldHit) {
+          HitEffectRenderer.addShieldPierceEffect(target.x, target.y);
+        }
       }
 
       // Screen shake for powerful melee (Barnacle King drill)
@@ -285,6 +330,10 @@ const NPCWeaponEffects = {
           // Trigger hit effect at target position
           if (proj.hitInfo && typeof HitEffectRenderer !== 'undefined') {
             HitEffectRenderer.addHit(proj.target.x, proj.target.y, proj.hitInfo.isShieldHit);
+            // Shield pierce effect for pirate weapons
+            if (proj.hitInfo.shieldPiercing && proj.hitInfo.isShieldHit) {
+              HitEffectRenderer.addShieldPierceEffect(proj.target.x, proj.target.y);
+            }
           }
 
           // Create void tear effect for dark energy at impact
@@ -446,6 +495,15 @@ const NPCWeaponEffects = {
       case 'acid_burst':
         this.drawAcidBurstProjectile(ctx, config, proj);
         break;
+      case 'pirate_light_blaster':
+        this.drawPirateLightBlaster(ctx, config);
+        break;
+      case 'pirate_heavy_blaster':
+        this.drawPirateHeavyBlaster(ctx, config);
+        break;
+      case 'pirate_cannon':
+        this.drawPirateCannonball(ctx, config, proj);
+        break;
       default:
         this.drawGenericProjectile(ctx, config);
     }
@@ -483,6 +541,229 @@ const NPCWeaponEffects = {
       ctx.arc(sparkX, sparkY, 2, 0, Math.PI * 2);
       ctx.fill();
     }
+  },
+
+  /**
+   * Draw pirate light blaster - small red/orange energy bolts
+   * Used by pirate scouts
+   */
+  drawPirateLightBlaster(ctx, config) {
+    const size = config.size;
+    const time = Date.now();
+    const flicker = 0.8 + Math.sin(time * 0.02) * 0.2;
+
+    // Outer glow ring
+    const outerGlow = ctx.createRadialGradient(0, 0, 0, 0, 0, size * 2);
+    outerGlow.addColorStop(0, config.color.glow);
+    outerGlow.addColorStop(0.5, config.color.primary + '40');
+    outerGlow.addColorStop(1, 'transparent');
+
+    ctx.fillStyle = outerGlow;
+    ctx.beginPath();
+    ctx.arc(0, 0, size * 2, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Main bolt body - elongated shape
+    ctx.fillStyle = config.color.primary;
+    ctx.beginPath();
+    ctx.ellipse(0, 0, size * 1.2, size * 0.6, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Hot core
+    const coreGradient = ctx.createRadialGradient(size * 0.2, 0, 0, 0, 0, size * 0.8);
+    coreGradient.addColorStop(0, config.color.core || '#ffffff');
+    coreGradient.addColorStop(0.4, config.color.secondary);
+    coreGradient.addColorStop(1, config.color.primary);
+
+    ctx.fillStyle = coreGradient;
+    ctx.globalAlpha = flicker;
+    ctx.beginPath();
+    ctx.ellipse(size * 0.1, 0, size * 0.7, size * 0.4, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.globalAlpha = 1;
+
+    // Forward bright tip
+    ctx.fillStyle = '#ffffff';
+    ctx.beginPath();
+    ctx.arc(size * 0.6, 0, size * 0.2, 0, Math.PI * 2);
+    ctx.fill();
+  },
+
+  /**
+   * Draw pirate heavy blaster - larger bolts with pulsing glow
+   * Used by pirate fighters and captains
+   */
+  drawPirateHeavyBlaster(ctx, config) {
+    const size = config.size;
+    const time = Date.now();
+    const pulsePhase = (Math.sin(time * 0.01) + 1) / 2;
+    const glowSize = size * (2.5 + pulsePhase * 0.5);
+
+    // Pulsing outer glow (larger and more dramatic)
+    const outerGlow = ctx.createRadialGradient(0, 0, 0, 0, 0, glowSize);
+    outerGlow.addColorStop(0, config.color.glow);
+    outerGlow.addColorStop(0.3, config.color.primary + '60');
+    outerGlow.addColorStop(0.7, config.color.primary + '20');
+    outerGlow.addColorStop(1, 'transparent');
+
+    ctx.fillStyle = outerGlow;
+    ctx.beginPath();
+    ctx.arc(0, 0, glowSize, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Energy ring (pulsing)
+    ctx.strokeStyle = config.color.secondary;
+    ctx.lineWidth = 2 + pulsePhase;
+    ctx.globalAlpha = 0.6 + pulsePhase * 0.4;
+    ctx.beginPath();
+    ctx.arc(0, 0, size * 1.3, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+
+    // Main bolt body - more defined shape
+    const bodyGradient = ctx.createLinearGradient(-size, 0, size * 1.5, 0);
+    bodyGradient.addColorStop(0, config.color.primary);
+    bodyGradient.addColorStop(0.3, config.color.secondary);
+    bodyGradient.addColorStop(0.7, config.color.secondary);
+    bodyGradient.addColorStop(1, config.color.primary);
+
+    ctx.fillStyle = bodyGradient;
+    ctx.beginPath();
+    ctx.ellipse(0, 0, size * 1.4, size * 0.7, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Bright core
+    const coreGradient = ctx.createRadialGradient(size * 0.2, 0, 0, 0, 0, size);
+    coreGradient.addColorStop(0, '#ffffff');
+    coreGradient.addColorStop(0.3, config.color.core || '#ffffff');
+    coreGradient.addColorStop(0.6, config.color.secondary);
+    coreGradient.addColorStop(1, config.color.primary);
+
+    ctx.fillStyle = coreGradient;
+    ctx.beginPath();
+    ctx.ellipse(size * 0.15, 0, size * 0.9, size * 0.5, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Forward energy streaks
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 1.5;
+    ctx.globalAlpha = 0.8;
+    for (let i = 0; i < 3; i++) {
+      const angle = (i - 1) * 0.2;
+      ctx.beginPath();
+      ctx.moveTo(size * 0.5, 0);
+      ctx.lineTo(size * 1.3, Math.sin(angle) * size * 0.3);
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+  },
+
+  /**
+   * Draw pirate cannonball - heavy metal sphere with fire trail and smoke
+   * Used by dreadnought
+   */
+  drawPirateCannonball(ctx, config, proj) {
+    const size = config.size;
+    const time = Date.now();
+
+    // Smoke trail (behind the ball)
+    if (config.hasSmoke && proj.trail && proj.trail.length > 2) {
+      ctx.save();
+      ctx.rotate(-proj.rotation); // Cancel rotation for smoke
+
+      for (let i = 0; i < Math.min(proj.trail.length, 6); i++) {
+        const trailPoint = proj.trail[proj.trail.length - 1 - i];
+        const age = (time - trailPoint.time) / 200;
+        const smokeSize = size * (0.5 + age * 0.8);
+        const alpha = Math.max(0, 0.3 - age * 0.15);
+
+        // Calculate relative position
+        const dx = trailPoint.x - proj.x;
+        const dy = trailPoint.y - proj.y;
+
+        ctx.globalAlpha = alpha;
+        ctx.fillStyle = config.color.smoke || '#666666';
+        ctx.beginPath();
+        ctx.arc(dx, dy, smokeSize, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.restore();
+    }
+
+    // Fire glow around cannonball
+    const fireGlow = ctx.createRadialGradient(0, 0, size * 0.5, 0, 0, size * 2.5);
+    fireGlow.addColorStop(0, config.color.secondary + 'cc');
+    fireGlow.addColorStop(0.3, config.color.secondary + '80');
+    fireGlow.addColorStop(0.6, config.color.glow);
+    fireGlow.addColorStop(1, 'transparent');
+
+    ctx.fillStyle = fireGlow;
+    ctx.beginPath();
+    ctx.arc(0, 0, size * 2.5, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Fire trail (flickering flames behind)
+    const flameFlicker = Math.sin(time * 0.03) * 0.3 + 0.7;
+    ctx.fillStyle = config.color.secondary;
+    ctx.globalAlpha = flameFlicker;
+
+    for (let i = 0; i < 5; i++) {
+      const flameX = -size * (0.8 + i * 0.4) + Math.sin(time * 0.02 + i) * 2;
+      const flameY = Math.sin(time * 0.015 + i * 2) * (size * 0.3);
+      const flameSize = size * (0.4 - i * 0.06);
+
+      ctx.beginPath();
+      ctx.arc(flameX, flameY, flameSize, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+
+    // Metal cannonball - gradient for 3D effect
+    const ballGradient = ctx.createRadialGradient(
+      -size * 0.3, -size * 0.3, 0,
+      0, 0, size
+    );
+    ballGradient.addColorStop(0, '#666666');
+    ballGradient.addColorStop(0.3, config.color.primary);
+    ballGradient.addColorStop(0.7, '#222222');
+    ballGradient.addColorStop(1, '#111111');
+
+    ctx.fillStyle = ballGradient;
+    ctx.beginPath();
+    ctx.arc(0, 0, size, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Metal highlight
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.3)';
+    ctx.beginPath();
+    ctx.arc(-size * 0.3, -size * 0.3, size * 0.25, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Heated edge (the cannonball is hot!)
+    ctx.strokeStyle = config.color.secondary;
+    ctx.lineWidth = 2;
+    ctx.globalAlpha = 0.6 + Math.sin(time * 0.02) * 0.3;
+    ctx.beginPath();
+    ctx.arc(0, 0, size * 0.95, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+
+    // Sparks flying off
+    ctx.fillStyle = config.color.sparks || '#ffcc00';
+    for (let i = 0; i < 4; i++) {
+      const sparkPhase = (time * 0.005 + i * 1.5) % 1;
+      const sparkDist = size * (1 + sparkPhase * 2);
+      const sparkAngle = Math.PI + (i - 1.5) * 0.5 + Math.sin(time * 0.01 + i) * 0.2;
+      const sparkX = Math.cos(sparkAngle) * sparkDist;
+      const sparkY = Math.sin(sparkAngle) * sparkDist;
+      const sparkSize = 2 * (1 - sparkPhase);
+
+      ctx.globalAlpha = 1 - sparkPhase;
+      ctx.beginPath();
+      ctx.arc(sparkX, sparkY, sparkSize, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
   },
 
   drawDarkEnergyBolt(ctx, config, proj) {
@@ -975,13 +1256,61 @@ const NPCWeaponEffects = {
    */
   getWeaponForFaction(faction) {
     const factionWeapons = {
-      pirate: 'cannon',
+      pirate: 'pirate_heavy_blaster', // Default pirate weapon
       scavenger: 'jury_laser',
       swarm: 'dark_energy',
       void: 'dark_beam',
       rogue_miner: 'mining_laser'
     };
     return factionWeapons[faction] || 'cannon';
+  },
+
+  /**
+   * Get weapon type for a specific NPC type
+   * Allows more granular weapon selection within factions
+   */
+  getWeaponForNpcType(npcType) {
+    const npcWeapons = {
+      // Pirate weapons by role
+      pirate_scout: 'pirate_light_blaster',
+      pirate_fighter: 'pirate_heavy_blaster',
+      pirate_captain: 'pirate_heavy_blaster',
+      pirate_dreadnought: 'pirate_cannon',
+      // Scavenger weapons by role
+      scavenger_scrapper: 'dual_laser',
+      scavenger_salvager: 'dual_laser',
+      scavenger_barge: 'jury_laser',
+      scavenger_barnacle_king: 'boring_drill',
+      scavenger_hauler: 'jury_laser',
+      // Swarm weapons
+      swarm_drone: 'dark_energy',
+      swarm_warrior: 'dark_energy',
+      swarm_queen: 'web_snare',
+      // Void weapons
+      void_entity: 'dark_beam',
+      void_sentinel: 'dark_beam',
+      void_harbinger: 'dark_beam',
+      // Rogue miner weapons (actual NPC type names)
+      rogue_prospector: 'mining_laser',
+      rogue_driller: 'mining_laser',
+      rogue_excavator: 'mining_laser',
+      rogue_foreman: 'mining_laser'
+    };
+    return npcWeapons[npcType] || this.getWeaponForFaction(this.getFactionFromNpcType(npcType));
+  },
+
+  /**
+   * Extract faction from NPC type string
+   */
+  getFactionFromNpcType(npcType) {
+    if (!npcType) return 'pirate';
+    if (npcType.startsWith('pirate')) return 'pirate';
+    if (npcType.startsWith('scavenger')) return 'scavenger';
+    if (npcType.startsWith('swarm')) return 'swarm';
+    if (npcType.startsWith('void')) return 'void';
+    // Rogue miner types start with 'rogue_' (e.g., rogue_prospector, rogue_driller)
+    if (npcType.startsWith('rogue_')) return 'rogue_miner';
+    return 'pirate';
   },
 
   clear() {

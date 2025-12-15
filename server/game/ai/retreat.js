@@ -31,10 +31,24 @@ class RetreatStrategy {
       return this.retreat(npc, nearbyPlayers, deltaTime, context);
     }
 
+    // Combine players and hostile NPCs into potential targets
+    // Players take priority, then hostile NPCs (pirates)
+    const hostileNPCs = context.nearbyHostiles || [];
+    const allTargets = [...nearbyPlayers];
+
+    // Add hostile NPCs as targets (formatted like players)
+    for (const hostile of hostileNPCs) {
+      allTargets.push({
+        ...hostile,
+        isNPC: true
+      });
+    }
+
     // No targets - patrol (scavengers patrol loosely)
-    if (nearbyPlayers.length === 0) {
+    if (allTargets.length === 0) {
       npc.state = 'patrol';
       npc.targetPlayer = null;
+      npc.targetNPC = null;
       this.loosePatrol(npc, deltaTime, context);
       return null;
     }
@@ -43,16 +57,22 @@ class RetreatStrategy {
     npc.state = 'combat';
 
     // Select target (prefer isolated/damaged targets)
-    const target = this.selectTarget(npc, nearbyPlayers);
+    const target = this.selectTarget(npc, allTargets);
     if (!target) {
       this.loosePatrol(npc, deltaTime, context);
       return null;
     }
 
-    npc.targetPlayer = target.id;
+    if (target.isNPC) {
+      npc.targetNPC = target.id;
+      npc.targetPlayer = null;
+    } else {
+      npc.targetPlayer = target.id;
+      npc.targetNPC = null;
+    }
 
     // Hit-and-run movement
-    this.hitAndRunMovement(npc, target, nearbyPlayers, deltaTime);
+    this.hitAndRunMovement(npc, target, allTargets, deltaTime);
 
     // Opportunistic fire
     return this.tryOpportunisticFire(npc, target);

@@ -97,13 +97,14 @@ function checkHit(attackerPos, targetPos, targetSize, weaponRange, weaponTier) {
 }
 
 /**
- * Apply damage to a player with hull resistance
+ * Apply damage to a player with hull resistance and optional shield piercing
  * @param {number} targetUserId - Target player's user ID
  * @param {Object} damage - { shieldDamage, hullDamage }
  * @param {string} damageType - 'kinetic', 'energy', or 'explosive' (for hull resistance)
+ * @param {number} shieldPiercing - Fraction of damage that bypasses shields (0-1, default 0)
  * @returns {Object|null} Result with new shield/hull values, or null if player not found
  */
-function applyDamage(targetUserId, damage, damageType = 'kinetic') {
+function applyDamage(targetUserId, damage, damageType = 'kinetic', shieldPiercing = 0) {
   const ship = statements.getShipByUserId.get(targetUserId);
   if (!ship) return null;
 
@@ -120,7 +121,20 @@ function applyDamage(targetUserId, damage, damageType = 'kinetic') {
   // Record damage time for shield recharge delay
   shieldDelays.set(targetUserId, Date.now());
 
-  // Apply damage to shield first
+  // Calculate shield piercing damage (portion that bypasses shields entirely)
+  let piercingDamage = 0;
+  let shieldPierced = false;
+  if (shieldPiercing > 0 && newShield > 0) {
+    // Calculate total incoming damage and extract piercing portion
+    const totalDamage = shieldDamage + hullDamage;
+    piercingDamage = totalDamage * shieldPiercing;
+    // Reduce the damage that goes through normal shield absorption
+    shieldDamage = shieldDamage * (1 - shieldPiercing);
+    hullDamage = hullDamage * (1 - shieldPiercing);
+    shieldPierced = true;
+  }
+
+  // Apply damage to shield first (after piercing portion extracted)
   if (newShield > 0) {
     if (shieldDamage <= newShield) {
       newShield -= shieldDamage;
@@ -132,15 +146,16 @@ function applyDamage(targetUserId, damage, damageType = 'kinetic') {
   }
 
   // Calculate hull damage:
+  // - Piercing damage always goes directly to hull
   // - Shield overflow (shieldDamage after absorption) always goes to hull
   // - hullDamage only applies if shields broke during this hit (not if they were already down)
-  let totalHullDamage = shieldDamage; // Overflow from shields
+  let totalHullDamage = piercingDamage + shieldDamage; // Piercing + overflow from shields
   if (hadShields && newShield <= 0) {
     // Shields broke this hit - apply hull damage component too
     totalHullDamage += hullDamage;
   } else if (!hadShields) {
     // Shields were already down - just use hullDamage (shieldDamage would double-count)
-    totalHullDamage = hullDamage;
+    totalHullDamage = hullDamage + piercingDamage;
   }
 
   // Apply hull resistance to reduce damage
@@ -163,7 +178,9 @@ function applyDamage(targetUserId, damage, damageType = 'kinetic') {
     hull: Math.floor(newHull),
     isDead,
     hitShield: hadShields, // True if shields absorbed any damage
-    resistedDamage: resistance > 0 ? Math.floor(totalHullDamage * resistance / (1 - resistance)) : 0
+    resistedDamage: resistance > 0 ? Math.floor(totalHullDamage * resistance / (1 - resistance)) : 0,
+    shieldPierced, // True if damage bypassed shields via piercing
+    piercingDamage: Math.floor(piercingDamage) // Amount that went directly to hull
   };
 }
 

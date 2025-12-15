@@ -22,11 +22,17 @@ const FactionBases = {
   // Base configurations
   CONFIGS: {
     pirate_outpost: {
-      size: 80,
-      color: '#ff3300',
-      secondaryColor: '#880000',
-      accentColor: '#ffcc00',
-      glowColor: '#ff330060'
+      size: 90,
+      color: '#8B4513',        // Main wood (saddle brown)
+      secondaryColor: '#5c3a21', // Dark wood
+      accentColor: '#ffd700',   // Gold trim
+      glowColor: '#ff660040',   // Warm orange glow
+      plankColor: '#A0522D',    // Plank highlights (sienna)
+      lighthouseColor: '#666666', // Stone lighthouse
+      lanternColor: '#ff6600',   // Warm lantern light
+      ropeColor: '#8B7355',     // Rope tan
+      flagColor: '#1a1a1a',     // Black flag
+      chainColor: '#4a4a4a'     // Iron chains
     },
     scavenger_yard: {
       size: 100,
@@ -433,23 +439,37 @@ const FactionBases = {
     const time = this.animationTime;
     const size = config.size;
 
-    // Outer glow
-    const gradient = ctx.createRadialGradient(0, 0, size * 0.5, 0, 0, size * 1.5);
-    gradient.addColorStop(0, config.glowColor);
-    gradient.addColorStop(1, 'transparent');
-    ctx.fillStyle = gradient;
+    // Space "water" nebula effect underneath the dock
+    const nebulaGradient = ctx.createRadialGradient(0, 0, size * 0.2, 0, 0, size * 1.4);
+    nebulaGradient.addColorStop(0, 'rgba(20, 10, 30, 0.6)');
+    nebulaGradient.addColorStop(0.4, 'rgba(30, 15, 45, 0.4)');
+    nebulaGradient.addColorStop(0.7, 'rgba(10, 20, 40, 0.2)');
+    nebulaGradient.addColorStop(1, 'transparent');
+    ctx.fillStyle = nebulaGradient;
     ctx.beginPath();
-    ctx.arc(0, 0, size * 1.5, 0, Math.PI * 2);
+    ctx.arc(0, 0, size * 1.4, 0, Math.PI * 2);
     ctx.fill();
 
-    // Main station body - octagonal
+    // Warm orange glow from lanterns
+    const glowGradient = ctx.createRadialGradient(0, 0, size * 0.3, 0, 0, size * 1.2);
+    glowGradient.addColorStop(0, config.glowColor);
+    glowGradient.addColorStop(1, 'transparent');
+    ctx.fillStyle = glowGradient;
+    ctx.beginPath();
+    ctx.arc(0, 0, size * 1.2, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Draw swaying chains between mooring posts
+    this.drawDockChains(ctx, size, config, time);
+
+    // Hexagonal wooden dock platform
     ctx.fillStyle = config.secondaryColor;
     ctx.strokeStyle = config.color;
-    ctx.lineWidth = 3;
+    ctx.lineWidth = 4;
     ctx.beginPath();
-    for (let i = 0; i < 8; i++) {
-      const angle = (Math.PI * 2 * i) / 8 - Math.PI / 8;
-      const r = size * 0.7;
+    for (let i = 0; i < 6; i++) {
+      const angle = (Math.PI * 2 * i) / 6 - Math.PI / 6;
+      const r = size * 0.75;
       if (i === 0) {
         ctx.moveTo(Math.cos(angle) * r, Math.sin(angle) * r);
       } else {
@@ -460,87 +480,386 @@ const FactionBases = {
     ctx.fill();
     ctx.stroke();
 
-    // Center core
-    ctx.fillStyle = config.color;
-    ctx.beginPath();
-    ctx.arc(0, 0, size * 0.25, 0, Math.PI * 2);
-    ctx.fill();
+    // Plank lines on dock surface
+    ctx.strokeStyle = config.plankColor || '#A0522D';
+    ctx.lineWidth = 1;
+    ctx.globalAlpha = 0.4;
+    for (let i = -5; i <= 5; i++) {
+      const y = i * size * 0.12;
+      ctx.beginPath();
+      ctx.moveTo(-size * 0.65, y);
+      ctx.lineTo(size * 0.65, y);
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
 
-    // Skull insignia in center
-    this.drawSkullInsignia(ctx, 0, 0, size * 0.18);
-
-    // Rotating turrets on docking arms
-    const turretRotation = time * 0.5;
-    ctx.strokeStyle = config.secondaryColor;
-    ctx.lineWidth = 8;
+    // 4 dock extension arms with lanterns
     for (let i = 0; i < 4; i++) {
       const angle = (Math.PI * 2 * i) / 4 + Math.PI / 4;
-      const armEndX = Math.cos(angle) * size;
-      const armEndY = Math.sin(angle) * size;
+      this.drawDockArm(ctx, angle, size, config, time, i);
+    }
 
-      // Docking arm
-      ctx.beginPath();
-      ctx.moveTo(Math.cos(angle) * size * 0.5, Math.sin(angle) * size * 0.5);
-      ctx.lineTo(armEndX, armEndY);
-      ctx.stroke();
+    // 6 mooring posts with rope coils
+    for (let i = 0; i < 6; i++) {
+      const angle = (Math.PI * 2 * i) / 6 - Math.PI / 6;
+      const postX = Math.cos(angle) * size * 0.7;
+      const postY = Math.sin(angle) * size * 0.7;
+      this.drawMooringPost(ctx, postX, postY, config, time);
+    }
 
-      // Turret base
-      ctx.fillStyle = config.secondaryColor;
-      ctx.beginPath();
-      ctx.arc(armEndX, armEndY, 8, 0, Math.PI * 2);
-      ctx.fill();
+    // Central lighthouse tower
+    this.drawLighthouse(ctx, size, config, time);
 
-      // Rotating turret barrel
-      const barrelAngle = turretRotation + i * 0.7;
-      const barrelLength = 12;
-      ctx.strokeStyle = config.color;
-      ctx.lineWidth = 3;
+    // Large pirate flag on lighthouse
+    this.drawPirateFlag(ctx, 0, -size * 0.5, size * 0.3, config, time);
+  },
+
+  /**
+   * Draw swaying chains between mooring posts
+   */
+  drawDockChains(ctx, size, config, time) {
+    ctx.strokeStyle = config.chainColor || '#4a4a4a';
+    ctx.lineWidth = 2;
+    ctx.globalAlpha = 0.6;
+
+    for (let i = 0; i < 6; i++) {
+      const angle1 = (Math.PI * 2 * i) / 6 - Math.PI / 6;
+      const angle2 = (Math.PI * 2 * ((i + 1) % 6)) / 6 - Math.PI / 6;
+
+      const x1 = Math.cos(angle1) * size * 0.7;
+      const y1 = Math.sin(angle1) * size * 0.7;
+      const x2 = Math.cos(angle2) * size * 0.7;
+      const y2 = Math.sin(angle2) * size * 0.7;
+
+      // Chain sag with animation
+      const midX = (x1 + x2) / 2;
+      const midY = (y1 + y2) / 2;
+      const sagAmount = size * 0.08 + Math.sin(time * 0.8 + i) * size * 0.02;
+
+      // Calculate perpendicular direction for sag
+      const dx = x2 - x1;
+      const dy = y2 - y1;
+      const len = Math.sqrt(dx * dx + dy * dy);
+      const perpX = -dy / len;
+      const perpY = dx / len;
+
       ctx.beginPath();
-      ctx.moveTo(armEndX, armEndY);
-      ctx.lineTo(
-        armEndX + Math.cos(barrelAngle) * barrelLength,
-        armEndY + Math.sin(barrelAngle) * barrelLength
+      ctx.moveTo(x1, y1);
+      ctx.quadraticCurveTo(
+        midX + perpX * sagAmount,
+        midY + perpY * sagAmount,
+        x2, y2
       );
       ctx.stroke();
     }
+    ctx.globalAlpha = 1;
+  },
 
-    // Scanning light beam
-    const scanAngle = time * 1.5;
-    const scanLength = size * 1.2;
-    ctx.save();
-    ctx.rotate(scanAngle);
-    const scanGradient = ctx.createLinearGradient(0, 0, scanLength, 0);
-    scanGradient.addColorStop(0, '#ff000060');
-    scanGradient.addColorStop(1, 'transparent');
-    ctx.fillStyle = scanGradient;
+  /**
+   * Draw a dock extension arm with lantern
+   */
+  drawDockArm(ctx, angle, size, config, time, index) {
+    const armLength = size * 0.4;
+    const armStartX = Math.cos(angle) * size * 0.5;
+    const armStartY = Math.sin(angle) * size * 0.5;
+    const armEndX = Math.cos(angle) * (size * 0.5 + armLength);
+    const armEndY = Math.sin(angle) * (size * 0.5 + armLength);
+
+    // Arm structure (wooden beam)
+    ctx.strokeStyle = config.color;
+    ctx.lineWidth = 8;
+    ctx.lineCap = 'round';
     ctx.beginPath();
-    ctx.moveTo(0, 0);
-    ctx.lineTo(scanLength, -8);
-    ctx.lineTo(scanLength, 8);
+    ctx.moveTo(armStartX, armStartY);
+    ctx.lineTo(armEndX, armEndY);
+    ctx.stroke();
+
+    // Cross supports
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = config.secondaryColor;
+    const midX = (armStartX + armEndX) / 2;
+    const midY = (armStartY + armEndY) / 2;
+    const perpAngle = angle + Math.PI / 2;
+    ctx.beginPath();
+    ctx.moveTo(midX + Math.cos(perpAngle) * 8, midY + Math.sin(perpAngle) * 8);
+    ctx.lineTo(midX - Math.cos(perpAngle) * 8, midY - Math.sin(perpAngle) * 8);
+    ctx.stroke();
+
+    // Lantern at end
+    const lanternFlicker = 0.6 + Math.sin(time * 4 + index * 2) * 0.3;
+    const blinkPhase = Math.floor(time * 1.5) % 4;
+    const isLit = index === blinkPhase || lanternFlicker > 0.7;
+
+    // Lantern glow
+    if (isLit) {
+      const lanternGlow = ctx.createRadialGradient(armEndX, armEndY, 0, armEndX, armEndY, 25);
+      lanternGlow.addColorStop(0, `rgba(255, 102, 0, ${lanternFlicker * 0.6})`);
+      lanternGlow.addColorStop(0.5, `rgba(255, 102, 0, ${lanternFlicker * 0.3})`);
+      lanternGlow.addColorStop(1, 'transparent');
+      ctx.fillStyle = lanternGlow;
+      ctx.beginPath();
+      ctx.arc(armEndX, armEndY, 25, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // Lantern housing
+    ctx.fillStyle = '#333333';
+    ctx.beginPath();
+    ctx.arc(armEndX, armEndY, 6, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Lantern light
+    ctx.fillStyle = isLit ? (config.lanternColor || '#ff6600') : '#442200';
+    ctx.beginPath();
+    ctx.arc(armEndX, armEndY, 4, 0, Math.PI * 2);
+    ctx.fill();
+  },
+
+  /**
+   * Draw a mooring post with rope coil
+   */
+  drawMooringPost(ctx, x, y, config, time) {
+    // Post shadow
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.3)';
+    ctx.beginPath();
+    ctx.ellipse(x + 2, y + 2, 8, 4, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Vertical post
+    ctx.fillStyle = config.secondaryColor;
+    ctx.strokeStyle = config.color;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.rect(x - 5, y - 15, 10, 20);
+    ctx.fill();
+    ctx.stroke();
+
+    // Post cap (gold trim)
+    ctx.fillStyle = config.accentColor || '#ffd700';
+    ctx.beginPath();
+    ctx.arc(x, y - 15, 6, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Rope coil around post
+    ctx.strokeStyle = config.ropeColor || '#8B7355';
+    ctx.lineWidth = 2.5;
+    ctx.lineCap = 'round';
+
+    // Draw rope coils
+    for (let i = 0; i < 3; i++) {
+      const coilY = y - 8 + i * 5;
+      const wobble = Math.sin(time * 0.5 + i) * 1;
+      ctx.beginPath();
+      ctx.arc(x + wobble, coilY, 7 - i, 0, Math.PI * 1.7);
+      ctx.stroke();
+    }
+
+    // Rope hanging down
+    ctx.beginPath();
+    ctx.moveTo(x + 6, y - 3);
+    ctx.quadraticCurveTo(x + 12, y + 10, x + 8 + Math.sin(time) * 2, y + 15);
+    ctx.stroke();
+  },
+
+  /**
+   * Draw the central lighthouse
+   */
+  drawLighthouse(ctx, size, config, time) {
+    // Lighthouse base (stone)
+    ctx.fillStyle = config.lighthouseColor || '#666666';
+    ctx.strokeStyle = '#444444';
+    ctx.lineWidth = 2;
+
+    // Tapered tower shape
+    ctx.beginPath();
+    ctx.moveTo(-size * 0.15, size * 0.15);
+    ctx.lineTo(-size * 0.1, -size * 0.3);
+    ctx.lineTo(size * 0.1, -size * 0.3);
+    ctx.lineTo(size * 0.15, size * 0.15);
     ctx.closePath();
     ctx.fill();
+    ctx.stroke();
+
+    // Stone texture lines
+    ctx.strokeStyle = '#555555';
+    ctx.lineWidth = 1;
+    ctx.globalAlpha = 0.4;
+    for (let i = 0; i < 4; i++) {
+      const y = size * 0.1 - i * size * 0.1;
+      const width = size * 0.13 - i * 0.01;
+      ctx.beginPath();
+      ctx.moveTo(-width, y);
+      ctx.lineTo(width, y);
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+
+    // Lighthouse top platform
+    ctx.fillStyle = config.secondaryColor;
+    ctx.beginPath();
+    ctx.rect(-size * 0.12, -size * 0.35, size * 0.24, size * 0.05);
+    ctx.fill();
+
+    // Light housing (glass dome)
+    ctx.fillStyle = '#444444';
+    ctx.beginPath();
+    ctx.arc(0, -size * 0.4, size * 0.08, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Rotating beacon light
+    const beaconAngle = time * 2;
+    const beaconLength = size * 0.8;
+
+    ctx.save();
+    ctx.translate(0, -size * 0.4);
+    ctx.rotate(beaconAngle);
+
+    // Beacon beam
+    const beaconGradient = ctx.createLinearGradient(0, 0, beaconLength, 0);
+    beaconGradient.addColorStop(0, 'rgba(255, 200, 100, 0.8)');
+    beaconGradient.addColorStop(0.3, 'rgba(255, 150, 50, 0.4)');
+    beaconGradient.addColorStop(1, 'transparent');
+    ctx.fillStyle = beaconGradient;
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    ctx.lineTo(beaconLength, -size * 0.08);
+    ctx.lineTo(beaconLength, size * 0.08);
+    ctx.closePath();
+    ctx.fill();
+
+    // Second beam (opposite direction)
+    ctx.rotate(Math.PI);
+    ctx.fillStyle = beaconGradient;
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    ctx.lineTo(beaconLength, -size * 0.08);
+    ctx.lineTo(beaconLength, size * 0.08);
+    ctx.closePath();
+    ctx.fill();
+
     ctx.restore();
 
-    // Blinking red lights
-    const blinkPhase = Math.floor(time * 2) % 4;
-    for (let i = 0; i < 4; i++) {
-      const angle = (Math.PI * 2 * i) / 4 + Math.PI / 4;
-      const x = Math.cos(angle) * size;
-      const y = Math.sin(angle) * size;
+    // Beacon center glow
+    const beaconGlow = ctx.createRadialGradient(0, -size * 0.4, 0, 0, -size * 0.4, size * 0.15);
+    beaconGlow.addColorStop(0, 'rgba(255, 220, 150, 0.9)');
+    beaconGlow.addColorStop(0.5, 'rgba(255, 180, 100, 0.5)');
+    beaconGlow.addColorStop(1, 'transparent');
+    ctx.fillStyle = beaconGlow;
+    ctx.beginPath();
+    ctx.arc(0, -size * 0.4, size * 0.15, 0, Math.PI * 2);
+    ctx.fill();
 
-      ctx.fillStyle = (i === blinkPhase) ? '#ff0000' : '#660000';
-      ctx.beginPath();
-      ctx.arc(x, y, 5, 0, Math.PI * 2);
-      ctx.fill();
+    // Bright beacon center
+    ctx.fillStyle = '#ffeecc';
+    ctx.beginPath();
+    ctx.arc(0, -size * 0.4, size * 0.04, 0, Math.PI * 2);
+    ctx.fill();
+  },
 
-      // Light glow when active
-      if (i === blinkPhase) {
-        ctx.fillStyle = '#ff000040';
-        ctx.beginPath();
-        ctx.arc(x, y, 12, 0, Math.PI * 2);
-        ctx.fill();
+  /**
+   * Draw pirate flag with skull and crossbones
+   */
+  drawPirateFlag(ctx, x, y, flagSize, config, time) {
+    // Flag pole
+    ctx.strokeStyle = config.color;
+    ctx.lineWidth = 4;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(x, y + flagSize * 0.8);
+    ctx.lineTo(x, y - flagSize * 0.5);
+    ctx.stroke();
+
+    // Flag waving animation
+    const wavePhase = time * 2;
+    const waveAmount = flagSize * 0.08;
+
+    // Flag shape (waving)
+    ctx.fillStyle = config.flagColor || '#1a1a1a';
+    ctx.beginPath();
+    ctx.moveTo(x, y - flagSize * 0.4);
+
+    // Top edge with wave
+    for (let i = 0; i <= 10; i++) {
+      const t = i / 10;
+      const fx = x + t * flagSize;
+      const fy = y - flagSize * 0.4 + Math.sin(wavePhase + t * 3) * waveAmount * t;
+      if (i === 0) {
+        ctx.moveTo(fx, fy);
+      } else {
+        ctx.lineTo(fx, fy);
       }
     }
+
+    // Right edge
+    ctx.lineTo(x + flagSize + Math.sin(wavePhase + 3) * waveAmount, y + flagSize * 0.2);
+
+    // Bottom edge with wave
+    for (let i = 10; i >= 0; i--) {
+      const t = i / 10;
+      const fx = x + t * flagSize;
+      const fy = y + flagSize * 0.2 + Math.sin(wavePhase + 1 + t * 3) * waveAmount * t;
+      ctx.lineTo(fx, fy);
+    }
+
+    ctx.closePath();
+    ctx.fill();
+
+    // Flag border
+    ctx.strokeStyle = '#333333';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    // Skull and crossbones on flag
+    const skullX = x + flagSize * 0.45;
+    const skullY = y - flagSize * 0.1 + Math.sin(wavePhase + 1.5) * waveAmount * 0.5;
+    const skullSize = flagSize * 0.25;
+
+    // Crossbones behind skull
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = flagSize * 0.06;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(skullX - skullSize * 0.9, skullY - skullSize * 0.6);
+    ctx.lineTo(skullX + skullSize * 0.9, skullY + skullSize * 0.6);
+    ctx.moveTo(skullX + skullSize * 0.9, skullY - skullSize * 0.6);
+    ctx.lineTo(skullX - skullSize * 0.9, skullY + skullSize * 0.6);
+    ctx.stroke();
+
+    // Bone ends
+    ctx.fillStyle = '#ffffff';
+    const boneEndSize = flagSize * 0.04;
+    const bonePositions = [
+      { x: skullX - skullSize * 0.9, y: skullY - skullSize * 0.6 },
+      { x: skullX + skullSize * 0.9, y: skullY + skullSize * 0.6 },
+      { x: skullX + skullSize * 0.9, y: skullY - skullSize * 0.6 },
+      { x: skullX - skullSize * 0.9, y: skullY + skullSize * 0.6 }
+    ];
+    for (const pos of bonePositions) {
+      ctx.beginPath();
+      ctx.arc(pos.x, pos.y, boneEndSize, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // Skull circle
+    ctx.fillStyle = '#ffffff';
+    ctx.beginPath();
+    ctx.arc(skullX, skullY, skullSize * 0.5, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Eye sockets
+    ctx.fillStyle = config.flagColor || '#1a1a1a';
+    ctx.beginPath();
+    ctx.arc(skullX - skullSize * 0.15, skullY - skullSize * 0.05, skullSize * 0.12, 0, Math.PI * 2);
+    ctx.arc(skullX + skullSize * 0.15, skullY - skullSize * 0.05, skullSize * 0.12, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Nose hole
+    ctx.beginPath();
+    ctx.moveTo(skullX, skullY + skullSize * 0.1);
+    ctx.lineTo(skullX - skullSize * 0.06, skullY + skullSize * 0.2);
+    ctx.lineTo(skullX + skullSize * 0.06, skullY + skullSize * 0.2);
+    ctx.closePath();
+    ctx.fill();
   },
 
   /**

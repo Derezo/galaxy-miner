@@ -8,10 +8,11 @@ const TerritorialStrategy = require('./territorial');
 const RetreatStrategy = require('./retreat');
 const ScavengerStrategy = require('./scavenger');
 const MiningStrategy = require('./mining');
+const PirateStrategy = require('./pirate');
 
 // Map faction to AI strategy
 const FACTION_STRATEGIES = {
-  pirate: 'flanking',
+  pirate: 'pirate',       // Changed from 'flanking' to new pirate strategy
   scavenger: 'scavenger', // Changed from 'retreat' to new scavenger strategy
   swarm: 'swarm',
   void: 'formation',
@@ -26,7 +27,8 @@ const strategies = {
   territorial: new TerritorialStrategy(),
   retreat: new RetreatStrategy(),
   scavenger: new ScavengerStrategy(),
-  mining: new MiningStrategy()
+  mining: new MiningStrategy(),
+  pirate: new PirateStrategy()
 };
 
 // Retreat thresholds by faction
@@ -300,9 +302,10 @@ function handleRageMode(npc, allPlayers, deltaTime) {
  * @param {Map} allNPCs - All active NPCs (for ally detection)
  * @param {number} deltaTime - Time since last update
  * @param {Function} getActiveBase - Function to look up base by ID (optional, for scavengers)
+ * @param {Function} getBasesInRange - Function to get bases within range (optional, for pirates)
  * @returns {Object|null} Action result (fire, etc.)
  */
-function updateNPCAI(npc, allPlayers, allNPCs, deltaTime, getActiveBase = null) {
+function updateNPCAI(npc, allPlayers, allNPCs, deltaTime, getActiveBase = null, getBasesInRange = null) {
   // Special handling for orphaned NPCs in rage mode
   if (npc.orphaned && npc.state === 'rage') {
     return handleRageMode(npc, allPlayers, deltaTime);
@@ -324,19 +327,39 @@ function updateNPCAI(npc, allPlayers, allNPCs, deltaTime, getActiveBase = null) 
 
   // Find ally NPCs (same faction, for formation/swarm behaviors)
   const nearbyAllies = [];
-  for (const [id, ally] of allNPCs) {
-    if (id === npc.id) continue;
-    if (ally.faction !== npc.faction) continue;
+  // Find hostile NPCs (enemy faction, for defensive behaviors)
+  const nearbyHostiles = [];
 
-    const dx = ally.position.x - npc.position.x;
-    const dy = ally.position.y - npc.position.y;
+  // Define faction hostility
+  const FACTION_ENEMIES = {
+    pirate: ['scavenger', 'rogue_miner'],
+    scavenger: ['pirate'],
+    rogue_miner: ['pirate']
+  };
+  const hostileFactions = FACTION_ENEMIES[npc.faction] || [];
+
+  for (const [id, otherNpc] of allNPCs) {
+    if (id === npc.id) continue;
+
+    const dx = otherNpc.position.x - npc.position.x;
+    const dy = otherNpc.position.y - npc.position.y;
     const dist = Math.sqrt(dx * dx + dy * dy);
 
-    // Allies within 500 units
-    if (dist <= 500) {
-      nearbyAllies.push({ ...ally, distance: dist });
+    if (otherNpc.faction === npc.faction) {
+      // Allies within 500 units
+      if (dist <= 500) {
+        nearbyAllies.push({ ...otherNpc, distance: dist });
+      }
+    } else if (hostileFactions.includes(otherNpc.faction)) {
+      // Hostile NPCs within aggro range
+      if (dist <= npc.aggroRange) {
+        nearbyHostiles.push({ ...otherNpc, distance: dist });
+      }
     }
   }
+
+  // Sort hostiles by distance
+  nearbyHostiles.sort((a, b) => a.distance - b.distance);
 
   // Build context for strategy
   // For scavengers and rogue miners, get the full base object
@@ -363,11 +386,26 @@ function updateNPCAI(npc, allPlayers, allNPCs, deltaTime, getActiveBase = null) 
     homeBase = npc.homeBasePosition;
   }
 
+  // For pirates, get nearby enemy faction bases (scavenger yards, mining claims)
+  let nearbyBases = [];
+  if (npc.faction === 'pirate' && getBasesInRange) {
+    // Get bases within extended range for raiding
+    const raidRange = 1500; // Pirates search for bases within 1500 units
+    const allBasesInRange = getBasesInRange(npc.position, raidRange);
+    // Filter to enemy faction bases only
+    nearbyBases = allBasesInRange.filter(base =>
+      base.type === 'scavenger_yard' || base.type === 'mining_claim'
+    );
+  }
+
   const context = {
     homeBase,
     patrolRadius: npc.patrolRadius || 600,
     territoryRadius: npc.territoryRadius || 500,
-    hasForeman  // For rogue miner Foreman buff
+    hasForeman,  // For rogue miner Foreman buff
+    allNPCs,     // Full NPC map for cross-faction targeting
+    nearbyBases, // Enemy bases for pirate raiding
+    nearbyHostiles // Enemy NPCs for defensive behaviors
   };
 
   // Execute faction-specific AI
@@ -424,11 +462,20 @@ function getMiningStrategy() {
   return strategies.mining;
 }
 
+/**
+ * Get the pirate strategy instance for external calls (intel, dreadnought spawn, etc.)
+ * @returns {PirateStrategy} The pirate strategy instance
+ */
+function getPirateStrategy() {
+  return strategies.pirate;
+}
+
 module.exports = {
   AIStrategy,
   getStrategy,
   getScavengerStrategy,
   getMiningStrategy,
+  getPirateStrategy,
   updateNPCAI,
   getNPCsByFaction,
   findFormationLeader,

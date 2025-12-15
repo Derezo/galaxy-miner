@@ -10,63 +10,69 @@ const CONSTANTS = require('../../shared/constants');
 
 // NPC types with faction, weapon, and tier info
 const NPC_TYPES = {
-  // === PIRATES (Flanking AI, Retreat at 40%) ===
+  // === PIRATES (Pirate AI with role-specific behaviors) ===
+  // All pirates have shield-piercing weapons (10% damage bypasses shields)
   pirate_scout: {
     name: 'Pirate Scout',
     faction: 'pirate',
     hull: 50,
     shield: 25,
-    speed: 120,
-    weaponType: 'kinetic',
+    speed: 130,          // Fast for espionage/fleeing
+    weaponType: 'pirate_light_blaster',
     weaponTier: 1,
     weaponDamage: 5,
     weaponRange: 200,
-    aggroRange: 400,
-    creditReward: 30,  // Tier: low (was 25) - loot via loot-pools.js
-    deathEffect: 'explosion'
+    aggroRange: 500,     // Extended for spotting targets
+    creditReward: 30,
+    deathEffect: 'explosion',
+    shieldPiercing: 0.1  // 10% damage bypasses shields
   },
   pirate_fighter: {
     name: 'Pirate Fighter',
     faction: 'pirate',
     hull: 100,
     shield: 50,
-    speed: 100,
-    weaponType: 'kinetic',
+    speed: 110,          // Fast for boost dive attacks
+    weaponType: 'pirate_heavy_blaster',
     weaponTier: 2,
-    weaponDamage: 10,
-    weaponRange: 250,
+    weaponDamage: 12,    // Increased for burst damage
+    weaponRange: 280,
     aggroRange: 500,
-    creditReward: 80,  // Tier: mid (was 75)
-    deathEffect: 'explosion'
+    creditReward: 80,
+    deathEffect: 'explosion',
+    shieldPiercing: 0.1  // 10% damage bypasses shields
   },
   pirate_captain: {
     name: 'Pirate Captain',
     faction: 'pirate',
     hull: 200,
     shield: 100,
-    speed: 80,
-    weaponType: 'kinetic',
+    speed: 90,           // Moderate speed
+    weaponType: 'pirate_heavy_blaster',
     weaponTier: 3,
-    weaponDamage: 20,
+    weaponDamage: 22,    // Higher damage for close-range engagement
     weaponRange: 300,
     aggroRange: 600,
-    creditReward: 220,  // Tier: high (was 200)
-    deathEffect: 'explosion'
+    creditReward: 220,
+    deathEffect: 'explosion',
+    shieldPiercing: 0.1  // 10% damage bypasses shields
   },
   pirate_dreadnought: {
     name: 'Pirate Dreadnought',
     faction: 'pirate',
-    hull: 400,
-    shield: 200,
-    speed: 60,
-    weaponType: 'kinetic',
+    hull: 600,           // Increased - no shields, special hull
+    shield: 0,           // No shields - relies on invulnerability proc
+    speed: 180,          // Extremely fast
+    weaponType: 'pirate_cannon',
     weaponTier: 4,
-    weaponDamage: 52,  // Buffed +50% (was 35)
-    weaponRange: 350,
-    aggroRange: 700,
-    creditReward: 550,  // Tier: boss (was 500)
+    weaponDamage: 65,    // Increased damage
+    weaponRange: 1400,   // 300% increase (was 350) - massive cannon range
+    aggroRange: 1500,    // Extended aggro range to match weapon range
+    creditReward: 800,   // Tier: boss
     deathEffect: 'explosion',
-    isBoss: true
+    isBoss: true,
+    invulnerableChance: 0.35,  // 35% chance to negate all damage
+    shieldPiercing: 0.1        // 10% damage bypasses shields
   },
 
   // === SCAVENGERS (Retreat AI, Retreat at 20%) ===
@@ -1172,12 +1178,29 @@ function cleanupFormations() {
 // Base type to NPC type mapping (spawn pool per base)
 const BASE_NPC_SPAWNS = {
   pirate_outpost: {
-    npcs: ['pirate_scout', 'pirate_fighter', 'pirate_captain'],
-    weights: [0.5, 0.35, 0.15],  // Probability weights
-    maxNPCs: 5,                  // Max NPCs spawned from this base
-    spawnCooldown: 30000,        // 30 seconds between spawns (for initial/continuous)
+    npcs: ['pirate_fighter'],    // Only fighters spawn regularly - captains spawn on intel
+    weights: [1.0],              // 100% fighters in regular spawn
+    maxNPCs: 4,                  // Max regular NPCs (fighters) from base
+    spawnCooldown: 30000,        // 30 seconds between spawns
     respawnDelay: 300000,        // 5 minutes before respawning after death
-    initialSpawn: 3              // Initial NPCs when base activates
+    initialSpawn: 2,             // Fighters spawn on base creation
+    // Scout spawning configuration (scouts spawn away from base)
+    scoutConfig: {
+      maxScouts: 2,              // Max scouts per base
+      spawnCooldown: 45000,      // 45 seconds between scout spawns
+      spawnRadius: 600,          // Scouts spawn 600 units from base
+      npcType: 'pirate_scout'
+    },
+    // Captain spawning configuration (captains spawn when scout returns with intel)
+    captainConfig: {
+      maxCaptains: 2,            // Max captains per base
+      npcType: 'pirate_captain'
+    },
+    // Dreadnought spawn trigger (spawns once per base lifetime at 25% health)
+    dreadnoughtConfig: {
+      healthTrigger: 0.25,       // Spawn when base reaches 25% health
+      npcType: 'pirate_dreadnought'
+    }
   },
   scavenger_yard: {
     npcs: ['scavenger_scrapper', 'scavenger_salvager', 'scavenger_collector'],
@@ -1386,6 +1409,226 @@ function spawnNPCFromBase(baseId) {
   return npc;
 }
 
+/**
+ * Spawn a pirate scout away from the base (for espionage patrol)
+ * @param {string} baseId - The pirate outpost base ID
+ * @returns {Object|null} The spawned scout NPC or null
+ */
+function spawnScoutFromBase(baseId) {
+  const base = activeBases.get(baseId);
+  if (!base || base.type !== 'pirate_outpost' || base.destroyed) return null;
+
+  const spawnConfig = BASE_NPC_SPAWNS.pirate_outpost;
+  const scoutConfig = spawnConfig?.scoutConfig;
+  if (!scoutConfig) return null;
+
+  // Count current scouts
+  const currentScouts = base.spawnedNPCs.filter(npcId => {
+    const npc = activeNPCs.get(npcId);
+    return npc && npc.type === 'pirate_scout';
+  }).length;
+
+  if (currentScouts >= scoutConfig.maxScouts) return null;
+
+  const npcTypeData = NPC_TYPES[scoutConfig.npcType];
+  if (!npcTypeData) return null;
+
+  const npcId = `npc_scout_${++npcIdCounter}`;
+
+  // Get base position
+  const currentPos = world.getObjectPosition(baseId);
+  const baseX = currentPos ? currentPos.x : base.x;
+  const baseY = currentPos ? currentPos.y : base.y;
+
+  // Spawn AWAY from base (at scoutConfig.spawnRadius distance)
+  const angle = Math.random() * Math.PI * 2;
+  const spawnX = baseX + Math.cos(angle) * scoutConfig.spawnRadius;
+  const spawnY = baseY + Math.sin(angle) * scoutConfig.spawnRadius;
+
+  const npc = {
+    id: npcId,
+    type: 'pirate_scout',
+    name: npcTypeData.name,
+    faction: 'pirate',
+    position: { x: spawnX, y: spawnY },
+    velocity: { x: 0, y: 0 },
+    rotation: Math.random() * Math.PI * 2,
+    hull: npcTypeData.hull,
+    hullMax: npcTypeData.hull,
+    shield: npcTypeData.shield,
+    shieldMax: npcTypeData.shield,
+    speed: npcTypeData.speed,
+    weaponType: npcTypeData.weaponType,
+    weaponTier: npcTypeData.weaponTier,
+    weaponDamage: npcTypeData.weaponDamage,
+    weaponRange: npcTypeData.weaponRange,
+    aggroRange: npcTypeData.aggroRange,
+    creditReward: npcTypeData.creditReward,
+    homeBaseId: baseId,
+    homeBasePosition: { x: baseX, y: baseY },
+    spawnPoint: { x: spawnX, y: spawnY },
+    targetPlayer: null,
+    lastFireTime: 0,
+    lastDamageTime: 0,
+    patrolAngle: Math.random() * Math.PI * 2,
+    damageContributors: new Map(),
+    state: 'patrol',
+    shieldPiercing: npcTypeData.shieldPiercing || 0.1
+  };
+
+  activeNPCs.set(npcId, npc);
+  base.spawnedNPCs.push(npcId);
+
+  logger.log(`[PIRATE] Scout ${npcId} spawned at distance ${scoutConfig.spawnRadius} from base ${base.name}`);
+
+  return npc;
+}
+
+/**
+ * Spawn a pirate captain when a scout returns with intel
+ * Captains only spawn in response to scout intel, not regularly
+ * @param {string} baseId - The pirate outpost base ID
+ * @param {Object} intel - The intel report from the scout
+ * @returns {Object|null} The spawned captain NPC or null
+ */
+function spawnCaptainFromIntel(baseId, intel) {
+  const base = activeBases.get(baseId);
+  if (!base || base.type !== 'pirate_outpost' || base.destroyed) return null;
+
+  const spawnConfig = BASE_NPC_SPAWNS.pirate_outpost;
+  const captainConfig = spawnConfig?.captainConfig;
+  if (!captainConfig) return null;
+
+  // Count current captains
+  const currentCaptains = base.spawnedNPCs.filter(npcId => {
+    const npc = activeNPCs.get(npcId);
+    return npc && npc.type === 'pirate_captain';
+  }).length;
+
+  if (currentCaptains >= captainConfig.maxCaptains) {
+    logger.log(`[PIRATE] Max captains (${captainConfig.maxCaptains}) already at base ${base.name}`);
+    return null;
+  }
+
+  const npcTypeData = NPC_TYPES[captainConfig.npcType];
+  if (!npcTypeData) return null;
+
+  const npcId = `npc_captain_${++npcIdCounter}`;
+
+  // Get base position - captains spawn AT the base
+  const currentPos = world.getObjectPosition(baseId);
+  const baseX = currentPos ? currentPos.x : base.x;
+  const baseY = currentPos ? currentPos.y : base.y;
+
+  // Small random offset so they don't stack
+  const offsetAngle = Math.random() * Math.PI * 2;
+  const offsetDist = 30 + Math.random() * 50;
+  const spawnX = baseX + Math.cos(offsetAngle) * offsetDist;
+  const spawnY = baseY + Math.sin(offsetAngle) * offsetDist;
+
+  const npc = {
+    id: npcId,
+    type: 'pirate_captain',
+    name: npcTypeData.name,
+    faction: 'pirate',
+    position: { x: spawnX, y: spawnY },
+    velocity: { x: 0, y: 0 },
+    rotation: Math.random() * Math.PI * 2,
+    hull: npcTypeData.hull,
+    hullMax: npcTypeData.hull,
+    shield: npcTypeData.shield,
+    shieldMax: npcTypeData.shield,
+    speed: npcTypeData.speed,
+    weaponType: npcTypeData.weaponType,
+    weaponTier: npcTypeData.weaponTier,
+    weaponDamage: npcTypeData.weaponDamage,
+    weaponRange: npcTypeData.weaponRange,
+    aggroRange: npcTypeData.aggroRange,
+    creditReward: npcTypeData.creditReward,
+    homeBaseId: baseId,
+    homeBasePosition: { x: baseX, y: baseY },
+    spawnPoint: { x: spawnX, y: spawnY },
+    targetPlayer: intel.targetId,
+    raidTargetPos: intel.targetPos,
+    lastFireTime: 0,
+    lastDamageTime: 0,
+    patrolAngle: Math.random() * Math.PI * 2,
+    damageContributors: new Map(),
+    state: 'raid',  // Captains spawned from intel go directly to raid
+    spawnedFromIntel: true,
+    shieldPiercing: npcTypeData.shieldPiercing || 0.1,
+    // Base raid info - captains prioritize stealing from bases
+    isRaidingBase: intel.isBaseTarget || false,
+    raidBaseType: intel.baseType || null,
+    raidBaseId: intel.isBaseTarget ? intel.targetId : null
+  };
+
+  activeNPCs.set(npcId, npc);
+  base.spawnedNPCs.push(npcId);
+
+  const targetDesc = intel.isBaseTarget ? `${intel.baseType} base` : intel.targetType;
+  logger.log(`[PIRATE] Captain ${npcId} spawned from intel at base ${base.name}, targeting ${targetDesc}`);
+
+  return npc;
+}
+
+/**
+ * Spawn a pirate dreadnought when base reaches critical health (25%)
+ * @param {string} baseId - The pirate outpost base ID
+ * @returns {Object|null} The spawned dreadnought NPC or null
+ */
+function spawnDreadnoughtAtBase(baseId) {
+  const base = activeBases.get(baseId);
+  if (!base || base.type !== 'pirate_outpost') return null;
+
+  const npcTypeData = NPC_TYPES.pirate_dreadnought;
+  if (!npcTypeData) return null;
+
+  const npcId = `npc_dreadnought_${Date.now()}`;
+
+  // Get base position
+  const currentPos = world.getObjectPosition(baseId);
+  const baseX = currentPos ? currentPos.x : base.x;
+  const baseY = currentPos ? currentPos.y : base.y;
+
+  const npc = {
+    id: npcId,
+    type: 'pirate_dreadnought',
+    name: npcTypeData.name,
+    faction: 'pirate',
+    position: { x: baseX, y: baseY },
+    velocity: { x: 0, y: 0 },
+    rotation: 0,
+    hull: npcTypeData.hull,
+    hullMax: npcTypeData.hull,
+    shield: 0,
+    shieldMax: 0,
+    speed: npcTypeData.speed,
+    weaponType: npcTypeData.weaponType,
+    weaponTier: npcTypeData.weaponTier,
+    weaponDamage: npcTypeData.weaponDamage,
+    weaponRange: npcTypeData.weaponRange,
+    aggroRange: npcTypeData.aggroRange,
+    creditReward: npcTypeData.creditReward,
+    homeBaseId: baseId,
+    homeBasePosition: { x: baseX, y: baseY },
+    spawnPoint: { x: baseX, y: baseY },
+    targetPlayer: null,
+    lastFireTime: 0,
+    lastDamageTime: 0,
+    damageContributors: new Map(),
+    state: 'spawning',
+    isBoss: true,
+    invulnerableChance: npcTypeData.invulnerableChance,
+    shieldPiercing: npcTypeData.shieldPiercing || 0.1
+  };
+
+  activeNPCs.set(npcId, npc);
+  base.spawnedNPCs.push(npcId);
+
+  return npc;
+}
+
 // Update base spawning (called from game loop)
 function updateBaseSpawning(nearbyPlayers) {
   const now = Date.now();
@@ -1459,6 +1702,68 @@ function updateBaseSpawning(nearbyPlayers) {
         }
       }
     }
+
+    // Pirate outpost scout spawning (separate from normal spawns)
+    if (base.type === 'pirate_outpost' && spawnConfig.scoutConfig) {
+      const scoutConfig = spawnConfig.scoutConfig;
+
+      // Initialize scout spawn tracking
+      if (!base.lastScoutSpawnTime) {
+        base.lastScoutSpawnTime = 0;
+      }
+      if (!base.pendingScoutRespawns) {
+        base.pendingScoutRespawns = [];
+      }
+
+      // Track dead scouts and add to pending respawns (5 min delay like other pirates)
+      const previousScoutCount = base.spawnedNPCs.filter(npcId => {
+        const npc = activeNPCs.get(npcId);
+        return npc && npc.type === 'pirate_scout';
+      }).length;
+
+      // Count current scouts
+      const currentScouts = base.spawnedNPCs.filter(npcId => {
+        const npc = activeNPCs.get(npcId);
+        return npc && npc.type === 'pirate_scout';
+      }).length;
+
+      // If scout count dropped, add pending respawns
+      if (!base._lastScoutCount) base._lastScoutCount = currentScouts;
+      const deadScouts = base._lastScoutCount - currentScouts;
+      if (deadScouts > 0) {
+        const scoutRespawnDelay = spawnConfig.respawnDelay || 300000; // 5 minutes like fighters
+        for (let i = 0; i < deadScouts; i++) {
+          base.pendingScoutRespawns.push({
+            respawnAt: now + scoutRespawnDelay
+          });
+        }
+        logger.log(`[PIRATE] ${base.name}: ${deadScouts} scout(s) killed, respawn in ${scoutRespawnDelay / 1000}s`);
+      }
+      base._lastScoutCount = currentScouts;
+
+      // Check if any pending scout respawns are ready
+      const readyScoutRespawns = base.pendingScoutRespawns.filter(r => now >= r.respawnAt);
+      base.pendingScoutRespawns = base.pendingScoutRespawns.filter(r => now < r.respawnAt);
+
+      // Spawn scouts from pending respawns first
+      for (const respawn of readyScoutRespawns) {
+        if (currentScouts >= scoutConfig.maxScouts) break;
+        const scout = spawnScoutFromBase(baseId);
+        if (scout) {
+          base.lastScoutSpawnTime = now;
+        }
+      }
+
+      // Also check regular spawn cooldown for initial spawns (when below max and no pending)
+      if (currentScouts < scoutConfig.maxScouts && base.pendingScoutRespawns.length === 0) {
+        if (now - base.lastScoutSpawnTime >= scoutConfig.spawnCooldown) {
+          const scout = spawnScoutFromBase(baseId);
+          if (scout) {
+            base.lastScoutSpawnTime = now;
+          }
+        }
+      }
+    }
   }
 }
 
@@ -1497,6 +1802,25 @@ function damageBase(baseId, damage, attackerId = null) {
 
   // Apply damage to base health
   base.health -= damage;
+
+  // Check for pirate dreadnought spawn (pirate_outpost only, at 25% health)
+  if (base.type === 'pirate_outpost' && !base.dreadnoughtSpawned) {
+    const healthPercent = base.health / base.maxHealth;
+    const spawnConfig = BASE_NPC_SPAWNS.pirate_outpost;
+    const dreadnoughtConfig = spawnConfig?.dreadnoughtConfig;
+
+    if (dreadnoughtConfig && healthPercent <= dreadnoughtConfig.healthTrigger) {
+      const pirateStrategy = ai.getPirateStrategy();
+      if (pirateStrategy.shouldSpawnDreadnought(baseId, healthPercent)) {
+        const dreadnought = spawnDreadnoughtAtBase(baseId);
+        if (dreadnought) {
+          base.dreadnoughtSpawned = true;
+          pirateStrategy.markDreadnoughtSpawned(baseId, dreadnought.id);
+          logger.warn(`[PIRATE] DREADNOUGHT SPAWNED at ${base.name}! Base at ${Math.round(healthPercent * 100)}% health`);
+        }
+      }
+    }
+  }
 
   if (base.health <= 0) {
     // Base destroyed
@@ -1882,6 +2206,33 @@ function getBasesInRange(position, range) {
   return basesInRange;
 }
 
+/**
+ * Get all active (non-destroyed) bases for a specific faction
+ * @param {string} faction - Faction name (e.g., 'pirate', 'scavenger')
+ * @returns {Array} Array of bases for that faction
+ */
+function getActiveBasesByFaction(faction) {
+  const factionBases = [];
+  for (const [baseId, base] of activeBases) {
+    if (base.destroyed) continue;
+    if (base.faction === faction) {
+      // Compute current position for orbital bases
+      const currentPos = world.getObjectPosition(baseId);
+      factionBases.push({
+        id: baseId,
+        x: currentPos ? currentPos.x : base.x,
+        y: currentPos ? currentPos.y : base.y,
+        size: base.size || 100,
+        faction: base.faction,
+        type: base.type,
+        name: base.name,
+        destroyed: base.destroyed
+      });
+    }
+  }
+  return factionBases;
+}
+
 function generateSpawnPoints(sectorX, sectorY) {
   const key = `${sectorX}_${sectorY}`;
   if (sectorSpawnPoints.has(key)) {
@@ -1900,25 +2251,18 @@ function generateSpawnPoints(sectorX, sectorY) {
 
   const spawnPoints = [];
 
-  // 20% chance of spawns in each sector
-  if (rng() < 0.2) {
-    const count = Math.floor(rng() * 3) + 1; // 1-3 spawn points
+  // 10% chance of spawns in each sector (reduced from 20%)
+  // Only pirate scouts spawn in sectors - they patrol looking for targets
+  // Fighters/captains only spawn from pirate outpost bases
+  if (rng() < 0.1) {
+    const count = Math.floor(rng() * 2) + 1; // 1-2 spawn points (reduced from 1-3)
     for (let i = 0; i < count; i++) {
       const x = sectorX * config.SECTOR_SIZE + rng() * config.SECTOR_SIZE;
       const y = sectorY * config.SECTOR_SIZE + rng() * config.SECTOR_SIZE;
 
-      // Determine NPC type based on distance from origin (harder enemies further out)
-      const distFromOrigin = Math.sqrt(sectorX * sectorX + sectorY * sectorY);
-      let npcType;
-      if (distFromOrigin > 10) {
-        npcType = 'pirate_captain';
-      } else if (distFromOrigin > 5) {
-        npcType = 'pirate_fighter';
-      } else {
-        npcType = 'pirate_scout';
-      }
-
-      spawnPoints.push({ x, y, type: npcType });
+      // Only scouts patrol sectors - they report intel back to bases
+      // Fighters stay near bases, captains only spawn from intel
+      spawnPoints.push({ x, y, type: 'pirate_scout' });
     }
   }
 
@@ -2013,8 +2357,8 @@ function updateNPC(npc, players, deltaTime) {
   }
 
   // Use the new AI system for faction-specific behavior
-  // Pass getActiveBase function for scavenger AI to look up base data
-  return ai.updateNPCAI(npc, players, activeNPCs, deltaTime, getActiveBase);
+  // Pass getActiveBase for scavengers, getBasesInRange for pirates
+  return ai.updateNPCAI(npc, players, activeNPCs, deltaTime, getActiveBase, getBasesInRange);
 }
 
 /**
@@ -2753,6 +3097,7 @@ module.exports = {
   checkBaseRespawn,
   getDestroyedBases,
   getBasesInRange,
+  getActiveBasesByFaction,
   // Swarm linked health
   applySwarmLinkedDamage,
   // Swarm Queen spawning
@@ -2798,5 +3143,9 @@ module.exports = {
   spawnHauler,
   // Rogue Miner deposit and dynamic spawning
   handleRogueMinerDeposit,
-  spawnRogueMinerNPC
+  spawnRogueMinerNPC,
+  // Pirate faction spawning
+  spawnScoutFromBase,
+  spawnCaptainFromIntel,
+  spawnDreadnoughtAtBase
 };

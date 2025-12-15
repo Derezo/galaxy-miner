@@ -167,6 +167,58 @@ const ParticleSystem = {
     }
   },
 
+  /**
+   * Spawn plunder effect - gold coin burst for Skull and Bones relic
+   * @param {number} x - World X position
+   * @param {number} y - World Y position
+   */
+  spawnPlunderEffect(x, y) {
+    // Gold coin burst - 20 particles radiating outward
+    for (let i = 0; i < 20; i++) {
+      const angle = Math.random() * Math.PI * 2;
+      const speed = 50 + Math.random() * 100;
+      this.spawn({
+        x,
+        y,
+        vx: Math.cos(angle) * speed,
+        vy: Math.sin(angle) * speed,
+        life: 600 + Math.random() * 400,
+        color: '#ffd700',
+        secondaryColor: '#ff9900',
+        size: 4 + Math.random() * 4,
+        type: 'glow',
+        drag: 0.96,
+        gravity: 20
+      });
+    }
+
+    // Central flash - large white glow
+    this.spawn({
+      x,
+      y,
+      vx: 0,
+      vy: 0,
+      life: 400,
+      color: '#ffffff',
+      size: 25,
+      type: 'glow',
+      decay: 0.7
+    });
+
+    // Expanding ring shockwave
+    this.spawn({
+      x,
+      y,
+      vx: 0,
+      vy: 0,
+      life: 500,
+      color: '#ffd700',
+      secondaryColor: '#ff9900',
+      size: 15,
+      type: 'ring'
+    });
+  },
+
   update(dt) {
     for (let i = this.active.length - 1; i >= 0; i--) {
       const particle = this.active[i];

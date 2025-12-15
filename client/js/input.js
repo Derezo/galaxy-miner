@@ -46,11 +46,14 @@ const Input = {
         }
         break;
       case 'KeyM':
-        // Priority: Wormhole > Mining > Loot collection
+        // Priority: Wormhole > Plunder > Mining > Loot collection
         Logger.log('[Input] M pressed - wormhole:', Player._nearestWormhole, 'hasGem:', Player.hasRelic('WORMHOLE_GEM'),
+          'nearestBase:', Player._nearestBase, 'hasSkullAndBones:', Player.hasRelic('SKULL_AND_BONES'),
           'mineable:', Player._nearestMineable, 'miningTarget:', Player.miningTarget, 'hasScrapSiphon:', Player.hasRelic('SCRAP_SIPHON'));
         if (Player._nearestWormhole && Player.hasRelic('WORMHOLE_GEM') && !Player.inWormholeTransit) {
           Player.tryEnterWormhole();
+        } else if (Player._nearestBase && Player.hasRelic('SKULL_AND_BONES')) {
+          Player.tryPlunderBase();
         } else if (Player._nearestMineable && !Player.miningTarget) {
           Player.tryMine();
         } else if (Player.hasRelic('SCRAP_SIPHON')) {

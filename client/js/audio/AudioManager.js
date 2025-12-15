@@ -165,7 +165,6 @@ const AudioManager = (function () {
    * @returns {Promise<AudioBufferSourceNode|null>}
    */
   function playAt(soundId, x, y, options = {}) {
-    console.log("Playing sound " + soundId);
     return play(soundId, { ...options, x, y });
   }
 

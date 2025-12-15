@@ -106,13 +106,17 @@ function register(ctx) {
           clearInterval(checkCollection);
           untrackInterval(socket.id, checkCollection);
 
+          // Determine if this is NPC wreckage (has faction or npcName)
+          const isNpcWreckage = !!(wreckage.faction || wreckage.npcName);
+
           // Distribute credits to team members who contributed damage
           const teamCredits = distributeTeamCredits(
             progress.creditReward,
             progress.damageContributors,
             authenticatedUserId(),
             io,
-            userSockets
+            userSockets,
+            isNpcWreckage
           );
 
           // Filter out credits from contents - they're handled via team distribution
@@ -312,13 +316,14 @@ function register(ctx) {
         }
       }
 
-      // Distribute credits (merged)
+      // Distribute credits (merged) - multi-collect is always NPC wreckage
       const teamCredits = distributeTeamCredits(
         totalCredits,
         Object.keys(allDamageContributors).length > 0 ? allDamageContributors : null,
         authenticatedUserId(),
         io,
-        userSockets
+        userSockets,
+        true // isNpcWreckage - Scrap Siphon multi-collect is for NPC wreckage
       );
 
       // Filter out credits
@@ -380,23 +385,35 @@ function register(ctx) {
  * @param {number} collectorId - User ID of the collector
  * @param {Object} io - Socket.io instance
  * @param {Map} userSockets - Map of userId -> socketId
- * @returns {Object} - { total, collectorCredits, distributed }
+ * @param {boolean} isNpcWreckage - Whether wreckage is from NPC (for PIRATE_TREASURE bonus)
+ * @returns {Object} - { total, collectorCredits, distributed, bonusApplied }
  */
-function distributeTeamCredits(baseCredits, damageContributors, collectorId, io, userSockets) {
+function distributeTeamCredits(baseCredits, damageContributors, collectorId, io, userSockets, isNpcWreckage = false) {
   // If no base credits or invalid, return 0 for all
   if (!baseCredits || typeof baseCredits !== 'number' || baseCredits <= 0) {
-    return { total: 0, collectorCredits: 0, distributed: [] };
+    return { total: 0, collectorCredits: 0, distributed: [], bonusApplied: 0 };
+  }
+
+  // Check for PIRATE_TREASURE bonus (10% extra credits from NPC wreckage)
+  let pirateTreasureBonus = 0;
+  if (isNpcWreckage) {
+    const hasPirateTreasure = statements.hasRelic.get(collectorId, 'PIRATE_TREASURE');
+    if (hasPirateTreasure) {
+      const bonusRate = Constants.RELIC_TYPES?.PIRATE_TREASURE?.effects?.npcWreckageCreditBonus || 0.10;
+      pirateTreasureBonus = Math.floor(baseCredits * bonusRate);
+    }
   }
 
   // If no damage contributors, collector gets all credits
   if (!damageContributors || Object.keys(damageContributors).length === 0) {
-    // Solo kill - collector gets base credits
+    // Solo kill - collector gets base credits + PIRATE_TREASURE bonus
+    const totalCredits = baseCredits + pirateTreasureBonus;
     const ship = statements.getShipByUserId.get(collectorId);
     if (ship) {
       const currentCredits = getSafeCredits(ship);
-      safeUpdateCredits(currentCredits + baseCredits, collectorId);
+      safeUpdateCredits(currentCredits + totalCredits, collectorId);
     }
-    return { total: baseCredits, collectorCredits: baseCredits, distributed: [{ playerId: collectorId, credits: baseCredits }] };
+    return { total: totalCredits, collectorCredits: totalCredits, distributed: [{ playerId: collectorId, credits: totalCredits }], bonusApplied: pirateTreasureBonus };
   }
 
   const participants = Object.keys(damageContributors);
@@ -463,9 +480,20 @@ function distributeTeamCredits(baseCredits, damageContributors, collectorId, io,
     }
   }
 
+  // Apply PIRATE_TREASURE bonus to collector (only for NPC wreckage)
+  if (pirateTreasureBonus > 0) {
+    const ship = statements.getShipByUserId.get(collectorId);
+    if (ship) {
+      const currentCredits = getSafeCredits(ship);
+      safeUpdateCredits(currentCredits + pirateTreasureBonus, collectorId);
+      collectorCredits += pirateTreasureBonus;
+    }
+    logger.log(`[PIRATE_TREASURE] Collector ${collectorId} received +${pirateTreasureBonus} bonus credits`);
+  }
+
   logger.log(`[TEAM CREDITS] Distributed ${totalCredits} credits (${teamMultiplier}x bonus) to ${participantCount} players`);
 
-  return { total: totalCredits, collectorCredits, distributed };
+  return { total: totalCredits + pirateTreasureBonus, collectorCredits, distributed, bonusApplied: pirateTreasureBonus };
 }
 
 /**

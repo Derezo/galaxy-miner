@@ -185,6 +185,11 @@ const Renderer = {
       DeathEffects.update(dt);
     }
 
+    // Update floating text system (damage numbers, "Invulnerable" text, etc.)
+    if (typeof FloatingTextSystem !== "undefined") {
+      FloatingTextSystem.update(dt);
+    }
+
     // Update base destruction sequences
     if (typeof BaseDestructionSequence !== "undefined") {
       BaseDestructionSequence.update(dt);
@@ -465,9 +470,27 @@ const Renderer = {
     if (typeof DebugSettings !== 'undefined' && DebugSettings.get('rendering', 'collisionHitboxes')) {
       const npcsArray = typeof Entities !== 'undefined' ? Array.from(Entities.npcs.values()) : [];
       // Combine procedural bases with server-tracked bases for hitbox rendering
-      let allBases = [...(objects.bases || [])];
+      // Use server positions when available (authoritative) to match visual rendering
+      const proceduralIds = new Set((objects.bases || []).map(b => b.id));
+      let allBases = (objects.bases || []).map(base => {
+        // For procedural bases, use server position if available (matches visual rendering)
+        if (typeof Entities !== 'undefined') {
+          const serverBase = Entities.bases.get(base.id);
+          if (serverBase && serverBase.position) {
+            return {
+              ...base,
+              x: serverBase.position.x,
+              y: serverBase.position.y,
+              size: serverBase.size || base.size || 100
+            };
+          }
+        }
+        return base;
+      });
+      // Add server-tracked bases that aren't in procedural list
       if (typeof Entities !== 'undefined') {
         for (const [baseId, serverBase] of Entities.bases) {
+          if (proceduralIds.has(baseId)) continue; // Already in list with server position
           if (Entities.isBaseDestroyed(baseId)) continue;
           // Convert server base format to have flat x/y
           allBases.push({
@@ -1402,6 +1425,11 @@ const Renderer = {
       this.canvas.width,
       this.canvas.height
     );
+
+    // Draw floating text (damage numbers, "Invulnerable" text, etc.)
+    if (typeof FloatingTextSystem !== "undefined") {
+      FloatingTextSystem.draw(ctx, this.camera);
+    }
 
     // Draw legacy effects
     this.drawEffects();

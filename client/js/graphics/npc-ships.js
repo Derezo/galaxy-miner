@@ -14,10 +14,21 @@ const NPCShipGeometry = {
   // Faction color schemes
   FACTION_COLORS: {
     pirate: {
-      hull: '#ff3300',
-      accent: '#cc2200',
-      glow: '#ff330060',
-      outline: '#ff6600'
+      // Space galleon theme - dark wood hulls with red sails
+      hull: '#5c3a21',        // Dark wood brown
+      deck: '#8B5A2B',        // Lighter deck wood
+      accent: '#3d2415',      // Dark wood trim
+      sail: '#cc2200',        // Red sails
+      sailAccent: '#ff4400',  // Sail highlight
+      mast: '#3d1a1a',        // Dark mast wood
+      flag: '#1a1a1a',        // Black flag background
+      flagSkull: '#ffffff',   // White skull on flag
+      flame: '#ff6600',       // Thruster flame
+      flameCore: '#ffcc00',   // Thruster flame center
+      gold: '#ffd700',        // Gold trim
+      cannonport: '#2a1a10',  // Dark cannon port
+      glow: '#ff440040',      // Orange glow
+      outline: '#8B4513'      // Medium wood outline
     },
     scavenger: {
       // Grimy industrial junkyard aesthetic
@@ -119,43 +130,234 @@ const NPCShipGeometry = {
   },
 
   generatePiratePaths(SIZE) {
-    // Pirates: Angular, aggressive, sharp edges
-    // Variant 1: Scout - Small, fast, dart shape
+    // Pirates: Space galleon boats with sails, flags, and thrusters
+    // All ships face right (positive X direction)
+
+    // Variant 1: Scout - Small boat with single sail, tiny flag
+    // Fast reconnaissance vessel
     this.cachedPaths['pirate_1'] = new Path2D(
-      `M ${SIZE * 0.9} 0 L ${-SIZE * 0.5} ${-SIZE * 0.4} L ${-SIZE * 0.3} 0 L ${-SIZE * 0.5} ${SIZE * 0.4} Z`
+      // Sleek boat hull (pointed front, curved sides)
+      `M ${SIZE * 0.85} 0
+       L ${SIZE * 0.6} ${-SIZE * 0.15}
+       L ${SIZE * 0.1} ${-SIZE * 0.25}
+       L ${-SIZE * 0.4} ${-SIZE * 0.2}
+       L ${-SIZE * 0.55} ${-SIZE * 0.1}
+       L ${-SIZE * 0.5} 0
+       L ${-SIZE * 0.55} ${SIZE * 0.1}
+       L ${-SIZE * 0.4} ${SIZE * 0.2}
+       L ${SIZE * 0.1} ${SIZE * 0.25}
+       L ${SIZE * 0.6} ${SIZE * 0.15} Z`
+    );
+    // Scout sail (small triangular)
+    this.cachedPaths['pirate_1_sail'] = new Path2D(
+      `M ${SIZE * 0.0} ${-SIZE * 0.22}
+       L ${SIZE * 0.2} ${-SIZE * 0.55}
+       L ${SIZE * 0.3} ${-SIZE * 0.2}
+       Z`
+    );
+    // Scout mast
+    this.cachedAccents['pirate_1'] = new Path2D(
+      `M ${SIZE * 0.15} ${-SIZE * 0.55}
+       L ${SIZE * 0.18} ${-SIZE * 0.55}
+       L ${SIZE * 0.18} ${SIZE * 0.0}
+       L ${SIZE * 0.15} ${SIZE * 0.0} Z`
+    );
+    // Small flag
+    this.cachedPaths['pirate_1_flag'] = new Path2D(
+      `M ${SIZE * 0.17} ${-SIZE * 0.55}
+       L ${SIZE * 0.35} ${-SIZE * 0.50}
+       L ${SIZE * 0.35} ${-SIZE * 0.42}
+       L ${SIZE * 0.17} ${-SIZE * 0.45} Z`
     );
 
-    // Variant 2: Fighter - Wider, winged
+    // Variant 2: Fighter - Mid-size boat with larger sail, cannon ports
     this.cachedPaths['pirate_2'] = new Path2D(
-      `M ${SIZE} 0 L ${SIZE * 0.3} ${-SIZE * 0.2} L ${-SIZE * 0.2} ${-SIZE * 0.7}
-       L ${-SIZE * 0.5} ${-SIZE * 0.5} L ${-SIZE * 0.4} 0
-       L ${-SIZE * 0.5} ${SIZE * 0.5} L ${-SIZE * 0.2} ${SIZE * 0.7}
-       L ${SIZE * 0.3} ${SIZE * 0.2} Z`
+      // Sturdier boat hull
+      `M ${SIZE * 0.95} 0
+       L ${SIZE * 0.7} ${-SIZE * 0.2}
+       L ${SIZE * 0.3} ${-SIZE * 0.32}
+       L ${-SIZE * 0.2} ${-SIZE * 0.35}
+       L ${-SIZE * 0.55} ${-SIZE * 0.28}
+       L ${-SIZE * 0.65} ${-SIZE * 0.12}
+       L ${-SIZE * 0.6} 0
+       L ${-SIZE * 0.65} ${SIZE * 0.12}
+       L ${-SIZE * 0.55} ${SIZE * 0.28}
+       L ${-SIZE * 0.2} ${SIZE * 0.35}
+       L ${SIZE * 0.3} ${SIZE * 0.32}
+       L ${SIZE * 0.7} ${SIZE * 0.2} Z`
+    );
+    // Fighter sail (larger, curved shape)
+    this.cachedPaths['pirate_2_sail'] = new Path2D(
+      `M ${SIZE * 0.0} ${-SIZE * 0.32}
+       Q ${SIZE * 0.15} ${-SIZE * 0.75} ${SIZE * 0.3} ${-SIZE * 0.25}
+       L ${SIZE * 0.0} ${-SIZE * 0.32} Z`
+    );
+    // Fighter mast
+    this.cachedAccents['pirate_2'] = new Path2D(
+      `M ${SIZE * 0.13} ${-SIZE * 0.75}
+       L ${SIZE * 0.17} ${-SIZE * 0.75}
+       L ${SIZE * 0.17} ${SIZE * 0.0}
+       L ${SIZE * 0.13} ${SIZE * 0.0} Z`
+    );
+    // Flag on top
+    this.cachedPaths['pirate_2_flag'] = new Path2D(
+      `M ${SIZE * 0.15} ${-SIZE * 0.75}
+       L ${SIZE * 0.38} ${-SIZE * 0.68}
+       L ${SIZE * 0.38} ${-SIZE * 0.55}
+       L ${SIZE * 0.15} ${-SIZE * 0.60} Z`
+    );
+    // Cannon ports (side)
+    this.cachedPaths['pirate_2_cannons'] = new Path2D(
+      `M ${SIZE * 0.1} ${-SIZE * 0.33} L ${SIZE * 0.15} ${-SIZE * 0.35} L ${SIZE * 0.15} ${-SIZE * 0.38} L ${SIZE * 0.1} ${-SIZE * 0.36} Z
+       M ${-SIZE * 0.15} ${-SIZE * 0.36} L ${-SIZE * 0.1} ${-SIZE * 0.38} L ${-SIZE * 0.1} ${-SIZE * 0.35} L ${-SIZE * 0.15} ${-SIZE * 0.33} Z
+       M ${SIZE * 0.1} ${SIZE * 0.33} L ${SIZE * 0.15} ${SIZE * 0.35} L ${SIZE * 0.15} ${SIZE * 0.38} L ${SIZE * 0.1} ${SIZE * 0.36} Z
+       M ${-SIZE * 0.15} ${SIZE * 0.36} L ${-SIZE * 0.1} ${SIZE * 0.38} L ${-SIZE * 0.1} ${SIZE * 0.35} L ${-SIZE * 0.15} ${SIZE * 0.33} Z`
     );
 
-    // Variant 3: Captain - Heavy, armored
+    // Variant 3: Captain - Heavy armored boat, command banner, gold trim
     this.cachedPaths['pirate_3'] = new Path2D(
-      `M ${SIZE * 1.1} 0 L ${SIZE * 0.5} ${-SIZE * 0.25}
-       L ${SIZE * 0.2} ${-SIZE * 0.4} L ${-SIZE * 0.3} ${-SIZE * 0.8}
-       L ${-SIZE * 0.6} ${-SIZE * 0.5} L ${-SIZE * 0.7} 0
-       L ${-SIZE * 0.6} ${SIZE * 0.5} L ${-SIZE * 0.3} ${SIZE * 0.8}
-       L ${SIZE * 0.2} ${SIZE * 0.4} L ${SIZE * 0.5} ${SIZE * 0.25} Z`
+      // Heavy galleon hull
+      `M ${SIZE * 1.05} 0
+       L ${SIZE * 0.8} ${-SIZE * 0.25}
+       L ${SIZE * 0.4} ${-SIZE * 0.4}
+       L ${-SIZE * 0.1} ${-SIZE * 0.45}
+       L ${-SIZE * 0.5} ${-SIZE * 0.4}
+       L ${-SIZE * 0.7} ${-SIZE * 0.25}
+       L ${-SIZE * 0.75} ${-SIZE * 0.1}
+       L ${-SIZE * 0.7} 0
+       L ${-SIZE * 0.75} ${SIZE * 0.1}
+       L ${-SIZE * 0.7} ${SIZE * 0.25}
+       L ${-SIZE * 0.5} ${SIZE * 0.4}
+       L ${-SIZE * 0.1} ${SIZE * 0.45}
+       L ${SIZE * 0.4} ${SIZE * 0.4}
+       L ${SIZE * 0.8} ${SIZE * 0.25} Z`
     );
+    // Captain sail (larger, billowing)
+    this.cachedPaths['pirate_3_sail'] = new Path2D(
+      `M ${SIZE * 0.0} ${-SIZE * 0.42}
+       Q ${SIZE * 0.2} ${-SIZE * 0.9} ${SIZE * 0.4} ${-SIZE * 0.35}
+       L ${SIZE * 0.0} ${-SIZE * 0.42} Z`
+    );
+    // Captain mast
     this.cachedAccents['pirate_3'] = new Path2D(
-      `M ${SIZE * 0.4} 0 L ${SIZE * 0.1} ${-SIZE * 0.15} L ${SIZE * 0.1} ${SIZE * 0.15} Z`
+      `M ${SIZE * 0.18} ${-SIZE * 0.9}
+       L ${SIZE * 0.22} ${-SIZE * 0.9}
+       L ${SIZE * 0.22} ${SIZE * 0.0}
+       L ${SIZE * 0.18} ${SIZE * 0.0} Z`
+    );
+    // Command banner (larger flag)
+    this.cachedPaths['pirate_3_flag'] = new Path2D(
+      `M ${SIZE * 0.2} ${-SIZE * 0.9}
+       L ${SIZE * 0.5} ${-SIZE * 0.82}
+       L ${SIZE * 0.5} ${-SIZE * 0.65}
+       L ${SIZE * 0.2} ${-SIZE * 0.72} Z`
+    );
+    // Gold trim line
+    this.cachedPaths['pirate_3_trim'] = new Path2D(
+      `M ${SIZE * 0.8} ${-SIZE * 0.2}
+       L ${SIZE * 0.4} ${-SIZE * 0.35}
+       L ${-SIZE * 0.1} ${-SIZE * 0.4}
+       L ${-SIZE * 0.5} ${-SIZE * 0.35}
+       M ${SIZE * 0.8} ${SIZE * 0.2}
+       L ${SIZE * 0.4} ${SIZE * 0.35}
+       L ${-SIZE * 0.1} ${SIZE * 0.4}
+       L ${-SIZE * 0.5} ${SIZE * 0.35}`
     );
 
-    // Variant 4: Dreadnought - Massive, intimidating
+    // Variant 4: Dreadnought - Massive galleon with 3 masts, rowing paddles, 12 cannons
+    // This is the boss ship - huge and intimidating
     this.cachedPaths['pirate_4'] = new Path2D(
-      `M ${SIZE * 1.3} 0 L ${SIZE * 0.7} ${-SIZE * 0.2}
-       L ${SIZE * 0.4} ${-SIZE * 0.5} L ${0} ${-SIZE * 0.9}
-       L ${-SIZE * 0.4} ${-SIZE * 0.7} L ${-SIZE * 0.8} ${-SIZE * 0.3}
-       L ${-SIZE * 0.9} 0 L ${-SIZE * 0.8} ${SIZE * 0.3}
-       L ${-SIZE * 0.4} ${SIZE * 0.7} L ${0} ${SIZE * 0.9}
-       L ${SIZE * 0.4} ${SIZE * 0.5} L ${SIZE * 0.7} ${SIZE * 0.2} Z`
+      // Massive galleon hull
+      `M ${SIZE * 1.3} 0
+       L ${SIZE * 1.0} ${-SIZE * 0.3}
+       L ${SIZE * 0.6} ${-SIZE * 0.5}
+       L ${SIZE * 0.1} ${-SIZE * 0.6}
+       L ${-SIZE * 0.4} ${-SIZE * 0.55}
+       L ${-SIZE * 0.8} ${-SIZE * 0.45}
+       L ${-SIZE * 1.0} ${-SIZE * 0.3}
+       L ${-SIZE * 1.05} ${-SIZE * 0.15}
+       L ${-SIZE * 1.0} 0
+       L ${-SIZE * 1.05} ${SIZE * 0.15}
+       L ${-SIZE * 1.0} ${SIZE * 0.3}
+       L ${-SIZE * 0.8} ${SIZE * 0.45}
+       L ${-SIZE * 0.4} ${SIZE * 0.55}
+       L ${SIZE * 0.1} ${SIZE * 0.6}
+       L ${SIZE * 0.6} ${SIZE * 0.5}
+       L ${SIZE * 1.0} ${SIZE * 0.3} Z`
     );
+    // Three sails - fore, main, aft
+    this.cachedPaths['pirate_4_sail_fore'] = new Path2D(
+      `M ${SIZE * 0.55} ${-SIZE * 0.48}
+       Q ${SIZE * 0.7} ${-SIZE * 1.0} ${SIZE * 0.85} ${-SIZE * 0.45}
+       L ${SIZE * 0.55} ${-SIZE * 0.48} Z`
+    );
+    this.cachedPaths['pirate_4_sail_main'] = new Path2D(
+      `M ${SIZE * 0.0} ${-SIZE * 0.58}
+       Q ${SIZE * 0.2} ${-SIZE * 1.2} ${SIZE * 0.4} ${-SIZE * 0.52}
+       L ${SIZE * 0.0} ${-SIZE * 0.58} Z`
+    );
+    this.cachedPaths['pirate_4_sail_aft'] = new Path2D(
+      `M ${-SIZE * 0.5} ${-SIZE * 0.5}
+       Q ${-SIZE * 0.35} ${-SIZE * 0.95} ${-SIZE * 0.2} ${-SIZE * 0.48}
+       L ${-SIZE * 0.5} ${-SIZE * 0.5} Z`
+    );
+    // Three masts
     this.cachedAccents['pirate_4'] = new Path2D(
-      `M ${SIZE * 0.5} 0 L ${SIZE * 0.2} ${-SIZE * 0.12} L ${0} 0 L ${SIZE * 0.2} ${SIZE * 0.12} Z`
+      // Fore mast
+      `M ${SIZE * 0.68} ${-SIZE * 1.0}
+       L ${SIZE * 0.72} ${-SIZE * 1.0}
+       L ${SIZE * 0.72} ${SIZE * 0.0}
+       L ${SIZE * 0.68} ${SIZE * 0.0} Z
+       M ${SIZE * 0.18} ${-SIZE * 1.2}
+       L ${SIZE * 0.22} ${-SIZE * 1.2}
+       L ${SIZE * 0.22} ${SIZE * 0.0}
+       L ${SIZE * 0.18} ${SIZE * 0.0} Z
+       M ${-SIZE * 0.38} ${-SIZE * 0.95}
+       L ${-SIZE * 0.34} ${-SIZE * 0.95}
+       L ${-SIZE * 0.34} ${SIZE * 0.0}
+       L ${-SIZE * 0.38} ${SIZE * 0.0} Z`
+    );
+    // Main flag (large skull and crossbones)
+    this.cachedPaths['pirate_4_flag'] = new Path2D(
+      `M ${SIZE * 0.2} ${-SIZE * 1.2}
+       L ${SIZE * 0.6} ${-SIZE * 1.1}
+       L ${SIZE * 0.6} ${-SIZE * 0.9}
+       L ${SIZE * 0.2} ${-SIZE * 0.98} Z`
+    );
+    // 12 cannon ports (6 per side)
+    this.cachedPaths['pirate_4_cannons'] = new Path2D(
+      // Top side (6 cannons)
+      `M ${SIZE * 0.8} ${-SIZE * 0.38} L ${SIZE * 0.85} ${-SIZE * 0.42} L ${SIZE * 0.85} ${-SIZE * 0.48} L ${SIZE * 0.8} ${-SIZE * 0.44} Z
+       M ${SIZE * 0.5} ${-SIZE * 0.52} L ${SIZE * 0.55} ${-SIZE * 0.56} L ${SIZE * 0.55} ${-SIZE * 0.62} L ${SIZE * 0.5} ${-SIZE * 0.58} Z
+       M ${SIZE * 0.2} ${-SIZE * 0.58} L ${SIZE * 0.25} ${-SIZE * 0.62} L ${SIZE * 0.25} ${-SIZE * 0.68} L ${SIZE * 0.2} ${-SIZE * 0.64} Z
+       M ${-SIZE * 0.1} ${-SIZE * 0.57} L ${-SIZE * 0.05} ${-SIZE * 0.61} L ${-SIZE * 0.05} ${-SIZE * 0.67} L ${-SIZE * 0.1} ${-SIZE * 0.63} Z
+       M ${-SIZE * 0.4} ${-SIZE * 0.53} L ${-SIZE * 0.35} ${-SIZE * 0.57} L ${-SIZE * 0.35} ${-SIZE * 0.63} L ${-SIZE * 0.4} ${-SIZE * 0.59} Z
+       M ${-SIZE * 0.7} ${-SIZE * 0.43} L ${-SIZE * 0.65} ${-SIZE * 0.47} L ${-SIZE * 0.65} ${-SIZE * 0.53} L ${-SIZE * 0.7} ${-SIZE * 0.49} Z
+       M ${SIZE * 0.8} ${SIZE * 0.38} L ${SIZE * 0.85} ${SIZE * 0.42} L ${SIZE * 0.85} ${SIZE * 0.48} L ${SIZE * 0.8} ${SIZE * 0.44} Z
+       M ${SIZE * 0.5} ${SIZE * 0.52} L ${SIZE * 0.55} ${SIZE * 0.56} L ${SIZE * 0.55} ${SIZE * 0.62} L ${SIZE * 0.5} ${SIZE * 0.58} Z
+       M ${SIZE * 0.2} ${SIZE * 0.58} L ${SIZE * 0.25} ${SIZE * 0.62} L ${SIZE * 0.25} ${SIZE * 0.68} L ${SIZE * 0.2} ${SIZE * 0.64} Z
+       M ${-SIZE * 0.1} ${SIZE * 0.57} L ${-SIZE * 0.05} ${SIZE * 0.61} L ${-SIZE * 0.05} ${SIZE * 0.67} L ${-SIZE * 0.1} ${SIZE * 0.63} Z
+       M ${-SIZE * 0.4} ${SIZE * 0.53} L ${-SIZE * 0.35} ${SIZE * 0.57} L ${-SIZE * 0.35} ${SIZE * 0.63} L ${-SIZE * 0.4} ${SIZE * 0.59} Z
+       M ${-SIZE * 0.7} ${SIZE * 0.43} L ${-SIZE * 0.65} ${SIZE * 0.47} L ${-SIZE * 0.65} ${SIZE * 0.53} L ${-SIZE * 0.7} ${SIZE * 0.49} Z`
+    );
+    // Rowing paddles positions (for animation reference - 4 per side)
+    this.cachedPaths['pirate_4_paddles'] = new Path2D(
+      // Paddle shafts (will be animated)
+      `M ${SIZE * 0.4} ${-SIZE * 0.55} L ${SIZE * 0.45} ${-SIZE * 0.75}
+       M ${SIZE * 0.0} ${-SIZE * 0.6} L ${SIZE * 0.05} ${-SIZE * 0.8}
+       M ${-SIZE * 0.4} ${-SIZE * 0.55} L ${-SIZE * 0.35} ${-SIZE * 0.75}
+       M ${-SIZE * 0.75} ${-SIZE * 0.4} L ${-SIZE * 0.7} ${-SIZE * 0.6}
+       M ${SIZE * 0.4} ${SIZE * 0.55} L ${SIZE * 0.45} ${SIZE * 0.75}
+       M ${SIZE * 0.0} ${SIZE * 0.6} L ${SIZE * 0.05} ${SIZE * 0.8}
+       M ${-SIZE * 0.4} ${SIZE * 0.55} L ${-SIZE * 0.35} ${SIZE * 0.75}
+       M ${-SIZE * 0.75} ${SIZE * 0.4} L ${-SIZE * 0.7} ${SIZE * 0.6}`
+    );
+    // Rear thruster position
+    this.cachedPaths['pirate_4_thruster'] = new Path2D(
+      `M ${-SIZE * 1.0} ${-SIZE * 0.15}
+       L ${-SIZE * 1.05} ${-SIZE * 0.1}
+       L ${-SIZE * 1.05} ${SIZE * 0.1}
+       L ${-SIZE * 1.0} ${SIZE * 0.15} Z`
     );
   },
 
@@ -673,6 +875,11 @@ const NPCShipGeometry = {
       ctx.stroke(accentPath);
     }
 
+    // Special Pirate rendering: sails, flags, cannons, thrusters
+    if (actualFaction === 'pirate') {
+      this.drawPirateEffects(ctx, variant, variantNum, colors, time, npc);
+    }
+
     // Special Swarm rendering: pulsing veins and glowing eye
     if (actualFaction === 'swarm') {
       this.drawSwarmEffects(ctx, variant, variantNum, colors, time);
@@ -701,6 +908,286 @@ const NPCShipGeometry = {
       const effectSize = this.SIZE * scale;
       this.drawRogueMinerRageEffects(ctx, screenPos, effectSize, time);
     }
+  },
+
+  /**
+   * Draw pirate-specific effects: sails, flags, cannons, paddles, thrusters
+   */
+  drawPirateEffects(ctx, variant, variantNum, colors, time, npc) {
+    const SIZE = this.SIZE;
+    const currentTime = time || Date.now();
+
+    // Draw sail(s) with billowing effect
+    if (variantNum === 4) {
+      // Dreadnought has 3 sails
+      const sailPaths = ['pirate_4_sail_fore', 'pirate_4_sail_main', 'pirate_4_sail_aft'];
+      for (const sailKey of sailPaths) {
+        const sailPath = this.cachedPaths[sailKey];
+        if (sailPath) {
+          // Draw sail shadow first
+          ctx.save();
+          ctx.translate(2, 2);
+          ctx.fillStyle = 'rgba(0,0,0,0.3)';
+          ctx.fill(sailPath);
+          ctx.restore();
+
+          // Main sail with gradient for depth
+          const sailGradient = ctx.createLinearGradient(-SIZE * 0.5, -SIZE * 0.8, SIZE * 0.5, -SIZE * 0.4);
+          sailGradient.addColorStop(0, colors.sail || '#cc2200');
+          sailGradient.addColorStop(0.5, colors.sailHighlight || '#ff3300');
+          sailGradient.addColorStop(1, colors.sail || '#cc2200');
+          ctx.fillStyle = sailGradient;
+          ctx.fill(sailPath);
+          ctx.strokeStyle = colors.mast || '#3d1a1a';
+          ctx.lineWidth = 1;
+          ctx.stroke(sailPath);
+        }
+      }
+    } else {
+      // Single sail for scout, fighter, captain
+      const sailPath = this.cachedPaths[variant + '_sail'];
+      if (sailPath) {
+        // Sail shadow
+        ctx.save();
+        ctx.translate(1, 1);
+        ctx.fillStyle = 'rgba(0,0,0,0.25)';
+        ctx.fill(sailPath);
+        ctx.restore();
+
+        // Main sail
+        const sailGradient = ctx.createLinearGradient(-SIZE * 0.3, -SIZE * 0.6, SIZE * 0.3, -SIZE * 0.2);
+        sailGradient.addColorStop(0, colors.sail || '#cc2200');
+        sailGradient.addColorStop(0.5, colors.sailHighlight || '#ff3300');
+        sailGradient.addColorStop(1, colors.sail || '#cc2200');
+        ctx.fillStyle = sailGradient;
+        ctx.fill(sailPath);
+        ctx.strokeStyle = colors.mast || '#3d1a1a';
+        ctx.lineWidth = 0.8;
+        ctx.stroke(sailPath);
+      }
+    }
+
+    // Draw flag with skull and crossbones
+    const flagPath = this.cachedPaths[variant + '_flag'];
+    if (flagPath) {
+      // Flag background
+      ctx.fillStyle = colors.flag || '#1a1a1a';
+      ctx.fill(flagPath);
+      ctx.strokeStyle = colors.flagBorder || '#333333';
+      ctx.lineWidth = 0.5;
+      ctx.stroke(flagPath);
+
+      // Draw skull symbol on flag (simplified)
+      this.drawFlagSkull(ctx, variant, variantNum, colors);
+    }
+
+    // Draw cannon ports
+    const cannonPath = this.cachedPaths[variant + '_cannons'];
+    if (cannonPath) {
+      ctx.fillStyle = colors.cannonMetal || '#2a2a2a';
+      ctx.fill(cannonPath);
+      ctx.strokeStyle = colors.gold || '#ffd700';
+      ctx.lineWidth = 0.5;
+      ctx.stroke(cannonPath);
+    }
+
+    // Draw gold trim for captain
+    const trimPath = this.cachedPaths[variant + '_trim'];
+    if (trimPath) {
+      ctx.strokeStyle = colors.gold || '#ffd700';
+      ctx.lineWidth = 2;
+      ctx.lineCap = 'round';
+      ctx.stroke(trimPath);
+
+      // Add glow effect
+      ctx.strokeStyle = colors.goldGlow || 'rgba(255, 215, 0, 0.4)';
+      ctx.lineWidth = 4;
+      ctx.stroke(trimPath);
+    }
+
+    // Dreadnought-specific: animated rowing paddles
+    if (variantNum === 4) {
+      this.drawDreadnoughtPaddles(ctx, SIZE, currentTime, colors, npc);
+      this.drawDreadnoughtThruster(ctx, SIZE, currentTime, colors, npc);
+    }
+  },
+
+  /**
+   * Draw skull and crossbones symbol on pirate flags
+   */
+  drawFlagSkull(ctx, variant, variantNum, colors) {
+    const SIZE = this.SIZE;
+    const skullColor = colors.flagSkull || '#ffffff';
+
+    // Position varies by variant (center of flag)
+    let cx, cy, scale;
+    switch (variantNum) {
+      case 1: // Scout - small flag
+        cx = SIZE * 0.26;
+        cy = -SIZE * 0.48;
+        scale = 0.06;
+        break;
+      case 2: // Fighter
+        cx = SIZE * 0.27;
+        cy = -SIZE * 0.65;
+        scale = 0.08;
+        break;
+      case 3: // Captain - larger flag
+        cx = SIZE * 0.35;
+        cy = -SIZE * 0.78;
+        scale = 0.10;
+        break;
+      case 4: // Dreadnought - biggest flag
+        cx = SIZE * 0.4;
+        cy = -SIZE * 1.0;
+        scale = 0.12;
+        break;
+      default:
+        return;
+    }
+
+    ctx.fillStyle = skullColor;
+
+    // Skull (circle)
+    ctx.beginPath();
+    ctx.arc(cx, cy, SIZE * scale, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Eye sockets (dark)
+    ctx.fillStyle = colors.flag || '#1a1a1a';
+    ctx.beginPath();
+    ctx.arc(cx - SIZE * scale * 0.35, cy - SIZE * scale * 0.1, SIZE * scale * 0.25, 0, Math.PI * 2);
+    ctx.arc(cx + SIZE * scale * 0.35, cy - SIZE * scale * 0.1, SIZE * scale * 0.25, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Crossbones (X behind skull)
+    ctx.strokeStyle = skullColor;
+    ctx.lineWidth = SIZE * scale * 0.25;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(cx - SIZE * scale * 1.2, cy - SIZE * scale * 0.8);
+    ctx.lineTo(cx + SIZE * scale * 1.2, cy + SIZE * scale * 0.8);
+    ctx.moveTo(cx + SIZE * scale * 1.2, cy - SIZE * scale * 0.8);
+    ctx.lineTo(cx - SIZE * scale * 1.2, cy + SIZE * scale * 0.8);
+    ctx.stroke();
+  },
+
+  /**
+   * Draw animated rowing paddles for dreadnought
+   */
+  drawDreadnoughtPaddles(ctx, SIZE, time, colors, npc) {
+    // 4 paddles per side, animated rowing motion
+    const paddlePositions = [
+      { x: SIZE * 0.4, baseY: SIZE * 0.55 },
+      { x: SIZE * 0.0, baseY: SIZE * 0.6 },
+      { x: -SIZE * 0.4, baseY: SIZE * 0.55 },
+      { x: -SIZE * 0.75, baseY: SIZE * 0.4 }
+    ];
+
+    // Rowing animation phase - each paddle slightly offset
+    const rowSpeed = 0.003;
+    const rowAmplitude = SIZE * 0.12;
+
+    ctx.strokeStyle = colors.paddle || '#5c3a21';
+    ctx.lineWidth = 3;
+    ctx.lineCap = 'round';
+
+    for (let i = 0; i < paddlePositions.length; i++) {
+      const pos = paddlePositions[i];
+      const phase = time * rowSpeed + i * 0.5; // Offset each paddle
+      const rowOffset = Math.sin(phase) * rowAmplitude;
+      const rotationOffset = Math.cos(phase) * 0.2;
+
+      // Draw both sides (top and bottom)
+      for (const side of [-1, 1]) {
+        ctx.save();
+        ctx.translate(pos.x, pos.baseY * side);
+        ctx.rotate(rotationOffset * side);
+
+        // Paddle shaft
+        ctx.beginPath();
+        ctx.moveTo(0, 0);
+        ctx.lineTo(0, (SIZE * 0.2 + rowOffset) * side);
+        ctx.stroke();
+
+        // Paddle blade
+        ctx.fillStyle = colors.paddleBlade || '#8B5A2B';
+        ctx.beginPath();
+        ctx.ellipse(0, (SIZE * 0.2 + rowOffset + SIZE * 0.05) * side, SIZE * 0.04, SIZE * 0.08, 0, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.restore();
+      }
+    }
+  },
+
+  /**
+   * Draw rear thruster flame for dreadnought (enhanced when boosting)
+   */
+  drawDreadnoughtThruster(ctx, SIZE, time, colors, npc) {
+    const thrusterPath = this.cachedPaths['pirate_4_thruster'];
+    if (!thrusterPath) return;
+
+    // Check if boosting (from NPC state)
+    const isBoosting = npc && (npc.state === 'boost_dive' || npc.isBoosting);
+
+    // Thruster housing
+    ctx.fillStyle = colors.thrusterHousing || '#2a2a2a';
+    ctx.fill(thrusterPath);
+    ctx.strokeStyle = colors.gold || '#ffd700';
+    ctx.lineWidth = 1;
+    ctx.stroke(thrusterPath);
+
+    // Flame effect
+    const flameFlicker = Math.sin(time * 0.02) * 0.3 + 0.7;
+    const flameLength = isBoosting ? SIZE * 0.6 : SIZE * 0.25;
+    const flameWidth = isBoosting ? SIZE * 0.2 : SIZE * 0.1;
+
+    // Flame gradient
+    const flameGradient = ctx.createLinearGradient(
+      -SIZE * 1.05, 0,
+      -SIZE * 1.05 - flameLength, 0
+    );
+    flameGradient.addColorStop(0, colors.flameCore || '#ffffff');
+    flameGradient.addColorStop(0.2, colors.flameInner || '#ffff00');
+    flameGradient.addColorStop(0.5, colors.flame || '#ff6600');
+    flameGradient.addColorStop(1, 'rgba(255, 100, 0, 0)');
+
+    ctx.fillStyle = flameGradient;
+    ctx.globalAlpha = flameFlicker;
+
+    // Draw flame shape
+    ctx.beginPath();
+    ctx.moveTo(-SIZE * 1.05, -flameWidth * 0.5);
+    ctx.quadraticCurveTo(
+      -SIZE * 1.05 - flameLength * 0.5, -flameWidth * 0.3,
+      -SIZE * 1.05 - flameLength, 0
+    );
+    ctx.quadraticCurveTo(
+      -SIZE * 1.05 - flameLength * 0.5, flameWidth * 0.3,
+      -SIZE * 1.05, flameWidth * 0.5
+    );
+    ctx.closePath();
+    ctx.fill();
+
+    // Inner bright core
+    if (isBoosting) {
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
+      ctx.beginPath();
+      ctx.moveTo(-SIZE * 1.05, -flameWidth * 0.2);
+      ctx.quadraticCurveTo(
+        -SIZE * 1.05 - flameLength * 0.3, -flameWidth * 0.1,
+        -SIZE * 1.05 - flameLength * 0.4, 0
+      );
+      ctx.quadraticCurveTo(
+        -SIZE * 1.05 - flameLength * 0.3, flameWidth * 0.1,
+        -SIZE * 1.05, flameWidth * 0.2
+      );
+      ctx.closePath();
+      ctx.fill();
+    }
+
+    ctx.globalAlpha = 1;
   },
 
   /**

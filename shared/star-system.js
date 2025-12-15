@@ -604,12 +604,12 @@ Object.assign(StarSystem, {
 
     // Mining claim object generation parameters
     const claimConfig = {
-      MIN_DISTANCE: 300,      // Minimum distance from claim base
-      MAX_DISTANCE: 4500,     // Maximum distance from claim base
+      MIN_DISTANCE: 200,      // Minimum distance from claim base
+      MAX_DISTANCE: 1500,     // Maximum distance from claim base
       PLANET_MIN: 2,          // Minimum planets per claim
       PLANET_MAX: 5,          // Maximum planets per claim
-      ASTEROID_MIN: 4,        // Minimum asteroids per claim
-      ASTEROID_MAX: 9,        // Maximum asteroids per claim
+      ASTEROID_MIN: 5,        // Minimum asteroids per claim
+      ASTEROID_MAX: 12,        // Maximum asteroids per claim
       MIN_SPACING: 100        // Minimum spacing between objects
     };
 

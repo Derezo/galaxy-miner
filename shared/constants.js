@@ -949,9 +949,10 @@ const CONSTANTS = {
       spawnRate: 15, // 1 per N sectors
       patrolRadius: 5, // sectors
       retreatThreshold: 0.4,
-      aiStrategy: 'flanking',
-      weaponType: 'cannon',
-      deathEffect: 'explosion'
+      aiStrategy: 'pirate',
+      weaponType: 'pirate_heavy_blaster',
+      deathEffect: 'explosion',
+      shieldPiercing: 0.1  // All pirate weapons pierce 10% of shields
     },
     SCAVENGER: {
       id: 'scavenger',
@@ -1019,6 +1020,54 @@ const CONSTANTS = {
       damageType: 'kinetic',
       size: 8,
       trail: true
+    },
+    // Pirate faction weapons - all have 10% shield piercing
+    pirate_light_blaster: {
+      id: 'pirate_light_blaster',
+      name: 'Light Blaster',
+      color: '#ff4400',
+      coreColor: '#ffffff',
+      glowColor: '#ff440060',
+      type: 'projectile',
+      damageType: 'kinetic',
+      size: 5,
+      speed: 500,
+      trail: true,
+      shieldPiercing: 0.1,
+      description: 'Fast-firing scout weapon with shield piercing'
+    },
+    pirate_heavy_blaster: {
+      id: 'pirate_heavy_blaster',
+      name: 'Heavy Blaster',
+      color: '#ff2200',
+      coreColor: '#ffffff',
+      glowColor: '#ff220080',
+      type: 'projectile',
+      damageType: 'kinetic',
+      size: 8,
+      speed: 450,
+      trail: true,
+      hasGlow: true,
+      shieldPiercing: 0.1,
+      description: 'Powerful pirate weapon with pulsing glow and shield piercing'
+    },
+    pirate_cannon: {
+      id: 'pirate_cannon',
+      name: 'Pirate Cannon',
+      color: '#333333',
+      secondaryColor: '#ff6600',
+      glowColor: '#ff660050',
+      smokeColor: '#666666',
+      sparkColor: '#ffcc00',
+      type: 'projectile',
+      damageType: 'explosive',
+      size: 12,
+      speed: 350,
+      trail: true,
+      isCannonball: true,
+      hasSmoke: true,
+      shieldPiercing: 0.1,
+      description: 'Massive cannonball with fire trail, used by dreadnoughts'
     },
     jury_laser: {
       id: 'jury_laser',
@@ -1214,10 +1263,14 @@ const CONSTANTS = {
       name: 'Pirate Treasure',
       rarity: 'rare',
       value: 300,
-      description: 'A chest of ill-gotten gains, marked with the insignia of Captain Vex. The lock mechanism is impossibly intricate.',
+      description: 'A chest of ill-gotten gains. Increases credits from NPC wreckage by 10%.',
       iconType: 'relic',
       glyphVariant: 'currency',
-      glowColor: '#ffcc00'
+      glowColor: '#ffcc00',
+      effect: 'credit_bonus',
+      effects: {
+        npcWreckageCreditBonus: 0.10  // +10% credits from NPC wreckage
+      }
     },
     WORMHOLE_GEM: {
       id: 'wormhole_gem',
@@ -1257,6 +1310,19 @@ const CONSTANTS = {
       effects: {
         miningYieldMultiplier: 5
       }
+    },
+    SKULL_AND_BONES: {
+      id: 'skull_and_bones',
+      name: 'Skull and Bones',
+      rarity: 'ultrarare',
+      value: 3000,
+      description: 'A cursed pirate banner that allows plundering faction bases without destroying them. Press M near any base to steal resources instantly.',
+      iconType: 'skull_and_bones',
+      glowColor: '#1a1a1a',
+      effect: 'plunder',
+      cooldown: 15000,          // 15 second cooldown
+      plunderRange: 200,        // Must be within 200 units of base edge
+      aggroRange: 600           // NPCs within 600 units become hostile
     }
   },
 

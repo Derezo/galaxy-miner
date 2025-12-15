@@ -15,7 +15,7 @@ const FACTION_LOOT = {
       rare:      ['PLATINUM', 'DARK_MATTER', 'QUANTUM_CRYSTALS'],
       ultrarare: ['EXOTIC_MATTER', 'ANTIMATTER']
     },
-    relics: ['PIRATE_TREASURE'],
+    relics: ['PIRATE_TREASURE', 'SKULL_AND_BONES'],
     buffs: ['SHIELD_BOOST', 'SPEED_BURST', 'DAMAGE_AMP'],
     components: ['ENGINE_CORE', 'WEAPON_MATRIX']
   },
@@ -331,6 +331,24 @@ function generateLoot(npcType) {
       type: 'relic',
       relicType: 'MINING_RITES'
     });
+  }
+
+  // Guaranteed SKULL_AND_BONES drop for Pirate Dreadnought
+  if (npcType === 'pirate_dreadnought') {
+    contents.push({
+      type: 'relic',
+      relicType: 'SKULL_AND_BONES'
+    });
+  }
+
+  // 5% chance of PIRATE_TREASURE drop from destroyed pirate_outpost base
+  if (npcType === 'pirate_outpost') {
+    if (Math.random() < 0.05) {
+      contents.push({
+        type: 'relic',
+        relicType: 'PIRATE_TREASURE'
+      });
+    }
   }
 
   return contents;

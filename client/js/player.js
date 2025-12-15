@@ -60,6 +60,10 @@ const Player = {
   wormholeDestination: null,
   _nearestWormhole: null,
 
+  // Plunder state (Skull and Bones relic)
+  plunderCooldownEnd: 0,
+  _nearestBase: null,
+
   // Audio state tracking
   _engineLoopActive: false,
   _boostLoopActive: false,
@@ -124,6 +128,10 @@ const Player = {
     this.wormholeTransitProgress = 0;
     this.wormholeDestination = null;
     this._nearestWormhole = null;
+
+    // Reset plunder state
+    this.plunderCooldownEnd = 0;
+    this._nearestBase = null;
 
     // Initialize UIState with player data
     if (typeof UIState !== 'undefined') {
@@ -883,6 +891,42 @@ const Player = {
         hint.classList.add('hidden');
       }
     }
+
+    // Track nearest base for plundering (Skull and Bones relic)
+    this._nearestBase = this.findNearestBase();
+  },
+
+  /**
+   * Find the nearest base within plunder range
+   * @returns {Object|null} Nearest base or null
+   */
+  findNearestBase() {
+    // Only check if player has the relic to save performance
+    if (!this.hasRelic('SKULL_AND_BONES')) return null;
+
+    const plunderRange = CONSTANTS.RELIC_TYPES?.SKULL_AND_BONES?.plunderRange || 200;
+    let nearestBase = null;
+    let nearestDist = Infinity;
+
+    // Get all bases from Entities
+    if (typeof Entities !== 'undefined' && Entities.bases) {
+      for (const [baseId, base] of Entities.bases) {
+        if (!base || base.destroyed) continue;
+
+        const dx = base.x - this.position.x;
+        const dy = base.y - this.position.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        const baseSize = base.size || 100;
+
+        // Check if within plunder range (edge of base, not center)
+        if (dist - baseSize < plunderRange && dist < nearestDist) {
+          nearestDist = dist;
+          nearestBase = base;
+        }
+      }
+    }
+
+    return nearestBase;
   },
 
   /**
@@ -908,6 +952,40 @@ const Player = {
 
     Logger.log('[Wormhole] Sending enter request for wormhole:', this._nearestWormhole.id);
     Network.sendEnterWormhole(this._nearestWormhole.id);
+  },
+
+  /**
+   * Attempt to plunder a nearby faction base (Skull and Bones relic)
+   */
+  tryPlunderBase() {
+    Logger.log('[Plunder] tryPlunderBase called, nearestBase:', this._nearestBase);
+
+    // Check cooldown
+    if (Date.now() < this.plunderCooldownEnd) {
+      const remaining = Math.ceil((this.plunderCooldownEnd - Date.now()) / 1000);
+      NotificationManager.error(`Plunder on cooldown: ${remaining}s`);
+      return;
+    }
+
+    // Check relic
+    if (!this.hasRelic('SKULL_AND_BONES')) {
+      NotificationManager.error('You need the Skull and Bones relic');
+      return;
+    }
+
+    // Check base nearby
+    if (!this._nearestBase) {
+      NotificationManager.error('No base nearby to plunder');
+      return;
+    }
+
+    // Send plunder request to server
+    Logger.log('[Plunder] Sending plunder request for base:', this._nearestBase.id);
+    Network.sendPlunderBase(this._nearestBase.id);
+
+    // Set cooldown (15 seconds)
+    const cooldown = CONSTANTS.RELIC_TYPES?.SKULL_AND_BONES?.cooldown || 15000;
+    this.plunderCooldownEnd = Date.now() + cooldown;
   },
 
   /**

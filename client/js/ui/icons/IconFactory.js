@@ -374,6 +374,16 @@ const IconFactory = {
       } else {
         icon = this._createFallbackRelicIcon(size);
       }
+    } else if (relicInfo.iconType === 'skull_and_bones') {
+      // Use SkullAndBonesShape for the Skull and Bones relic
+      if (typeof SkullAndBonesShape !== 'undefined') {
+        icon = SkullAndBonesShape.create({
+          size,
+          glowIntensity: 0.6
+        });
+      } else {
+        icon = this._createFallbackRelicIcon(size);
+      }
     } else {
       // Default: use RelicShape (stone monument)
       if (typeof RelicShape !== 'undefined') {

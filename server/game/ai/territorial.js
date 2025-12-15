@@ -27,13 +27,26 @@ class TerritorialStrategy {
       return this.retreat(npc, deltaTime, context);
     }
 
-    // Find players in territory
-    const intruders = this.findIntruders(npc, nearbyPlayers, territoryRadius, context);
+    // Combine players and hostile NPCs (pirates) as potential intruders
+    const hostileNPCs = context.nearbyHostiles || [];
+    const allPotentialIntruders = [...nearbyPlayers];
+
+    // Add hostile NPCs as intruders (pirates raiding the base)
+    for (const hostile of hostileNPCs) {
+      allPotentialIntruders.push({
+        ...hostile,
+        isNPC: true
+      });
+    }
+
+    // Find intruders in territory (both players and hostile NPCs)
+    const intruders = this.findIntruders(npc, allPotentialIntruders, territoryRadius, context);
 
     // No intruders - patrol territory
     if (intruders.length === 0) {
       npc.state = 'patrol';
       npc.targetPlayer = null;
+      npc.targetNPC = null;
       this.clearWarnings();
       this.patrolTerritory(npc, deltaTime, context);
       return null;
@@ -44,6 +57,15 @@ class TerritorialStrategy {
     if (!target) {
       this.patrolTerritory(npc, deltaTime, context);
       return null;
+    }
+
+    // Pirates (hostile NPCs) get no warning - immediate attack
+    if (target.isNPC) {
+      npc.state = 'combat';
+      npc.targetNPC = target.id;
+      npc.targetPlayer = null;
+      this.pursueInTerritory(npc, target, deltaTime, context);
+      return this.tryFire(npc, target);
     }
 
     // Check if target is actively mining (more aggressive)
@@ -62,6 +84,7 @@ class TerritorialStrategy {
     // Aggressive phase - attack the intruder
     npc.state = 'combat';
     npc.targetPlayer = target.id;
+    npc.targetNPC = null;
 
     // Move toward intruder but don't leave territory
     this.pursueInTerritory(npc, target, deltaTime, context);
@@ -86,12 +109,18 @@ class TerritorialStrategy {
   }
 
   /**
-   * Select target - prioritize miners, then closest
+   * Select target - prioritize pirates (immediate threat), then miners, then closest
    */
   selectTarget(npc, intruders) {
     if (intruders.length === 0) return null;
 
-    // First, check for anyone mining
+    // First priority: Hostile NPCs (pirates) - they're trying to steal!
+    const hostileNPCs = intruders.filter(p => p.isNPC);
+    if (hostileNPCs.length > 0) {
+      return hostileNPCs.sort((a, b) => a.distance - b.distance)[0];
+    }
+
+    // Second priority: Anyone mining our resources
     const miners = intruders.filter(p => p.status === 'mining' || p.mining);
     if (miners.length > 0) {
       return miners.sort((a, b) => a.distance - b.distance)[0];

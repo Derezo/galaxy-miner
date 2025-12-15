@@ -153,6 +153,15 @@ const RelicsPanel = {
     if (relicInfo.effect === 'wormhole_transit') {
       effectName = 'Wormhole Transit';
       effectDesc = 'Approach a wormhole and press [M] to enter. Select a destination from nearby wormholes to instantly travel.';
+    } else if (relicInfo.effect === 'plunder') {
+      effectName = 'Plunder';
+      const cooldownSec = Math.round((relicInfo.cooldown || 15000) / 1000);
+      const aggroRange = relicInfo.aggroRange || 600;
+      effectDesc = `Press [M] near any faction base to steal resources instantly without destroying it. Cooldown: ${cooldownSec}s. Warning: NPCs within ${aggroRange} units will become hostile!`;
+    } else if (relicInfo.effect === 'credit_bonus') {
+      effectName = "Pirate's Share";
+      const bonusPct = relicInfo.effects?.npcWreckageCreditBonus ? Math.round(relicInfo.effects.npcWreckageCreditBonus * 100) : 10;
+      effectDesc = `All credit rewards from NPC wreckage increased by ${bonusPct}%. Applies automatically when collecting loot.`;
     } else if (relicInfo.effects) {
       // Handle relics with multiple effects (like SCRAP_SIPHON)
       const effects = relicInfo.effects;

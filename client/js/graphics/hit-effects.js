@@ -436,10 +436,359 @@ const HitEffectRenderer = {
       vy: 500,
       life: 200
     });
+  },
+
+  /**
+   * Create shield pierce effect - red crack/spark particles when damage bypasses shields
+   * Used by pirate weapons that have 10% shield piercing
+   * @param {number} x - World X position
+   * @param {number} y - World Y position
+   * @param {number} pierceDamage - Amount of damage that pierced (for scaling effect intensity)
+   */
+  addShieldPierceEffect(x, y, pierceDamage = 10) {
+    // Validate coordinates to prevent NaN errors
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return;
+
+    // Calculate effect intensity based on pierce damage
+    const intensity = Math.min(1, pierceDamage / 20);
+    const particleCount = Math.floor(6 + intensity * 8);
+
+    // Red/orange "crack" particles shooting through shield
+    for (let i = 0; i < particleCount; i++) {
+      const angle = Math.random() * Math.PI * 2;
+      const speed = 100 + Math.random() * 150 * (1 + intensity);
+
+      // Main pierce sparks - red/orange to indicate hull damage through shields
+      ParticleSystem.spawn({
+        x: x + (Math.random() - 0.5) * 10,
+        y: y + (Math.random() - 0.5) * 10,
+        vx: Math.cos(angle) * speed,
+        vy: Math.sin(angle) * speed,
+        color: '#ff3300',
+        secondaryColor: '#ff6600',
+        size: 2 + Math.random() * 2,
+        life: 300 + Math.random() * 200,
+        decay: 1.1,
+        drag: 0.95,
+        type: 'spark'
+      });
+    }
+
+    // Shield "crack" visual - jagged line particles
+    const crackCount = 3 + Math.floor(intensity * 4);
+    for (let i = 0; i < crackCount; i++) {
+      const crackAngle = (i / crackCount) * Math.PI * 2 + Math.random() * 0.5;
+      const crackLen = 15 + Math.random() * 25;
+
+      // Crack origin point
+      const crackX = x + Math.cos(crackAngle) * 5;
+      const crackY = y + Math.sin(crackAngle) * 5;
+
+      // Multiple segments along crack
+      for (let seg = 0; seg < 3; seg++) {
+        const segDist = crackLen * (seg / 3);
+        const jitter = (Math.random() - 0.5) * 8;
+
+        ParticleSystem.spawn({
+          x: crackX + Math.cos(crackAngle) * segDist + Math.cos(crackAngle + Math.PI/2) * jitter,
+          y: crackY + Math.sin(crackAngle) * segDist + Math.sin(crackAngle + Math.PI/2) * jitter,
+          vx: Math.cos(crackAngle) * 30,
+          vy: Math.sin(crackAngle) * 30,
+          color: '#ff4400',
+          secondaryColor: '#ffcc00',
+          size: 3 - seg * 0.5,
+          life: 200 + Math.random() * 100,
+          decay: 1.2,
+          drag: 0.98,
+          type: 'glow'
+        });
+      }
+    }
+
+    // Central "breach point" glow
+    ParticleSystem.spawn({
+      x,
+      y,
+      vx: 0,
+      vy: 0,
+      color: '#ff2200',
+      secondaryColor: '#ff6600',
+      size: 10 + intensity * 8,
+      life: 250,
+      decay: 1.3,
+      drag: 1,
+      type: 'glow'
+    });
+
+    // Small orange sparks indicating hull taking damage
+    for (let i = 0; i < 5; i++) {
+      const sparkAngle = Math.random() * Math.PI * 2;
+      const sparkSpeed = 60 + Math.random() * 60;
+
+      ParticleSystem.spawn({
+        x,
+        y,
+        vx: Math.cos(sparkAngle) * sparkSpeed,
+        vy: Math.sin(sparkAngle) * sparkSpeed,
+        color: '#ffaa00',
+        size: 1.5 + Math.random(),
+        life: 200 + Math.random() * 150,
+        decay: 1.1,
+        drag: 0.93,
+        type: 'spark'
+      });
+    }
+  },
+
+  /**
+   * Create boost dive afterburner effect
+   * Large fiery trail behind a boosting ship
+   * @param {number} x - World X position
+   * @param {number} y - World Y position
+   * @param {number} rotation - Ship rotation in radians
+   * @param {number} size - Ship size for scaling
+   */
+  addBoostAfterburner(x, y, rotation, size = 20) {
+    // Validate coordinates to prevent NaN errors
+    if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(rotation)) return;
+
+    // Calculate position behind ship
+    const behindX = x - Math.cos(rotation) * size * 0.8;
+    const behindY = y - Math.sin(rotation) * size * 0.8;
+
+    // Main flame burst particles
+    for (let i = 0; i < 8; i++) {
+      const spreadAngle = rotation + Math.PI + (Math.random() - 0.5) * 0.6;
+      const speed = 150 + Math.random() * 100;
+
+      ParticleSystem.spawn({
+        x: behindX + (Math.random() - 0.5) * size * 0.3,
+        y: behindY + (Math.random() - 0.5) * size * 0.3,
+        vx: Math.cos(spreadAngle) * speed,
+        vy: Math.sin(spreadAngle) * speed,
+        color: '#ff6600',
+        secondaryColor: '#ffff00',
+        size: 5 + Math.random() * 4,
+        life: 400 + Math.random() * 200,
+        decay: 0.9,
+        drag: 0.97,
+        type: 'flame',
+        gravity: 0
+      });
+    }
+
+    // Bright white-hot core
+    for (let i = 0; i < 4; i++) {
+      const coreAngle = rotation + Math.PI + (Math.random() - 0.5) * 0.3;
+      const coreSpeed = 100 + Math.random() * 50;
+
+      ParticleSystem.spawn({
+        x: behindX,
+        y: behindY,
+        vx: Math.cos(coreAngle) * coreSpeed,
+        vy: Math.sin(coreAngle) * coreSpeed,
+        color: '#ffffff',
+        secondaryColor: '#ffff88',
+        size: 4 + Math.random() * 2,
+        life: 200 + Math.random() * 100,
+        decay: 1.1,
+        drag: 0.98,
+        type: 'glow'
+      });
+    }
+
+    // Smoke trail
+    for (let i = 0; i < 3; i++) {
+      const smokeAngle = rotation + Math.PI + (Math.random() - 0.5) * 0.8;
+      const smokeSpeed = 80 + Math.random() * 40;
+
+      ParticleSystem.spawn({
+        x: behindX + (Math.random() - 0.5) * size * 0.5,
+        y: behindY + (Math.random() - 0.5) * size * 0.5,
+        vx: Math.cos(smokeAngle) * smokeSpeed,
+        vy: Math.sin(smokeAngle) * smokeSpeed,
+        color: '#666666',
+        size: 6 + Math.random() * 4,
+        life: 600 + Math.random() * 300,
+        decay: 0.7,
+        drag: 0.99,
+        type: 'smoke'
+      });
+    }
+  }
+};
+
+/**
+ * Floating Text System
+ * Displays floating text effects like "Invulnerable", damage numbers, etc.
+ */
+const FloatingTextSystem = {
+  texts: [],
+
+  /**
+   * Add floating text at position
+   * @param {number} x - World X position
+   * @param {number} y - World Y position
+   * @param {string} text - Text to display
+   * @param {object} options - { color, size, duration, rise, font }
+   */
+  add(x, y, text, options = {}) {
+    // Validate coordinates
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return;
+
+    this.texts.push({
+      x,
+      y,
+      startY: y,
+      text,
+      color: options.color || '#ffffff',
+      size: options.size || 16,
+      font: options.font || 'bold',
+      duration: options.duration || 1500,
+      rise: options.rise !== undefined ? options.rise : 40,
+      startTime: Date.now(),
+      outline: options.outline !== undefined ? options.outline : true,
+      outlineColor: options.outlineColor || '#000000',
+      shake: options.shake || false,
+      pulse: options.pulse || false
+    });
+  },
+
+  /**
+   * Add "Invulnerable" floating text for dreadnought
+   * @param {number} x - World X position
+   * @param {number} y - World Y position
+   */
+  addInvulnerable(x, y) {
+    this.add(x, y - 30, 'INVULNERABLE', {
+      color: '#aaaaaa',
+      size: 14,
+      duration: 1200,
+      rise: 30,
+      outline: true,
+      outlineColor: '#333333',
+      pulse: true
+    });
+  },
+
+  /**
+   * Add damage number floating text
+   * @param {number} x - World X position
+   * @param {number} y - World Y position
+   * @param {number} damage - Damage amount
+   * @param {boolean} isCritical - Whether it's a critical hit
+   */
+  addDamageNumber(x, y, damage, isCritical = false) {
+    this.add(x + (Math.random() - 0.5) * 20, y - 20, Math.floor(damage).toString(), {
+      color: isCritical ? '#ff4400' : '#ffcc00',
+      size: isCritical ? 20 : 14,
+      duration: 1000,
+      rise: 35,
+      shake: isCritical
+    });
+  },
+
+  /**
+   * Add "Shield Pierced!" text
+   * @param {number} x - World X position
+   * @param {number} y - World Y position
+   */
+  addShieldPierced(x, y) {
+    this.add(x, y - 25, 'PIERCED!', {
+      color: '#ff3300',
+      size: 12,
+      duration: 800,
+      rise: 25,
+      outline: true,
+      outlineColor: '#440000'
+    });
+  },
+
+  /**
+   * Update all floating texts
+   * @param {number} dt - Delta time in seconds
+   */
+  update(dt) {
+    const now = Date.now();
+    this.texts = this.texts.filter(text => {
+      const elapsed = now - text.startTime;
+      return elapsed < text.duration;
+    });
+  },
+
+  /**
+   * Draw all floating texts
+   * @param {CanvasRenderingContext2D} ctx
+   * @param {object} camera - Camera position { x, y }
+   */
+  draw(ctx, camera) {
+    const now = Date.now();
+
+    for (const text of this.texts) {
+      const elapsed = now - text.startTime;
+      const progress = elapsed / text.duration;
+
+      // Validate text position
+      if (!Number.isFinite(text.x) || !Number.isFinite(text.startY)) continue;
+
+      // Calculate position with rise animation
+      let screenX = text.x - camera.x;
+      let screenY = text.startY - camera.y - (text.rise * progress);
+
+      // Add shake effect if enabled
+      if (text.shake && progress < 0.3) {
+        screenX += (Math.random() - 0.5) * 4;
+        screenY += (Math.random() - 0.5) * 4;
+      }
+
+      // Calculate alpha (fade out in last 30%)
+      let alpha = 1;
+      if (progress > 0.7) {
+        alpha = 1 - ((progress - 0.7) / 0.3);
+      }
+
+      // Calculate size with pulse if enabled
+      let size = text.size;
+      if (text.pulse) {
+        size = text.size * (1 + Math.sin(elapsed * 0.01) * 0.1);
+      }
+
+      // Scale up slightly at start
+      if (progress < 0.1) {
+        size = text.size * (0.5 + progress * 5);
+      }
+
+      ctx.save();
+      ctx.globalAlpha = alpha;
+      ctx.font = `${text.font} ${Math.floor(size)}px monospace`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+
+      // Draw outline if enabled
+      if (text.outline) {
+        ctx.strokeStyle = text.outlineColor;
+        ctx.lineWidth = 3;
+        ctx.strokeText(text.text, screenX, screenY);
+      }
+
+      // Draw main text
+      ctx.fillStyle = text.color;
+      ctx.fillText(text.text, screenX, screenY);
+
+      ctx.restore();
+    }
+  },
+
+  /**
+   * Clear all floating texts
+   */
+  clear() {
+    this.texts = [];
   }
 };
 
 // Export for browser
 if (typeof window !== 'undefined') {
   window.HitEffectRenderer = HitEffectRenderer;
+  window.FloatingTextSystem = FloatingTextSystem;
 }

@@ -841,6 +841,7 @@ function updateNPCs(deltaTime) {
         // Target moved out of range - skip damage but still show visual (miss)
         broadcastNearNpc(npcEntity, 'combat:npcFire', {
           npcId: npcId,
+          npcType: npcEntity.type,
           faction: npcEntity.faction,
           weaponType: action.weaponType || 'kinetic',
           sourceX: npcEntity.position.x,
@@ -876,6 +877,7 @@ function updateNPCs(deltaTime) {
         // MISS - show visual but no damage
         broadcastNearNpc(npcEntity, 'combat:npcFire', {
           npcId: npcId,
+          npcType: npcEntity.type,
           faction: npcEntity.faction,
           weaponType: action.weaponType || 'kinetic',
           sourceX: npcEntity.position.x,
@@ -903,9 +905,13 @@ function updateNPCs(deltaTime) {
       const previewShip = require('../database').statements.getShipByUserId.get(targetPlayer.id);
       const willHitShield = previewShip && previewShip.shield_hp > 0;
 
+      // Get shield piercing amount for pirate weapons
+      const shieldPiercing = npcEntity.shieldPiercing || 0;
+
       // Broadcast NPC weapon fire visual with hit info for proper timing
       broadcastNearNpc(npcEntity, 'combat:npcFire', {
         npcId: npcId,
+        npcType: npcEntity.type,
         faction: npcEntity.faction,
         weaponType: action.weaponType || 'kinetic',
         sourceX: npcEntity.position.x,
@@ -916,11 +922,13 @@ function updateNPCs(deltaTime) {
         // Include hit info for client-side hit effect timing
         hitInfo: {
           isShieldHit: willHitShield,
-          damage: Math.round(damage.shieldDamage + damage.hullDamage)
+          damage: Math.round(damage.shieldDamage + damage.hullDamage),
+          shieldPiercing: shieldPiercing > 0
         }
       });
 
-      const result = combat.applyDamage(targetPlayer.id, damage);
+      // Apply damage with shield piercing (pirate weapons bypass 10% of shields)
+      const result = combat.applyDamage(targetPlayer.id, damage, action.weaponType || 'kinetic', shieldPiercing);
 
       if (result) {
         // Update player state
@@ -930,7 +938,7 @@ function updateNPCs(deltaTime) {
         // Calculate total damage dealt for broadcasts
         const totalDamage = Math.round(damage.shieldDamage + damage.hullDamage);
 
-        // Broadcast hit effect to nearby players
+        // Broadcast hit effect to nearby players (with shield pierce indicator)
         broadcastNearNpc(npcEntity, 'combat:hit', {
           attackerId: npcId,
           attackerType: 'npc',
@@ -938,7 +946,9 @@ function updateNPCs(deltaTime) {
           targetY: targetPlayer.position.y,
           hitShield: result.hitShield,
           damage: totalDamage,
-          weaponType: action.weaponType
+          weaponType: action.weaponType,
+          shieldPierced: result.shieldPierced,
+          piercingDamage: result.piercingDamage
         });
 
         // Find player socket
@@ -1334,6 +1344,71 @@ function updateNPCs(deltaTime) {
         faction: 'rogue_miner',
         npcId: action.npcId
       });
+    } else if (action && action.action === 'pirate:intelBroadcast') {
+      // ============================================
+      // PIRATE: Scout returned with intel, alerting nearby pirates
+      // ============================================
+      broadcastInRange(npcEntity.position, action.broadcastRange || 1000, 'pirate:intel', {
+        scoutId: npcId,
+        scoutPos: { x: npcEntity.position.x, y: npcEntity.position.y },
+        targetInfo: action.targetInfo,
+        alertedPirateCount: action.alertedPirates?.length || 0,
+        baseId: action.baseId,
+        timestamp: Date.now()
+      });
+      logger.log(`[PIRATE] Scout ${npcId} broadcast intel to ${action.alertedPirates?.length || 0} pirates`);
+    } else if (action && action.action === 'pirate:boostDive') {
+      // ============================================
+      // PIRATE: Fighter/Dreadnought performing boost dive attack
+      // ============================================
+      broadcastNearNpc(npcEntity, 'pirate:boostDive', {
+        npcId: npcId,
+        npcType: npcEntity.type,
+        startX: action.startX,
+        startY: action.startY,
+        targetX: action.targetX,
+        targetY: action.targetY,
+        speedMultiplier: action.speedMultiplier || 2.5,
+        duration: action.duration
+      });
+    } else if (action && action.action === 'pirate:steal') {
+      // ============================================
+      // PIRATE: Successfully stole from scavenger/rogue miner base
+      // ============================================
+      broadcastNearNpc(npcEntity, 'pirate:stealSuccess', {
+        npcId: npcId,
+        npcType: npcEntity.type,
+        targetType: action.targetType,  // 'scavenger_scrapPile', 'scavenger_carried', 'rogue_credits'
+        targetBaseId: action.targetBaseId,
+        stolenAmount: action.stolenAmount,
+        stolenItems: action.stolenItems,
+        position: { x: npcEntity.position.x, y: npcEntity.position.y }
+      });
+      logger.log(`[PIRATE] ${npcEntity.type} stole from ${action.targetType}: ${action.stolenAmount}`);
+    } else if (action && action.action === 'pirate:dreadnoughtEnraged') {
+      // ============================================
+      // PIRATE: Dreadnought entered enraged state (base destroyed)
+      // ============================================
+      broadcastInRange(npcEntity.position, 3000, 'pirate:dreadnoughtEnraged', {
+        npcId: npcId,
+        x: npcEntity.position.x,
+        y: npcEntity.position.y,
+        destroyedBaseId: action.destroyedBaseId,
+        timestamp: Date.now()
+      });
+      logger.info(`[PIRATE] Dreadnought ${npcId} entered ENRAGED state - base ${action.destroyedBaseId} destroyed`);
+    } else if (action && action.action === 'pirate:captainHeal') {
+      // ============================================
+      // PIRATE: Captain healing at base
+      // ============================================
+      broadcastNearNpc(npcEntity, 'pirate:captainHeal', {
+        npcId: npcId,
+        hull: npcEntity.hull,
+        hullMax: npcEntity.hullMax,
+        shield: npcEntity.shield,
+        shieldMax: npcEntity.shieldMax,
+        healRate: action.healRate
+      });
     }
   }
 
@@ -1594,6 +1669,22 @@ function broadcastInRange(position, range, event, data) {
 function playerAttackNPC(attackerId, npcId, weaponType, weaponTier, damageOverride) {
   const npcEntity = npc.getNPC(npcId);
   if (!npcEntity) return null;
+
+  // DREADNOUGHT INVULNERABILITY CHECK
+  // Pirate dreadnoughts have a chance to negate all damage
+  if (npcEntity.type === 'pirate_dreadnought' && npcEntity.invulnerableChance) {
+    if (Math.random() < npcEntity.invulnerableChance) {
+      // Damage blocked - broadcast invulnerable effect
+      logger.log(`[PIRATE] Dreadnought ${npcId} invulnerable proc! Broadcasting to nearby players.`);
+      broadcastNearNpc(npcEntity, 'npc:invulnerable', {
+        npcId: npcId,
+        x: npcEntity.position.x,
+        y: npcEntity.position.y,
+        attackerId: attackerId
+      });
+      return { blocked: true, invulnerable: true, npcId };
+    }
+  }
 
   // Calculate damage using proper damage calculation, or use override if provided
   let totalDamage;
