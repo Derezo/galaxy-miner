@@ -360,15 +360,17 @@ const Renderer = {
     // Use new background system if available
     if (typeof BackgroundSystem !== "undefined" && BackgroundSystem.initialized) {
       // Get visible objects for zone sampling
-      if (typeof Player !== "undefined" && typeof World !== "undefined") {
+      if (typeof Player !== "undefined" && Player.position && typeof World !== "undefined") {
         const objects = World.getVisibleObjects(
           Player.position,
           Math.max(this.width, this.height) * 2
         );
         BackgroundSystem.update(this.lastDt || 0.016, objects, Player.position);
+        BackgroundSystem.draw(this.ctx, this.camera, this.width, this.height);
+      } else {
+        // BackgroundSystem available but player not ready - just draw with defaults
+        BackgroundSystem.draw(this.ctx, this.camera, this.width, this.height);
       }
-
-      BackgroundSystem.draw(this.ctx, this.camera, this.width, this.height);
     } else {
       // Fallback to old starfield
       this.ctx.fillStyle = CONSTANTS.COLORS.BACKGROUND;
