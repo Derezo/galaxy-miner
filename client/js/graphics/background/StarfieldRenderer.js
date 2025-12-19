@@ -20,6 +20,9 @@ const StarfieldRenderer = {
   // Seeded random for consistent star positions
   seed: 12345,
 
+  // Tile size for seamless world-space grid
+  tileSize: 2000,
+
   init() {
     this.generateStars();
     this.time = 0;
@@ -33,7 +36,6 @@ const StarfieldRenderer = {
    */
   generateStars() {
     this.stars = [];
-    const tileSize = 2000; // World units per tile
 
     for (const layer of this.layers) {
       const layerStars = [];
@@ -53,16 +55,18 @@ const StarfieldRenderer = {
         const rand4 = seed / 0x7fffffff;
         seed = (seed * 1103515245 + 12345) & 0x7fffffff;
         const rand5 = seed / 0x7fffffff;
+        seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+        const rand6 = seed / 0x7fffffff;
 
         layerStars.push({
           // Position within tile (will be offset by camera)
-          tileX: rand1 * tileSize,
-          tileY: rand2 * tileSize,
+          tileX: rand1 * this.tileSize,
+          tileY: rand2 * this.tileSize,
           size: layer.sizeMin + rand3 * (layer.sizeMax - layer.sizeMin),
           // Twinkle state
           twinklePhase: rand4 * Math.PI * 2,
           twinklePeriod: 3 + rand5 * 5, // 3-8 seconds
-          isTwinkling: rand4 < layer.twinkleChance,
+          isTwinkling: rand6 < layer.twinkleChance,
           // Drift state (for mid/near layers)
           driftPhase: rand5 * Math.PI * 2,
           driftPeriod: 20 + rand4 * 20, // 20-40 seconds
@@ -93,8 +97,6 @@ const StarfieldRenderer = {
    * @param {Object} palette - From PaletteManager
    */
   draw(ctx, camera, viewportWidth, viewportHeight, palette) {
-    const tileSize = 2000;
-
     // Draw each layer (back to front)
     for (let layerIndex = 0; layerIndex < this.layers.length; layerIndex++) {
       const layer = this.layers[layerIndex];
@@ -105,18 +107,18 @@ const StarfieldRenderer = {
       const parallaxY = camera.y * layer.parallax;
 
       // Determine which tiles are visible
-      const startTileX = Math.floor((parallaxX - viewportWidth) / tileSize);
-      const endTileX = Math.ceil((parallaxX + viewportWidth * 2) / tileSize);
-      const startTileY = Math.floor((parallaxY - viewportHeight) / tileSize);
-      const endTileY = Math.ceil((parallaxY + viewportHeight * 2) / tileSize);
+      const startTileX = Math.floor((parallaxX - viewportWidth) / this.tileSize);
+      const endTileX = Math.ceil((parallaxX + viewportWidth * 2) / this.tileSize);
+      const startTileY = Math.floor((parallaxY - viewportHeight) / this.tileSize);
+      const endTileY = Math.ceil((parallaxY + viewportHeight * 2) / this.tileSize);
 
       // Draw stars in visible tiles
       for (let tileX = startTileX; tileX <= endTileX; tileX++) {
         for (let tileY = startTileY; tileY <= endTileY; tileY++) {
           for (const star of layerStars) {
             // Calculate screen position
-            let screenX = star.tileX + tileX * tileSize - parallaxX;
-            let screenY = star.tileY + tileY * tileSize - parallaxY;
+            let screenX = star.tileX + tileX * this.tileSize - parallaxX;
+            let screenY = star.tileY + tileY * this.tileSize - parallaxY;
 
             // Apply drift if enabled
             if (star.driftAmplitude > 0) {
@@ -149,34 +151,34 @@ const StarfieldRenderer = {
   },
 
   /**
-   * Draw a single soft-gradient star
+   * Draw a single star with optimized rendering (no gradients)
    */
   drawStar(ctx, x, y, size, brightness, palette, layerIndex) {
     ctx.save();
-    ctx.globalAlpha = brightness;
 
     // Get accent color from palette, default to white
     let baseColor = '#ffffff';
     if (palette && palette.accentHSL) {
       const hsl = palette.accentHSL;
-      // Tint star color slightly toward palette
-      const tintStrength = 0.15 + layerIndex * 0.05; // Nearer layers more tinted
+      const tintStrength = 0.15 + layerIndex * 0.05;
       const h = hsl.h;
       const s = hsl.s * tintStrength;
-      const l = 85 + (100 - 85) * (1 - tintStrength);
+      const l = 85 + 15 * tintStrength;
       baseColor = `hsl(${h}, ${s}%, ${l}%)`;
     }
 
-    // Soft radial gradient
-    const gradient = ctx.createRadialGradient(x, y, 0, x, y, size * 1.5);
-    gradient.addColorStop(0, '#ffffff');
-    gradient.addColorStop(0.3, baseColor);
-    gradient.addColorStop(0.7, baseColor + '40');
-    gradient.addColorStop(1, 'transparent');
-
-    ctx.fillStyle = gradient;
+    // Outer glow (larger, faded)
+    ctx.globalAlpha = brightness * 0.3;
+    ctx.fillStyle = baseColor;
     ctx.beginPath();
     ctx.arc(x, y, size * 1.5, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Inner core (brighter)
+    ctx.globalAlpha = brightness;
+    ctx.fillStyle = '#ffffff';
+    ctx.beginPath();
+    ctx.arc(x, y, size * 0.5, 0, Math.PI * 2);
     ctx.fill();
 
     ctx.restore();
