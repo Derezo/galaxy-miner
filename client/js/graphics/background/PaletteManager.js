@@ -55,8 +55,17 @@ const PaletteManager = {
       secondary: { h: 230, s: 25, l: 12 },
       accent: { h: 220, s: 10, l: 75 }
     };
-    this.startPalette = { ...this.currentPalette };
-    this.targetPalette = { ...this.currentPalette };
+    // Deep copy to avoid shared references
+    this.startPalette = {
+      primary: { ...this.currentPalette.primary },
+      secondary: { ...this.currentPalette.secondary },
+      accent: { ...this.currentPalette.accent }
+    };
+    this.targetPalette = {
+      primary: { ...this.currentPalette.primary },
+      secondary: { ...this.currentPalette.secondary },
+      accent: { ...this.currentPalette.accent }
+    };
     this.currentActivity = 0.15;
     this.targetActivity = 0.15;
     this.transition.active = false;
@@ -255,9 +264,14 @@ const PaletteManager = {
   },
 
   /**
-   * Convert HSL object to CSS string
+   * Convert HSL object to CSS string with clamping
+   * @param {{h: number, s: number, l: number}} hsl - HSL color object
+   * @returns {string} CSS hsl() string
    */
   hslToString(hsl) {
-    return `hsl(${Math.round(hsl.h)}, ${Math.round(hsl.s)}%, ${Math.round(hsl.l)}%)`;
+    const h = ((Math.round(hsl.h) % 360) + 360) % 360; // Wrap hue to 0-359
+    const s = Math.max(0, Math.min(100, Math.round(hsl.s)));
+    const l = Math.max(0, Math.min(100, Math.round(hsl.l)));
+    return `hsl(${h}, ${s}%, ${l}%)`;
   }
 };
