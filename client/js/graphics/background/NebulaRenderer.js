@@ -152,8 +152,8 @@ const NebulaRenderer = {
 
     // Get color from palette with cloud's offset
     let hsl;
-    if (palette && (cloud.usePrimary ? palette.primaryHSL : palette.secondaryHSL)) {
-      const baseHSL = cloud.usePrimary ? palette.primaryHSL : palette.secondaryHSL;
+    const baseHSL = palette && (cloud.usePrimary ? palette.primaryHSL : palette.secondaryHSL);
+    if (baseHSL) {
       hsl = {
         h: (baseHSL.h + cloud.colorOffset + 360) % 360,
         s: baseHSL.s + 10,  // Slightly more saturated for nebula
