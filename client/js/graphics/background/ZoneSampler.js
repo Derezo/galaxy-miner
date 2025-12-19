@@ -83,7 +83,7 @@ const ZoneSampler = {
     const factionCounts = {};
 
     // Sample stars
-    if (visibleObjects.stars) {
+    if (Array.isArray(visibleObjects.stars)) {
       for (const star of visibleObjects.stars) {
         const dist = this.getDistance(playerPosition, star);
         if (dist > this.config.sampleRadius) continue;
@@ -98,7 +98,7 @@ const ZoneSampler = {
     }
 
     // Sample planets
-    if (visibleObjects.planets) {
+    if (Array.isArray(visibleObjects.planets)) {
       for (const planet of visibleObjects.planets) {
         const dist = this.getDistance(playerPosition, planet);
         if (dist > this.config.sampleRadius) continue;
@@ -113,7 +113,7 @@ const ZoneSampler = {
     }
 
     // Sample asteroids (just for activity, minimal color contribution)
-    if (visibleObjects.asteroids) {
+    if (Array.isArray(visibleObjects.asteroids)) {
       for (const asteroid of visibleObjects.asteroids) {
         const dist = this.getDistance(playerPosition, asteroid);
         if (dist > this.config.sampleRadius) continue;
@@ -124,7 +124,7 @@ const ZoneSampler = {
     }
 
     // Sample bases
-    if (visibleObjects.bases) {
+    if (Array.isArray(visibleObjects.bases)) {
       for (const base of visibleObjects.bases) {
         const dist = this.getDistance(playerPosition, base);
         if (dist > this.config.sampleRadius) continue;
@@ -142,7 +142,9 @@ const ZoneSampler = {
 
     // Sample NPCs from Entities
     if (typeof Entities !== 'undefined' && Entities.npcs) {
-      for (const [id, npc] of Entities.npcs) {
+      for (const npc of Entities.npcs.values()) {
+        if (!npc.position) continue; // Skip if position is undefined
+
         const dist = this.getDistance(playerPosition, npc.position);
         if (dist > this.config.sampleRadius) continue;
 
@@ -159,7 +161,9 @@ const ZoneSampler = {
 
     // Sample other players
     if (typeof Entities !== 'undefined' && Entities.players) {
-      for (const [id, player] of Entities.players) {
+      for (const player of Entities.players.values()) {
+        if (!player.position) continue; // Skip if position is undefined
+
         const dist = this.getDistance(playerPosition, player.position);
         if (dist > this.config.sampleRadius) continue;
 
@@ -199,7 +203,7 @@ const ZoneSampler = {
    * Get weight based on distance (inverse, 1 at 0, 0 at sampleRadius)
    */
   getDistanceWeight(dist) {
-    return Math.max(0, 1 - (dist / this.config.sampleRadius));
+    return Math.max(0, Math.min(1, 1 - (dist / this.config.sampleRadius)));
   },
 
   /**
