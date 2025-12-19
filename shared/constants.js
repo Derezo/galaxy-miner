@@ -377,59 +377,60 @@ const CONSTANTS = {
 
   // Upgrade costs (credits only - legacy, reduced by 40% since resources now also required)
   UPGRADE_COSTS: {
-    2: 300,
-    3: 900,
+    2: 100,
+    3: 400,
     4: 3000,
     5: 9000
   },
 
   // Upgrade requirements with resources (per component per tier)
+  // Tier 2-3 costs significantly reduced to improve early game accessibility
   UPGRADE_REQUIREMENTS: {
     engine: {
-      2: { credits: 300, resources: { HYDROGEN: 15, CARBON: 10 } },
-      3: { credits: 900, resources: { HYDROGEN: 25, HELIUM3: 10, TITANIUM: 8 } },
+      2: { credits: 100, resources: { HYDROGEN: 5, CARBON: 3 } },
+      3: { credits: 400, resources: { HYDROGEN: 12, HELIUM3: 5, TITANIUM: 4 } },
       4: { credits: 3000, resources: { HELIUM3: 20, XENON: 10, PLATINUM: 5 } },
       5: { credits: 9000, resources: { XENON: 15, ANTIMATTER: 3, EXOTIC_MATTER: 2 } }
     },
     weapon: {
-      2: { credits: 300, resources: { IRON: 15, NICKEL: 10 } },
-      3: { credits: 900, resources: { TITANIUM: 12, COBALT: 10, COPPER: 8 } },
+      2: { credits: 100, resources: { IRON: 5, NICKEL: 3 } },
+      3: { credits: 400, resources: { TITANIUM: 6, COBALT: 5, COPPER: 4 } },
       4: { credits: 3000, resources: { IRIDIUM: 8, URANIUM: 5, PLATINUM: 8 } },
       5: { credits: 9000, resources: { URANIUM: 12, DARK_MATTER: 5, NEUTRONIUM: 2 } }
     },
     shield: {
-      2: { credits: 300, resources: { SILICON: 15, SULFUR: 10 } },
-      3: { credits: 900, resources: { ICE_CRYSTALS: 12, LITHIUM: 10, SILVER: 8 } },
+      2: { credits: 100, resources: { SILICON: 5, SULFUR: 3 } },
+      3: { credits: 400, resources: { ICE_CRYSTALS: 6, LITHIUM: 5, SILVER: 4 } },
       4: { credits: 3000, resources: { QUANTUM_CRYSTALS: 6, DARK_MATTER: 8, GOLD: 10 } },
       5: { credits: 9000, resources: { QUANTUM_CRYSTALS: 12, VOID_CRYSTALS: 2, EXOTIC_MATTER: 3 } }
     },
     mining: {
-      2: { credits: 300, resources: { IRON: 20, CARBON: 8 } },
-      3: { credits: 900, resources: { TITANIUM: 15, COPPER: 10, COBALT: 8 } },
+      2: { credits: 100, resources: { IRON: 6, CARBON: 3 } },
+      3: { credits: 400, resources: { TITANIUM: 8, COPPER: 5, COBALT: 4 } },
       4: { credits: 3000, resources: { PLATINUM: 10, IRIDIUM: 6, GOLD: 8 } },
       5: { credits: 9000, resources: { IRIDIUM: 12, NEUTRONIUM: 3, DARK_MATTER: 5 } }
     },
     cargo: {
-      2: { credits: 300, resources: { IRON: 20, NICKEL: 12 } },
-      3: { credits: 900, resources: { TITANIUM: 18, COPPER: 12, SILVER: 6 } },
+      2: { credits: 100, resources: { IRON: 6, NICKEL: 4 } },
+      3: { credits: 400, resources: { TITANIUM: 9, COPPER: 6, SILVER: 3 } },
       4: { credits: 3000, resources: { TITANIUM: 25, PLATINUM: 8, IRIDIUM: 5 } },
       5: { credits: 9000, resources: { IRIDIUM: 15, NEUTRONIUM: 4, VOID_CRYSTALS: 1 } }
     },
     radar: {
-      2: { credits: 300, resources: { COPPER: 12, SILICON: 15 } },
-      3: { credits: 900, resources: { SILVER: 10, NEON: 12, LITHIUM: 8 } },
+      2: { credits: 100, resources: { COPPER: 4, SILICON: 5 } },
+      3: { credits: 400, resources: { SILVER: 5, NEON: 6, LITHIUM: 4 } },
       4: { credits: 3000, resources: { GOLD: 10, QUANTUM_CRYSTALS: 5, XENON: 8 } },
       5: { credits: 9000, resources: { QUANTUM_CRYSTALS: 10, EXOTIC_MATTER: 4, VOID_CRYSTALS: 2 } }
     },
     energy_core: {
-      2: { credits: 300, resources: { HYDROGEN: 20, PHOSPHORUS: 10 } },
-      3: { credits: 900, resources: { HELIUM3: 15, LITHIUM: 12, URANIUM: 3 } },
+      2: { credits: 100, resources: { HYDROGEN: 6, PHOSPHORUS: 3 } },
+      3: { credits: 400, resources: { HELIUM3: 8, LITHIUM: 6, URANIUM: 2 } },
       4: { credits: 3000, resources: { URANIUM: 10, DARK_MATTER: 6, HELIUM3: 20 } },
       5: { credits: 9000, resources: { ANTIMATTER: 5, EXOTIC_MATTER: 3, NEUTRONIUM: 2 } }
     },
     hull: {
-      2: { credits: 300, resources: { IRON: 25, NICKEL: 15 } },
-      3: { credits: 900, resources: { TITANIUM: 20, COBALT: 12, IRON: 20 } },
+      2: { credits: 100, resources: { IRON: 8, NICKEL: 5 } },
+      3: { credits: 400, resources: { TITANIUM: 10, COBALT: 6, IRON: 10 } },
       4: { credits: 3000, resources: { IRIDIUM: 10, PLATINUM: 10, TITANIUM: 15 } },
       5: { credits: 9000, resources: { NEUTRONIUM: 5, IRIDIUM: 15, VOID_CRYSTALS: 1 } }
     }
