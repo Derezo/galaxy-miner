@@ -11,6 +11,13 @@ const PaletteManager = {
     accent: { h: 220, s: 10, l: 75 }     // Silver-white
   },
 
+  // Saved palette when transition starts
+  startPalette: {
+    primary: { h: 220, s: 30, l: 8 },
+    secondary: { h: 230, s: 25, l: 12 },
+    accent: { h: 220, s: 10, l: 75 }
+  },
+
   // Target palette (what we're transitioning to)
   targetPalette: {
     primary: { h: 220, s: 30, l: 8 },
@@ -48,6 +55,7 @@ const PaletteManager = {
       secondary: { h: 230, s: 25, l: 12 },
       accent: { h: 220, s: 10, l: 75 }
     };
+    this.startPalette = { ...this.currentPalette };
     this.targetPalette = { ...this.currentPalette };
     this.currentActivity = 0.15;
     this.targetActivity = 0.15;
@@ -61,6 +69,8 @@ const PaletteManager = {
    * @param {Object} zoneData - From ZoneSampler.getZoneData()
    */
   update(dt, zoneData) {
+    if (!zoneData) return;
+
     // Calculate new target palette from zone colors
     const newTarget = this.calculateTargetPalette(zoneData.colors);
     this.targetActivity = zoneData.activityLevel;
@@ -69,6 +79,12 @@ const PaletteManager = {
     if (!this.transition.active) {
       const diff = this.getPaletteDifference(this.currentPalette, newTarget);
       if (diff > this.config.changeThreshold) {
+        // Save current palette as start point
+        this.startPalette = {
+          primary: { ...this.currentPalette.primary },
+          secondary: { ...this.currentPalette.secondary },
+          accent: { ...this.currentPalette.accent }
+        };
         // Start transition with delay
         this.targetPalette = newTarget;
         this.transition.active = true;
@@ -98,9 +114,9 @@ const PaletteManager = {
           // Interpolate with easing (slow at start and end)
           const eased = this.easeInOutCubic(this.transition.progress);
           this.currentPalette = this.interpolatePalette(
-            this.currentPalette,
+            this.startPalette,
             this.targetPalette,
-            eased * 0.02  // Very small step per frame
+            eased
           );
         }
       }
@@ -139,7 +155,11 @@ const PaletteManager = {
     }
 
     if (totalWeight === 0) {
-      return this.currentPalette;
+      return {
+        primary: { ...this.currentPalette.primary },
+        secondary: { ...this.currentPalette.secondary },
+        accent: { ...this.currentPalette.accent }
+      };
     }
 
     const avgH = hSum / totalWeight;
