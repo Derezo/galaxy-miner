@@ -1,0 +1,48 @@
+[1;33m⚠  DRY RUN MODE - No changes will be made[0m
+[0;36mℹ  Target: root@mittonvillage.com:/var/www/galaxy-miner[0m
+[0;36mℹ  Domain: galaxyminer.mittonvillage.com[0m
+[0;32m✓ Deployment lock acquired[0m
+
+[0;34m==>[1m Checking local prerequisites[0m
+[0;32m✓ tar is installed[0m
+[0;32m✓ node is installed (v22.21.0)[0m
+[0;32m✓ SSH key found: /home/eric/.ssh/id_ed25519[0m
+[0;32m✓ .env.production found[0m
+[0;32m✓ ecosystem.config.js found[0m
+[0;32m✓ package.json found[0m
+
+[0;34m==>[1m Checking SSH connectivity[0m
+[1;33m[DRY-RUN][0m Would test SSH connection to root@mittonvillage.com
+
+[0;34m==>[1m Checking remote prerequisites[0m
+[1;33m[DRY-RUN][0m Would check remote prerequisites (node, npm, pm2, nginx, certbot)
+
+[0;34m==>[1m Creating remote backup[0m
+[1;33m[DRY-RUN][0m Would create backup of /var/www/galaxy-miner
+
+[0;34m==>[1m Creating deployment package[0m
+[1;33m[DRY-RUN][0m Would create deployment package at /tmp/galaxy-miner-deploy.tar.gz
+
+[0;34m==>[1m Transferring to remote server[0m
+[1;33m[DRY-RUN][0m Would transfer package to mittonvillage.com and extract to /var/www/galaxy-miner
+
+[0;34m==>[1m Installing dependencies[0m
+[1;33m[DRY-RUN][0m Would run npm ci --omit=dev on remote
+
+[0;34m==>[1m Deploying environment configuration[0m
+[1;33m[DRY-RUN][0m Would deploy .env.production to /var/www/galaxy-miner/.env
+
+[0;34m==>[1m Deploying with PM2[0m
+[1;33m[DRY-RUN][0m Would start/reload PM2 process
+
+[0;34m==>[1m Deploying Nginx configuration[0m
+[1;33m[DRY-RUN][0m Would deploy Nginx config to /etc/nginx/sites-available/galaxyminer.mittonvillage.com
+
+[0;34m==>[1m Setting up SSL certificate[0m
+[1;33m[DRY-RUN][0m Would setup SSL certificate for galaxyminer.mittonvillage.com
+
+[0;34m==>[1m Verifying deployment[0m
+[1;33m[DRY-RUN][0m Would verify health endpoint at https://galaxyminer.mittonvillage.com/health
+
+[0;34m==>[1m Deployment Summary[0m
+[0;36mℹ  This was a dry run - no changes were made[0m

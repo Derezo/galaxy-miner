@@ -1,3 +1,6 @@
+// Load environment variables first (before any other requires)
+require('dotenv').config();
+
 const express = require('express');
 const { createServer } = require('http');
 const { Server } = require('socket.io');

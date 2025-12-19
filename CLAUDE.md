@@ -70,13 +70,16 @@ Both client and server use identical seeded random generation (seed: `GALAXY_ALP
 ### NPC AI System (`/server/game/ai/`)
 
 Modular AI with faction-specific strategies:
-- `flanking.js` - Pirates: aggressive flanking maneuvers
-- `swarm.js` - Swarm: coordinated group attacks, linked health pools
-- `territorial.js` - Rogue Miners: defend claimed territory
-- `retreat.js` - Scavengers: flee when damaged
-- `formation.js` - Void Entities: maintain formation patterns
+- `pirate.js` - Pirates: primary AI coordinator with aggression logic
+- `flanking.js` - Flanking maneuvers with shield piercing
+- `swarm.js` - Swarm: coordinated group attacks, linked health pools, assimilation mechanics
+- `territorial.js` - Rogue Miners: defend claimed territory around mining claims
+- `scavenger.js` - Scavengers: target wreckage, opportunistic behavior
+- `retreat.js` - Retreat behavior when damaged
+- `formation.js` - Void Entities: maintain formation patterns in deep space
+- `mining.js` - NPC mining behavior for resource-gathering NPCs
 
-Each faction has a spawn hub type (bases) that continuously spawns NPCs. Hub destruction stops spawning until respawn timer.
+Each faction has a spawn hub type (bases) that continuously spawns NPCs. Hub destruction stops spawning until respawn timer. The Swarm faction has unique mechanics including queen spawning, base assimilation, and egg hatching.
 
 ### Key Client Modules
 
@@ -88,7 +91,35 @@ Each faction has a spawn hub type (bases) that continuously spawns NPCs. Hub des
 | `/client/js/player.js` | Local player physics and state |
 | `/client/js/world.js` | Client-side procedural generation |
 | `/client/js/entities.js` | Entity management (players, NPCs, projectiles) |
-| `/client/js/input.js` | Keyboard/mouse input handling |
+| `/client/js/input.js` | Keyboard/mouse input handling (unified mobile/desktop) |
+
+### Mobile System (`/client/js/mobile/`)
+
+Touch-optimized controls for mobile devices. See `/client/js/mobile/README.md` for detailed API.
+
+- `device-detect.js` - Device detection, body classes (`is-mobile`, `is-touch`, `is-landscape`)
+- `virtual-joystick.js` - Floating touch joystick for movement (left 40% of screen)
+- `auto-fire.js` - Automatic firing when aimed at enemies within tolerance
+- `mobile-hud.js` - Touch action buttons (fire, context action, menu)
+
+Mobile CSS in `/client/css/mobile.css` handles responsive layout, safe area insets, and touch targets.
+
+### Network Handlers (`/client/js/network/`)
+
+Modular Socket.io event handlers (88 handlers across 10 modules). See `/client/js/network/README.md`.
+
+| Module | Events |
+|--------|--------|
+| `auth.js` | Login, register, token auth |
+| `player.js` | Player updates, death, respawn |
+| `combat.js` | Fire, hit, damage |
+| `mining.js` | Mining start, progress, complete |
+| `npc.js` | NPC updates, death, queen events |
+| `loot.js` | Wreckage spawn, collect, buffs |
+| `marketplace.js` | List, buy, cancel |
+| `ship.js` | Upgrades, customization |
+| `chat.js` | Messages, emotes |
+| `wormhole.js` | Transit events |
 
 ### Graphics System (`/client/js/graphics/`)
 
@@ -155,6 +186,9 @@ Tests use Vitest with in-memory SQLite databases. Test utilities in `/tests/setu
 - `createTestUser(db, { username, passwordHash })` - Create test user
 - `createTestShip(db, userId, shipData)` - Create test ship with defaults
 - `addInventory(db, userId, resourceType, quantity)` - Add resources to inventory
+- `getInventory(db, userId)` - Get user's inventory array
+- `createListing(db, { sellerId, resourceType, quantity, pricePerUnit })` - Create marketplace listing
+- `closeTestDatabase(db)` - Clean up database connection
 - `MOCK_CONSTANTS` - Test-safe constants for unit tests
 
 Tests are organized under `/tests/unit/` by module (server, shared).
@@ -162,6 +196,11 @@ Tests are organized under `/tests/unit/` by module (server, shared).
 ## Configuration
 
 Environment variables can be set in `.env` (copy from `.env.example`). The server uses defaults if not specified.
+
+Key environment variables:
+- `PORT` - Server port (default: 3388)
+- `SESSION_SECRET` - Required for production, token signing secret
+- `DEBUG` - When `false` (production), silences logger.log/info/warn; logger.error() and logger.network() always log
 
 ## Game Systems Reference
 
@@ -177,9 +216,13 @@ Environment variables can be set in `.env` (copy from `.env.example`). The serve
 
 **Loot System**: NPC deaths drop wreckage containing buffs (temporary power-ups), components (tier 6+ upgrades), and relics (permanent collectibles). See `/docs/systems/loot-pools.md`
 
+**Relics**: Permanent collectibles with unique effects - Wormhole Gem (wormhole transit), Pirate Treasure (credit bonus), Scrap Siphon (faster wreckage collection), Mining Rites (5x mining yield), Skull and Bones (plunder faction bases)
+
 **Teams**: Players can form teams with shared credits and friendly fire protection. See `/docs/systems/team-multiplayer.md`
 
-**Wormholes**: 8% of star systems have wormholes enabling instant travel between linked systems. See `/docs/systems/wormhole-transit.md`
+**Wormholes**: 8% of star systems have wormholes enabling instant travel between linked systems. Requires Wormhole Gem relic. See `/docs/systems/wormhole-transit.md`
+
+**Swarm Mechanics**: Unique faction with egg hatching, base assimilation (converting enemy bases), queen boss spawning (requires 3 assimilated bases in sector), and phase-based queen AI (Hunt → Siege → Swarm → Desperation)
 
 ## Node Version
 

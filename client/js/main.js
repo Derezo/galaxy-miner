@@ -3,6 +3,7 @@
 const GalaxyMiner = {
   initialized: false,
   gameStarted: false,
+  _fullscreenPending: false,
 
   init() {
     if (this.initialized) return;
@@ -10,7 +11,12 @@ const GalaxyMiner = {
 
     Logger.log('Galaxy Miner initializing...');
 
-    // Initialize modules
+    // Initialize device detection first (needed for mobile-aware initialization)
+    if (typeof DeviceDetect !== 'undefined') {
+      DeviceDetect.init();
+    }
+
+    // Initialize core modules
     Network.init();
     Input.init();
     Renderer.init();
@@ -25,6 +31,17 @@ const GalaxyMiner = {
     NotificationManager.init();
     EmoteWheel.init();
     AudioManager.init();
+
+    // Initialize mobile modules (only activate on mobile devices)
+    if (typeof VirtualJoystick !== 'undefined') {
+      VirtualJoystick.init();
+    }
+    if (typeof AutoFire !== 'undefined') {
+      AutoFire.init();
+    }
+    if (typeof MobileHUD !== 'undefined') {
+      MobileHUD.init();
+    }
 
     Logger.log('Galaxy Miner ready');
   },
@@ -49,8 +66,39 @@ const GalaxyMiner = {
     document.getElementById('auth-screen').classList.add('hidden');
     document.getElementById('hud').classList.remove('hidden');
 
+    // Request fullscreen on mobile
+    if (typeof DeviceDetect !== 'undefined' && DeviceDetect.isMobile) {
+      this.requestFullscreen();
+    }
+
     // Start game loop
     Game.start();
+  },
+
+  /**
+   * Request fullscreen mode on mobile devices
+   * Falls back to pending state if blocked (requires user gesture)
+   */
+  requestFullscreen() {
+    const elem = document.documentElement;
+    const request = elem.requestFullscreen || elem.webkitRequestFullscreen || elem.mozRequestFullScreen;
+    if (request) {
+      request.call(elem).catch(() => {
+        // Blocked by browser - will try on first touch
+        this._fullscreenPending = true;
+        Logger.log('Fullscreen blocked, will try on user gesture');
+      });
+    }
+  },
+
+  /**
+   * Try to enter fullscreen if pending (called from touch handler)
+   */
+  tryPendingFullscreen() {
+    if (this._fullscreenPending && this.gameStarted) {
+      this._fullscreenPending = false;
+      this.requestFullscreen();
+    }
   },
 
   stopGame() {

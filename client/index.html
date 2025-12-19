@@ -2,15 +2,26 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <title>Galaxy Miner</title>
   <link rel="stylesheet" href="css/index.css">
   <link rel="stylesheet" href="css/ship-upgrade.css">
   <link rel="stylesheet" href="css/wormhole-transit.css">
+  <link rel="stylesheet" href="css/mobile.css">
 </head>
 <body>
   <!-- Main game canvas -->
   <canvas id="gameCanvas"></canvas>
+
+  <!-- Mobile rotation prompt (shown in portrait mode) -->
+  <div class="rotation-prompt">
+    <svg class="rotation-prompt-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+      <rect x="4" y="2" width="16" height="20" rx="2"/>
+      <circle cx="12" cy="18" r="1.5"/>
+      <path d="M8 7h8M8 10h8"/>
+    </svg>
+    <p class="rotation-prompt-text">Please rotate your device to landscape mode for the best experience</p>
+  </div>
 
   <!-- UI Overlays -->
   <div id="ui-container">
@@ -325,6 +336,11 @@
   <script src="js/ui/profile-modal.js?v=2"></script>
   <script src="js/ui/terminal.js"></script>
   <script src="js/ui/emote-wheel.js"></script>
+  <!-- Mobile support -->
+  <script src="js/mobile/device-detect.js"></script>
+  <script src="js/mobile/virtual-joystick.js"></script>
+  <script src="js/mobile/auto-fire.js"></script>
+  <script src="js/mobile/mobile-hud.js"></script>
   <script src="js/game.js"></script>
   <script src="js/main.js"></script>
 </body>

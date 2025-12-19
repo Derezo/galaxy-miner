@@ -1,0 +1,79 @@
+[0;36mℹ  Target: root@mittonvillage.com:/var/www/galaxy-miner[0m
+[0;36mℹ  Domain: galaxyminer.mittonvillage.com[0m
+[0;32m✓ Deployment lock acquired[0m
+
+[0;34m==>[1m Checking local prerequisites[0m
+[0;32m✓ tar is installed[0m
+[0;32m✓ node is installed (v22.21.0)[0m
+[0;32m✓ SSH key found: /home/eric/.ssh/id_ed25519[0m
+[0;32m✓ .env.production found[0m
+[0;32m✓ ecosystem.config.js found[0m
+[0;32m✓ package.json found[0m
+
+[0;34m==>[1m Running pre-deployment validation[0m
+[0;36mℹ  Running test suite...[0m
+
+> galaxy-miner@1.0.0 test
+> vitest run
+
+[33mThe CJS build of Vite's Node API is deprecated. See https://vite.dev/guide/troubleshooting.html#vite-cjs-node-api-deprecated for more details.[39m
+
+ RUN  v2.1.9 /home/eric/Projects/galaxy-miner
+
+ ✓ tests/unit/shared/utils.test.js (41 tests) 4ms
+ ✓ tests/unit/shared/physics.test.js (34 tests) 15ms
+ ✓ tests/unit/server/auth.test.js (21 tests) 268ms
+
+ Test Files  3 passed (3)
+      Tests  96 passed (96)
+   Start at  22:37:30
+   Duration  458ms (transform 39ms, setup 0ms, collect 49ms, tests 287ms, environment 0ms, prepare 192ms)
+
+[0;32m✓ Tests passed[0m
+[0;32m✓ Pre-deployment validation passed[0m
+
+[0;34m==>[1m Checking SSH connectivity[0m
+[0;32m✓ SSH connection to mittonvillage.com verified[0m
+
+[0;34m==>[1m Checking remote prerequisites[0m
+[0;32m✓ Remote node: v20.19.6[0m
+[0;32m✓ Remote npm installed[0m
+[0;32m✓ Remote pm2 installed[0m
+[0;32m✓ Remote nginx installed[0m
+[0;32m✓ Remote certbot installed[0m
+
+[0;34m==>[1m Creating remote backup[0m
+[0;36mℹ  No existing deployment to backup[0m
+
+[0;34m==>[1m Creating deployment package[0m
+[0;36mℹ  Packaging application files...[0m
+[0;32m✓ Deployment package created: 4.4M[0m
+
+[0;34m==>[1m Transferring to remote server[0m
+[0;36mℹ  Uploading deployment package...[0m
+[0;32m✓ Package uploaded[0m
+[0;36mℹ  Extracting on remote server...[0m
+[0;32m✓ Package extracted[0m
+[0;32m✓ Code deployed[0m
+
+[0;34m==>[1m Installing dependencies[0m
+[0;36mℹ  Installing production dependencies (this may take a moment)...[0m
+[0;32m✓ Dependencies installed[0m
+
+[0;34m==>[1m Deploying environment configuration[0m
+[0;32m✓ Environment file deployed[0m
+
+[0;34m==>[1m Checking database[0m
+[0;36mℹ  Database not found, will be created on first run[0m
+[0;32m✓ Data directory prepared[0m
+
+[0;34m==>[1m Deploying with PM2[0m
+[0;36mℹ  Starting PM2 process for the first time...[0m
+[0;32m✓ PM2 deployment complete[0m
+
+[0;34m==>[1m Deploying Nginx configuration[0m
+[0;32m✓ Nginx config deployed[0m
+[0;36mℹ  Enabling Nginx site...[0m
+[0;36mℹ  Testing Nginx configuration...[0m
+[0;31m✗ Nginx config test failed - NOT reloading[0m
+[0;36mℹ  Cleaned up local deployment package[0m

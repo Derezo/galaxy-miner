@@ -91,7 +91,10 @@
   font-size: 16px;
 }
 
-/* HUD Button (legacy support) */
+/* HUD Button (legacy support)
+ * @deprecated - Use .btn system instead. Kept for backward compatibility.
+ * New code should use .btn, .btn-primary, .btn-ghost, etc.
+ */
 .hud-btn {
   padding: 12px 24px;
   background: var(--color-bg-dark);

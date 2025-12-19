@@ -8,6 +8,9 @@ const Renderer = {
   effects: [],
   miningNotification: null,
   lastDt: 0,
+  dpr: 1, // Device pixel ratio for high-DPI displays
+  width: 0, // Logical width (CSS pixels)
+  height: 0, // Logical height (CSS pixels)
 
   // Screen shake system
   screenShake: {
@@ -20,6 +23,9 @@ const Renderer = {
   init() {
     this.canvas = document.getElementById("gameCanvas");
     this.ctx = this.canvas.getContext("2d");
+
+    // Set DPI scaling (cap at 2 for performance on high-DPI mobile)
+    this.dpr = Math.min(window.devicePixelRatio || 1, 2);
 
     // Handle resize
     window.addEventListener("resize", () => this.resize());
@@ -89,8 +95,99 @@ const Renderer = {
   },
 
   resize() {
-    this.canvas.width = window.innerWidth;
-    this.canvas.height = window.innerHeight;
+    // Get CSS (logical) dimensions
+    const cssWidth = window.innerWidth;
+    const cssHeight = window.innerHeight;
+
+    // Set canvas buffer size (scaled by DPR for crisp rendering)
+    this.canvas.width = cssWidth * this.dpr;
+    this.canvas.height = cssHeight * this.dpr;
+
+    // Set CSS display size
+    this.canvas.style.width = cssWidth + 'px';
+    this.canvas.style.height = cssHeight + 'px';
+
+    // Scale context to match DPR
+    this.ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+
+    // Store logical dimensions for game code
+    this.width = cssWidth;
+    this.height = cssHeight;
+
+    // Track portrait mode for responsive game systems
+    this.portraitMode = cssWidth < cssHeight;
+  },
+
+  /**
+   * Check if currently in portrait orientation
+   * @returns {boolean} True if portrait mode
+   */
+  isPortrait() {
+    return this.portraitMode;
+  },
+
+  // ============================================
+  // MOBILE SCALING HELPERS
+  // ============================================
+
+  /**
+   * Get scaled font size for mobile displays
+   * @param {number} baseSize - Base font size in pixels
+   * @param {number} minScale - Minimum scale factor (default 0.7)
+   * @returns {number} Scaled font size
+   */
+  getFontSize(baseSize, minScale = 0.7) {
+    // Use smaller fonts on mobile for better fit
+    const isMobile = typeof DeviceDetect !== 'undefined' && DeviceDetect.isMobile;
+    if (!isMobile) return baseSize;
+
+    // Scale based on screen width, with floor
+    const screenScale = Math.min(this.width / 800, 1);
+    const scale = Math.max(screenScale, minScale);
+    return Math.round(baseSize * scale);
+  },
+
+  /**
+   * Get a font string with scaled size for canvas
+   * @param {number} baseSize - Base font size in pixels
+   * @param {string} weight - Font weight (e.g., 'bold', 'normal', '600')
+   * @param {string} family - Font family (default 'monospace')
+   * @returns {string} CSS font string for ctx.font
+   */
+  getFont(baseSize, weight = 'normal', family = 'monospace') {
+    const size = this.getFontSize(baseSize);
+    return `${weight} ${size}px ${family}`;
+  },
+
+  /**
+   * Get scaled line height for text
+   * @param {number} baseFontSize - Base font size used
+   * @param {number} lineHeightRatio - Line height multiplier (default 1.4)
+   * @returns {number} Line height in pixels
+   */
+  getLineHeight(baseFontSize, lineHeightRatio = 1.4) {
+    return Math.round(this.getFontSize(baseFontSize) * lineHeightRatio);
+  },
+
+  /**
+   * Get scaled spacing/margin for mobile
+   * @param {number} baseSpacing - Base spacing in pixels
+   * @returns {number} Scaled spacing
+   */
+  getSpacing(baseSpacing) {
+    const isMobile = typeof DeviceDetect !== 'undefined' && DeviceDetect.isMobile;
+    if (!isMobile) return baseSpacing;
+
+    // Reduce spacing on mobile
+    return Math.round(baseSpacing * 0.75);
+  },
+
+  /**
+   * Check if we're on a mobile device
+   * @returns {boolean} True if mobile
+   */
+  isMobile() {
+    return typeof DeviceDetect !== 'undefined' && DeviceDetect.isMobile;
   },
 
   // ============================================
@@ -282,9 +379,9 @@ const Renderer = {
   },
 
   updateCamera() {
-    // Center camera on player
-    this.camera.x = Player.position.x - this.canvas.width / 2;
-    this.camera.y = Player.position.y - this.canvas.height / 2;
+    // Center camera on player using logical dimensions (not physical buffer size)
+    this.camera.x = Player.position.x - this.width / 2;
+    this.camera.y = Player.position.y - this.height / 2;
 
     // Apply screen shake offset from base destruction sequences
     if (typeof BaseDestructionSequence !== "undefined") {

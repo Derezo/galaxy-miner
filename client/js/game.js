@@ -35,6 +35,11 @@ const Game = {
     // Update player (movement prediction)
     Player.update(dt);
 
+    // Mobile auto-fire system
+    if (typeof AutoFire !== 'undefined') {
+      AutoFire.update(dt);
+    }
+
     // Update other entities
     Entities.update(dt);
 

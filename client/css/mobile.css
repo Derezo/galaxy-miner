@@ -1,0 +1,1136 @@
+/* Galaxy Miner - Mobile Styles */
+/* All mobile-specific styles and responsive overrides */
+
+/* ============================================
+   STANDARD MEDIA QUERIES
+   These work independently of JS detection
+   ============================================ */
+
+/* Tablet and below */
+@media screen and (max-width: 768px) {
+  /* Panel responsive sizing - high specificity to override base styles */
+  html body .panel,
+  html body .terminal-panel {
+    width: 100%;
+    max-width: 100vw;
+    border-radius: 0;
+  }
+
+  /* Reduce header sizes */
+  .panel-header h2 {
+    font-size: 16px;
+  }
+
+  /* Stack two-column layouts */
+  .panel-two-column {
+    grid-template-columns: 1fr;
+  }
+
+  .panel-main {
+    border-right: none;
+    border-bottom: 1px solid var(--color-border-lighter, rgba(68, 102, 255, 0.2));
+  }
+}
+
+/* Phone sized screens */
+@media screen and (max-width: 480px) {
+  /* Further adjustments for very small screens */
+  .terminal-tab {
+    padding: 6px 8px;
+    font-size: 12px;
+  }
+
+  .panel-header h2 {
+    font-size: 14px;
+  }
+
+  /* Reduce spacing */
+  .panel-content {
+    padding: 8px;
+  }
+}
+
+/* Touch-capable devices (works with hover capability detection) */
+@media (hover: none) and (pointer: coarse) {
+  /* Touch-friendly sizing regardless of JS detection */
+  button,
+  .hud-btn,
+  .terminal-tab,
+  .panel-close,
+  .close-btn {
+    min-height: 44px;
+    min-width: 44px;
+  }
+
+  /* Larger tap targets for list items */
+  .panel-item,
+  .list-item,
+  .inventory-item {
+    min-height: 48px;
+    padding: 12px;
+  }
+
+  /* Prevent iOS zoom on input focus */
+  input,
+  select,
+  textarea {
+    font-size: 16px;
+  }
+}
+
+/* ============================================
+   ROTATION PROMPT (Portrait Mode Lock)
+   ============================================ */
+
+.rotation-prompt {
+  display: none;
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: var(--color-bg-darkest, #000011);
+  z-index: 9999;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text, #e0e0ff);
+  text-align: center;
+  padding: 20px;
+  box-sizing: border-box;
+}
+
+.rotation-prompt-icon {
+  width: 80px;
+  height: 80px;
+  margin-bottom: 24px;
+  color: var(--color-primary, #4466ff);
+  animation: rotate-phone 2s ease-in-out infinite;
+}
+
+@keyframes rotate-phone {
+  0%, 100% { transform: rotate(0deg); }
+  50% { transform: rotate(90deg); }
+}
+
+.rotation-prompt-text {
+  font-size: 18px;
+  max-width: 280px;
+  line-height: 1.5;
+  opacity: 0.9;
+}
+
+/* Portrait mode is now supported - rotation prompt disabled */
+/* Game canvas and UI container remain visible in portrait */
+
+/* Legacy: rotation prompt can be re-enabled if needed
+body.is-mobile.is-portrait .rotation-prompt {
+  display: flex;
+}
+html body.is-mobile.is-portrait #gameCanvas,
+html body.is-mobile.is-portrait #ui-container {
+  display: none;
+}
+*/
+
+/* ============================================
+   VIRTUAL JOYSTICK
+   ============================================ */
+
+.virtual-joystick {
+  display: none;
+  position: fixed;
+  pointer-events: none;
+  z-index: 100;
+}
+
+body.is-mobile .virtual-joystick {
+  display: block;
+}
+
+.virtual-joystick .joystick-base {
+  width: 120px;
+  height: 120px;
+  border-radius: 50%;
+  background: rgba(68, 102, 255, 0.15);
+  border: 2px solid rgba(68, 102, 255, 0.4);
+  opacity: 0;
+  transition: opacity 0.15s ease-out;
+  position: relative;
+}
+
+.virtual-joystick.active .joystick-base {
+  opacity: 1;
+}
+
+.virtual-joystick .joystick-knob {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 50px;
+  height: 50px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 30% 30%,
+    rgba(136, 170, 255, 0.9),
+    rgba(68, 102, 255, 0.8));
+  border: 2px solid rgba(255, 255, 255, 0.5);
+  box-shadow: 0 0 15px rgba(68, 102, 255, 0.5);
+  transition: transform 0.05s ease-out;
+}
+
+/* ============================================
+   MOBILE ACTION BUTTONS
+   ============================================ */
+
+.mobile-action-buttons {
+  display: none;
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  flex-direction: column;
+  gap: 12px;
+  z-index: 100;
+  pointer-events: auto;
+}
+
+body.is-mobile .mobile-action-buttons {
+  display: flex;
+}
+
+/* Hide mobile controls when HUD is hidden (login screen visible) */
+#hud.hidden ~ .mobile-action-buttons,
+#hud.hidden ~ .virtual-joystick,
+#hud.hidden ~ .autofire-indicator {
+  display: none !important;
+}
+
+.mobile-btn {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  border: 2px solid var(--color-border, rgba(68, 102, 255, 0.5));
+  background: var(--color-bg-dark, rgba(10, 10, 40, 0.85));
+  color: var(--color-text, #e0e0ff);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  font-size: 24px;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+  cursor: pointer;
+  transition: transform 0.1s, background-color 0.1s;
+}
+
+.mobile-btn:active {
+  background: var(--color-primary, #4466ff);
+  transform: scale(0.95);
+}
+
+.mobile-btn .btn-icon {
+  font-size: 20px;
+  line-height: 1;
+}
+
+.mobile-btn .btn-label {
+  font-size: 9px;
+  margin-top: 2px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  opacity: 0.8;
+}
+
+/* Fire button - larger and red */
+.mobile-btn-fire {
+  width: 80px;
+  height: 80px;
+  background: linear-gradient(145deg,
+    var(--color-danger, #ff4444),
+    var(--color-danger-dark, #cc2222));
+  border-color: var(--color-danger, #ff4444);
+  box-shadow: 0 0 20px rgba(255, 68, 68, 0.3);
+}
+
+.mobile-btn-fire:active {
+  background: linear-gradient(145deg,
+    var(--color-danger-dark, #cc2222),
+    var(--color-danger, #ff4444));
+  box-shadow: 0 0 30px rgba(255, 68, 68, 0.5);
+}
+
+.mobile-btn-fire .btn-icon {
+  font-size: 28px;
+}
+
+/* Context action button */
+.mobile-btn-action {
+  background: linear-gradient(145deg,
+    rgba(68, 102, 255, 0.3),
+    rgba(68, 102, 255, 0.1));
+}
+
+.mobile-btn-action:active {
+  background: var(--color-primary, #4466ff);
+}
+
+/* Menu button */
+.mobile-btn-menu {
+  width: 48px;
+  height: 48px;
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.3);
+}
+
+.mobile-btn-menu .btn-icon {
+  font-size: 18px;
+}
+
+/* ============================================
+   AUTO-FIRE TARGET INDICATOR
+   ============================================ */
+
+.autofire-indicator {
+  display: none;
+  position: fixed;
+  top: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(255, 68, 68, 0.2);
+  border: 1px solid rgba(255, 68, 68, 0.5);
+  border-radius: 4px;
+  padding: 4px 12px;
+  font-size: 12px;
+  color: #ff8888;
+  z-index: 100;
+}
+
+body.is-mobile .autofire-indicator.has-target {
+  display: block;
+}
+
+/* ============================================
+   FULL-SCREEN PANEL TAKEOVER
+   ============================================ */
+
+/* Full-screen panel takeover - high specificity chain */
+html body.is-mobile .panel,
+html body.is-mobile .terminal-panel {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  width: 100%;
+  max-width: none;
+  height: 100%;
+  max-height: none;
+  border-radius: 0;
+  transform: none;
+  margin: 0;
+}
+
+body.is-mobile .modal-backdrop {
+  display: none;
+}
+
+/* Terminal panel mobile adjustments */
+body.is-mobile #terminal-panel {
+  padding: var(--spacing-md, 12px);
+}
+
+body.is-mobile #terminal-panel .panel-content {
+  max-height: calc(100vh - 140px);
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+body.is-mobile #terminal-panel .terminal-content {
+  max-height: none;
+}
+
+/* ============================================
+   TOUCH-FRIENDLY SIZING
+   ============================================ */
+
+/* Ensure close buttons are large enough for touch */
+body.is-mobile .panel-close,
+body.is-mobile .close-btn,
+body.is-mobile .modal-close {
+  min-width: 48px;
+  min-height: 48px;
+  font-size: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Increase spacing for touch targets */
+body.is-mobile .panel-item,
+body.is-mobile .list-item,
+body.is-mobile .inventory-item,
+body.is-mobile .market-item {
+  min-height: 48px;
+  padding: var(--spacing-md, 12px);
+}
+
+body.is-mobile button {
+  min-height: 44px;
+  padding: 12px 16px;
+}
+
+body.is-mobile input,
+body.is-mobile select {
+  min-height: 44px;
+  padding: 10px 12px;
+  font-size: 16px; /* Prevents iOS zoom on focus */
+}
+
+/* Terminal tabs */
+body.is-mobile .terminal-tabs {
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+body.is-mobile .terminal-tab {
+  min-height: 44px;
+  padding: 8px 12px;
+  flex: 1 1 auto;
+  min-width: 60px;
+}
+
+body.is-mobile .terminal-tab svg {
+  width: 20px;
+  height: 20px;
+}
+
+/* ============================================
+   HUD ADJUSTMENTS FOR MOBILE
+   ============================================ */
+
+/* Move radar to avoid overlap with action buttons */
+body.is-mobile #radar {
+  right: 100px;
+  bottom: 10px;
+}
+
+/* Adjust profile display */
+body.is-mobile #profile-display {
+  transform: scale(0.9);
+  transform-origin: top right;
+}
+
+/* Landscape: Move profile to top-left to avoid action buttons */
+body.is-mobile.is-landscape #profile-display {
+  right: auto;
+  left: 15px;
+  transform-origin: top left;
+}
+
+/* Make HUD icons larger for touch */
+body.is-mobile .hud-icon {
+  width: 56px;
+  height: 56px;
+}
+
+/* Hide keyboard hints on mobile */
+body.is-mobile #action-hints {
+  display: none;
+}
+
+/* ============================================
+   CHAT OVERLAY MOBILE
+   ============================================ */
+
+body.is-mobile #chat-overlay {
+  width: 100%;
+  max-width: none;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  border-radius: 0;
+}
+
+body.is-mobile #chat-input {
+  font-size: 16px;
+}
+
+/* ============================================
+   UTILITY CLASSES
+   ============================================ */
+
+/* Hide elements on mobile */
+body.is-mobile .hide-on-mobile {
+  display: none !important;
+}
+
+/* Hide elements on desktop */
+body:not(.is-mobile) .hide-on-desktop {
+  display: none !important;
+}
+
+/* Prevent text selection on touch elements */
+.no-select {
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+/* ============================================
+   SAFE AREA INSETS (Notch Support)
+   ============================================ */
+
+@supports (padding: env(safe-area-inset-top)) {
+  body.is-mobile #hud {
+    padding-top: env(safe-area-inset-top);
+    padding-left: env(safe-area-inset-left);
+    padding-right: env(safe-area-inset-right);
+  }
+
+  body.is-mobile .mobile-action-buttons {
+    right: calc(20px + env(safe-area-inset-right));
+    bottom: calc(20px + env(safe-area-inset-bottom));
+  }
+
+  body.is-mobile #radar {
+    right: calc(100px + env(safe-area-inset-right));
+    bottom: calc(10px + env(safe-area-inset-bottom));
+  }
+}
+
+/* ============================================
+   MOBILE SETTINGS PANEL
+   ============================================ */
+
+.mobile-settings {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.settings-section {
+  background: rgba(0, 0, 20, 0.3);
+  border-radius: 8px;
+  padding: 16px;
+}
+
+.settings-section-title {
+  font-size: 14px;
+  color: var(--color-primary-lighter, #88aaff);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  margin: 0 0 16px 0;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--color-border-light, rgba(68, 102, 255, 0.3));
+}
+
+.settings-row {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.settings-row:last-child {
+  margin-bottom: 0;
+}
+
+.settings-row-toggle {
+  flex-direction: row;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.settings-label {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.label-text {
+  color: var(--color-text, #e0e0ff);
+  font-size: 14px;
+}
+
+.label-value {
+  color: var(--color-text-accent, #88aaff);
+  font-size: 14px;
+  font-family: monospace;
+}
+
+.settings-slider {
+  width: 100%;
+  height: 8px;
+  -webkit-appearance: none;
+  appearance: none;
+  background: rgba(68, 102, 255, 0.2);
+  border-radius: 4px;
+  outline: none;
+}
+
+.settings-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--color-primary, #4466ff);
+  cursor: pointer;
+  border: 2px solid var(--color-primary-lighter, #88aaff);
+}
+
+.settings-slider::-moz-range-thumb {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--color-primary, #4466ff);
+  cursor: pointer;
+  border: 2px solid var(--color-primary-lighter, #88aaff);
+}
+
+.settings-slider:disabled {
+  opacity: 0.5;
+}
+
+/* Toggle switch */
+.settings-toggle {
+  position: relative;
+  display: inline-block;
+  width: 52px;
+  height: 28px;
+}
+
+.settings-toggle input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.toggle-slider {
+  position: absolute;
+  cursor: pointer;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(68, 102, 255, 0.2);
+  border-radius: 28px;
+  transition: 0.3s;
+}
+
+.toggle-slider:before {
+  position: absolute;
+  content: "";
+  height: 20px;
+  width: 20px;
+  left: 4px;
+  bottom: 4px;
+  background-color: white;
+  border-radius: 50%;
+  transition: 0.3s;
+}
+
+.settings-toggle input:checked + .toggle-slider {
+  background-color: var(--color-primary, #4466ff);
+}
+
+.settings-toggle input:checked + .toggle-slider:before {
+  transform: translateX(24px);
+}
+
+.settings-toggle input:disabled + .toggle-slider {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.settings-note {
+  font-size: 12px;
+  color: var(--color-text-muted, #888);
+  font-style: italic;
+}
+
+.settings-actions {
+  display: flex;
+  justify-content: center;
+  padding-top: 8px;
+}
+
+.settings-actions .btn-secondary {
+  background: rgba(100, 100, 100, 0.3);
+  border-color: rgba(150, 150, 150, 0.5);
+}
+
+/* ============================================
+   FULL-SCREEN MODAL TAKEOVER
+   ============================================ */
+
+/* Profile modal full-screen on mobile */
+html body.is-mobile #profile-modal .profile-modal-content {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  max-height: none;
+  border-radius: 0;
+  transform: none !important;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+body.is-mobile #profile-modal .modal-body {
+  flex: 1;
+  max-height: none;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+body.is-mobile #profile-modal .modal-header,
+body.is-mobile #profile-modal .modal-footer,
+body.is-mobile #profile-modal .profile-tabs {
+  flex-shrink: 0;
+}
+
+/* Touch-friendly profile modal elements */
+body.is-mobile .profile-tab {
+  min-height: 44px;
+  padding: 12px 16px;
+}
+
+body.is-mobile #profile-modal .modal-close {
+  min-width: 48px;
+  min-height: 48px;
+  font-size: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Prevent modal body height fluctuation between tabs */
+#profile-modal .modal-body {
+  min-height: 300px;
+}
+
+body.is-mobile #profile-modal .modal-body {
+  min-height: 0; /* On mobile, flex layout handles this */
+}
+
+/* ============================================
+   SHIP TERMINAL TAB IMPROVEMENTS
+   ============================================ */
+
+/* Tab bar: horizontal scroll for 5 tabs */
+body.is-mobile .terminal-tabs {
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scroll-snap-type: x mandatory;
+  gap: 0;
+  padding: 0 4px;
+}
+
+body.is-mobile .terminal-tab {
+  flex: 0 0 auto;
+  min-width: 72px;
+  max-width: 100px;
+  min-height: 48px;
+  scroll-snap-align: start;
+  padding: 10px 8px;
+}
+
+/* Hide scrollbar but keep functionality */
+body.is-mobile .terminal-tabs::-webkit-scrollbar {
+  height: 0;
+  display: none;
+}
+
+/* Two-column panels: stack vertically on mobile */
+body.is-mobile .panel-two-column {
+  grid-template-columns: 1fr;
+  grid-template-rows: 1fr auto;
+  height: auto;
+}
+
+body.is-mobile .panel-main {
+  border-right: none;
+  border-bottom: 1px solid var(--color-border-lighter, rgba(68, 102, 255, 0.2));
+  max-height: 40vh;
+  min-height: 200px;
+  overflow-y: auto;
+}
+
+body.is-mobile .panel-detail {
+  max-height: 35vh;
+  border-top: none;
+  overflow-y: auto;
+}
+
+/* Touch-friendly list items (Cargo, Relics) */
+body.is-mobile .cargo-item,
+body.is-mobile .relic-item {
+  min-height: 56px;
+  padding: 14px 16px;
+  gap: 12px;
+}
+
+body.is-mobile .cargo-item-icon,
+body.is-mobile .relic-item-icon {
+  width: 32px;
+  height: 32px;
+}
+
+body.is-mobile .panel-detail-actions .btn {
+  min-height: 48px;
+  font-size: 15px;
+}
+
+/* Ship Upgrade Panel: stack columns */
+body.is-mobile .ship-upgrade-panel {
+  flex-direction: column;
+  gap: 16px;
+}
+
+body.is-mobile .ship-upgrade-left,
+body.is-mobile .ship-upgrade-right {
+  width: 100%;
+  flex: 0 0 auto;
+  padding: 12px;
+}
+
+body.is-mobile .ship-upgrade-right {
+  max-height: 45vh;
+  overflow-y: auto;
+}
+
+/* Part selector: 4-column grid */
+body.is-mobile .part-selector {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+  justify-items: center;
+}
+
+body.is-mobile .part-icon-wrapper {
+  width: 56px;
+  height: 56px;
+  min-width: 44px;
+  min-height: 44px;
+}
+
+body.is-mobile .upgrade-button {
+  min-height: 48px;
+  min-width: 100px;
+}
+
+/* Ship Customization: 4-column color grid */
+body.is-mobile .color-options {
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+  max-width: 300px;
+  margin: 0 auto;
+}
+
+body.is-mobile .color-option {
+  padding: 10px;
+  min-height: 56px;
+  min-width: 56px;
+}
+
+body.is-mobile .color-swatch {
+  width: 32px;
+  height: 32px;
+}
+
+/* Market Panel: full-width filters */
+body.is-mobile .market-filters {
+  flex-direction: column;
+  gap: 12px;
+}
+
+body.is-mobile .market-filter {
+  width: 100%;
+}
+
+body.is-mobile .market-filter .select {
+  min-height: 44px;
+  font-size: 16px; /* Prevents iOS zoom */
+}
+
+body.is-mobile .market-tab {
+  min-height: 44px;
+  padding: 12px 16px;
+}
+
+body.is-mobile .market-listing {
+  padding: 14px 16px;
+  min-height: 72px;
+  gap: 12px;
+}
+
+body.is-mobile .market-listing-actions .btn {
+  min-height: 44px;
+  min-width: 64px;
+}
+
+/* ============================================
+   PROFILE MODAL TAB IMPROVEMENTS
+   ============================================ */
+
+/* Avatar grid: 4x2 with larger options */
+body.is-mobile .profile-options-grid {
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+}
+
+body.is-mobile .profile-option {
+  padding: 16px 10px;
+  min-height: 80px;
+}
+
+body.is-mobile .profile-option-emoji {
+  font-size: 36px;
+}
+
+body.is-mobile .profile-option-name {
+  font-size: 10px;
+}
+
+/* Profile modal footer buttons */
+body.is-mobile #profile-modal .modal-footer {
+  padding: 16px;
+}
+
+body.is-mobile #profile-modal .modal-footer .btn {
+  min-height: 48px;
+  padding: 14px 24px;
+  font-size: 15px;
+}
+
+/* Volume sliders: larger touch targets */
+body.is-mobile .volume-slider {
+  height: 10px;
+}
+
+body.is-mobile .volume-slider::-webkit-slider-thumb {
+  width: 28px;
+  height: 28px;
+}
+
+body.is-mobile .volume-slider::-moz-range-thumb {
+  width: 28px;
+  height: 28px;
+}
+
+body.is-mobile .volume-row {
+  padding: 12px 0;
+  gap: 14px;
+}
+
+body.is-mobile .volume-mute-checkbox input[type="checkbox"] {
+  width: 22px;
+  height: 22px;
+}
+
+/* Developer tab: single column, touch-friendly */
+body.is-mobile .debug-master-toggle {
+  padding: 16px;
+  gap: 14px;
+}
+
+body.is-mobile .debug-toggle-switch {
+  width: 56px;
+  height: 32px;
+}
+
+body.is-mobile .debug-toggle-slider:before {
+  width: 24px;
+  height: 24px;
+}
+
+body.is-mobile .debug-options-grid {
+  grid-template-columns: 1fr;
+  gap: 0;
+}
+
+body.is-mobile .debug-option {
+  padding: 12px 0;
+  min-height: 44px;
+}
+
+body.is-mobile .debug-option input[type="checkbox"] {
+  width: 22px;
+  height: 22px;
+  margin-right: 14px;
+}
+
+body.is-mobile .debug-option label {
+  font-size: 14px;
+}
+
+body.is-mobile .debug-reset-btn {
+  min-height: 48px;
+  font-size: 14px;
+  margin-top: 20px;
+}
+
+/* ============================================
+   CREDITS DISPLAY REPOSITIONING
+   ============================================ */
+
+/* Move credits to bottom-right on mobile, reduce size 20% */
+body.is-mobile #credits-display {
+  position: fixed;
+  top: auto;
+  bottom: 15px;
+  right: 15px;
+}
+
+body.is-mobile #credit-value {
+  font-size: 13px; /* 20% reduction from 16px */
+}
+
+body.is-mobile #credit-icon-container {
+  width: 20px;
+  height: 20px;
+}
+
+body.is-mobile #credits-display {
+  padding: 5px 11px;
+  gap: 6px;
+}
+
+/* Safe area support for bottom-positioned credits */
+@supports (padding: env(safe-area-inset-bottom)) {
+  body.is-mobile #credits-display {
+    bottom: calc(15px + env(safe-area-inset-bottom));
+    right: calc(15px + env(safe-area-inset-right));
+  }
+}
+
+/* ============================================
+   PORTRAIT MODE RESPONSIVE LAYOUT
+   ============================================ */
+
+/* Portrait: Stack action buttons vertically on right side */
+body.is-mobile.is-portrait .mobile-action-buttons {
+  right: 10px;
+  bottom: 50%;
+  transform: translateY(50%);
+  flex-direction: column;
+  gap: 12px;
+}
+
+body.is-mobile.is-portrait .mobile-btn-fire {
+  width: 70px;
+  height: 70px;
+}
+
+body.is-mobile.is-portrait .mobile-btn-action,
+body.is-mobile.is-portrait .mobile-btn-menu {
+  width: 56px;
+  height: 56px;
+}
+
+/* Portrait: Move radar to top-right, scale smaller */
+body.is-mobile.is-portrait #radar {
+  top: 60px;
+  right: 10px;
+  bottom: auto;
+  transform: scale(0.7);
+  transform-origin: top right;
+}
+
+/* Portrait: Move profile display to top-left */
+body.is-mobile.is-portrait #profile-display {
+  top: 10px;
+  right: auto;
+  left: 10px;
+  transform: scale(0.85);
+  transform-origin: top left;
+}
+
+/* Portrait: Keep terminal icon centered at top */
+body.is-mobile.is-portrait #terminal-icon {
+  top: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+/* Portrait: Adjust virtual joystick position constraints */
+body.is-mobile.is-portrait .virtual-joystick {
+  /* Joystick appears in bottom-left quadrant via JS zone detection */
+  max-width: 50%;
+}
+
+/* Portrait: Move credits to bottom-left to avoid action buttons */
+body.is-mobile.is-portrait #credits-display {
+  right: auto;
+  left: 15px;
+  bottom: 15px;
+}
+
+/* Portrait: Safe area insets */
+@supports (padding: env(safe-area-inset-top)) {
+  body.is-mobile.is-portrait .mobile-action-buttons {
+    right: calc(10px + env(safe-area-inset-right));
+  }
+
+  body.is-mobile.is-portrait #profile-display {
+    top: calc(10px + env(safe-area-inset-top));
+    left: calc(10px + env(safe-area-inset-left));
+  }
+
+  body.is-mobile.is-portrait #radar {
+    top: calc(60px + env(safe-area-inset-top));
+    right: calc(10px + env(safe-area-inset-right));
+  }
+
+  body.is-mobile.is-portrait #credits-display {
+    left: calc(15px + env(safe-area-inset-left));
+    bottom: calc(15px + env(safe-area-inset-bottom));
+  }
+}
+
+/* ============================================
+   MOBILE LANDSCAPE AUTH SCREEN
+   ============================================ */
+
+/* Optimize auth screen for limited vertical space in landscape */
+body.is-mobile.is-landscape #auth-screen {
+  padding: 10px;
+}
+
+body.is-mobile.is-landscape .auth-box {
+  width: 90%;
+  max-width: 500px;
+  padding: 15px 25px;
+}
+
+body.is-mobile.is-landscape .auth-box h1 {
+  font-size: 22px;
+  margin-bottom: 12px;
+}
+
+body.is-mobile.is-landscape .auth-form h2 {
+  font-size: 16px;
+  margin-bottom: 10px;
+}
+
+body.is-mobile.is-landscape .auth-form input {
+  padding: 10px;
+  margin-bottom: 8px;
+}
+
+body.is-mobile.is-landscape .auth-form button {
+  padding: 10px;
+}
+
+body.is-mobile.is-landscape .switch-form {
+  margin-top: 10px;
+  font-size: 12px;
+}

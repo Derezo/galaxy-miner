@@ -95,13 +95,49 @@ const Input = {
     return this.keys[code] === true;
   },
 
+  /**
+   * Get mobile movement input from virtual joystick
+   * @returns {Object|null} Mobile input or null if not on mobile/no input
+   */
+  getMobileMovementInput() {
+    if (typeof VirtualJoystick === 'undefined' || !VirtualJoystick.active) {
+      return null;
+    }
+    return VirtualJoystick.getMovementInput();
+  },
+
+  /**
+   * Get unified movement input (mobile or keyboard)
+   * @returns {Object} Movement input with support for both input types
+   */
   getMovementInput() {
+    // Check mobile input first (takes priority when active)
+    const mobileInput = this.getMobileMovementInput();
+    if (mobileInput && mobileInput.thrustMagnitude > 0) {
+      return {
+        up: false,
+        down: false,
+        left: false,
+        right: false,
+        boost: false,
+        // Mobile-specific analog values
+        targetRotation: mobileInput.targetRotation,
+        thrustMagnitude: mobileInput.thrustMagnitude,
+        isMobile: true
+      };
+    }
+
+    // Fall back to keyboard input
     return {
       up: this.isKeyDown('ArrowUp') || this.isKeyDown('KeyW'),
       down: this.isKeyDown('ArrowDown') || this.isKeyDown('KeyS'),
       left: this.isKeyDown('ArrowLeft') || this.isKeyDown('KeyA'),
       right: this.isKeyDown('ArrowRight') || this.isKeyDown('KeyD'),
-      boost: this.isKeyDown('ShiftLeft') || this.isKeyDown('ShiftRight')
+      boost: this.isKeyDown('ShiftLeft') || this.isKeyDown('ShiftRight'),
+      // No mobile values
+      targetRotation: undefined,
+      thrustMagnitude: 0,
+      isMobile: false
     };
   },
 

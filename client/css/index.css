@@ -17,3 +17,6 @@
 
 /* Panels, modals, and overlays */
 @import url('./panels.css');
+
+/* Note: mobile.css, ship-upgrade.css, and wormhole-transit.css are loaded
+   directly via <link> tags in index.html for clearer loading order */

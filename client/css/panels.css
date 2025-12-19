@@ -136,8 +136,8 @@
 
 /* Modal Dialog (smaller confirm/prompt) */
 .modal-dialog {
-  min-width: 350px;
-  max-width: 450px;
+  width: clamp(280px, 85vw, 450px);
+  min-width: auto;
 }
 
 /* Panel (general) */
@@ -146,8 +146,8 @@
   top: 50%;
   left: 50%;
   transform: translate(-50%, -50%);
-  width: 600px;
-  max-height: 600px;
+  width: clamp(320px, 90vw, 600px);
+  max-height: min(600px, 85vh);
   background: var(--color-bg-darkest);
   backdrop-filter: blur(20px);
   border: 2px solid rgba(68, 102, 255, 0.5);
@@ -191,8 +191,8 @@
 
 /* Terminal Panel */
 .terminal-panel {
-  width: 700px;
-  max-height: 650px;
+  width: clamp(320px, 95vw, 700px);
+  max-height: min(650px, 90vh);
 }
 
 /* Terminal tabs (legacy support) */

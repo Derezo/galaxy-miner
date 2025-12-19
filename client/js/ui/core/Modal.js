@@ -30,14 +30,26 @@ const Modal = {
     // Create backdrop
     this._backdrop = document.createElement('div');
     this._backdrop.className = 'modal-backdrop';
-    this._backdrop.addEventListener('click', (e) => {
+
+    // Handle backdrop click to close
+    const handleBackdropClose = (e) => {
       if (e.target === this._backdrop) {
         const topModal = this._stack[this._stack.length - 1];
         if (topModal && topModal.closeOnBackdrop !== false) {
           this.close();
         }
       }
-    });
+    };
+
+    this._backdrop.addEventListener('click', handleBackdropClose);
+
+    // Add touch support for backdrop (mobile)
+    this._backdrop.addEventListener('touchend', (e) => {
+      if (e.target === this._backdrop) {
+        e.preventDefault();
+        handleBackdropClose(e);
+      }
+    }, { passive: false });
 
     this._container.appendChild(this._backdrop);
     document.body.appendChild(this._container);
@@ -93,9 +105,15 @@ const Modal = {
       `;
       modalEl.appendChild(titleEl);
 
-      titleEl.querySelector('.modal-close').addEventListener('click', () => {
+      const closeBtn = titleEl.querySelector('.modal-close');
+      closeBtn.addEventListener('click', () => {
         this.close();
       });
+      // Touch support for close button (mobile)
+      closeBtn.addEventListener('touchend', (e) => {
+        e.preventDefault();
+        this.close();
+      }, { passive: false });
     }
 
     // Add content

@@ -152,7 +152,10 @@ const Player = {
       return;
     }
 
+    // Get input from unified Input module (handles mobile/desktop automatically)
     const input = Input.getMovementInput();
+    const isMobileInput = input.isMobile;
+
     const now = Date.now();
 
     // Calculate speed based on engine tier
@@ -175,12 +178,36 @@ const Player = {
       speed *= boostMultiplier;
     }
 
-    // Rotation
-    if (input.left) this.rotation -= rotSpeed * dt;
-    if (input.right) this.rotation += rotSpeed * dt;
+    // Rotation and movement (mobile vs desktop)
+    if (isMobileInput && input.targetRotation !== undefined && input.thrustMagnitude > 0) {
+      // Mobile: smooth rotation toward joystick direction
+      let rotDiff = input.targetRotation - this.rotation;
+      // Normalize angle to -PI to PI
+      while (rotDiff > Math.PI) rotDiff -= Math.PI * 2;
+      while (rotDiff < -Math.PI) rotDiff += Math.PI * 2;
 
-    // Thrust with duration tracking for visual effects
-    if (input.up) {
+      // Rotation speed scales with how far off target we are
+      const mobileRotSpeed = rotSpeed * Math.min(1.5, Math.abs(rotDiff) * 2);
+      this.rotation += Math.sign(rotDiff) * mobileRotSpeed * dt;
+
+      // Apply thrust proportional to joystick magnitude
+      const thrustFactor = input.thrustMagnitude;
+      this.velocity.x += Math.cos(this.rotation) * speed * thrustFactor * dt;
+      this.velocity.y += Math.sin(this.rotation) * speed * thrustFactor * dt;
+      this.thrustDuration = Math.min(this.thrustDuration + dt * 1000 * thrustFactor, 2000);
+
+      // Mobile boost via joystick at max thrust
+      if (input.boost && !this.boostActive && now >= this.boostCooldownEnd) {
+        this.activateBoost();
+      }
+    } else {
+      // Desktop: discrete rotation
+      if (input.left) this.rotation -= rotSpeed * dt;
+      if (input.right) this.rotation += rotSpeed * dt;
+    }
+
+    // Thrust with duration tracking for visual effects (desktop only, mobile handled above)
+    if (!isMobileInput && input.up) {
       // Double-tap detection for thrust boost
       if (!this._lastThrustKeyWasDown) {
         // Key just pressed - check for double-tap
@@ -199,12 +226,20 @@ const Player = {
       this.velocity.y += Math.sin(this.rotation) * speed * dt;
       // Accumulate thrust duration (cap at 2000ms for visual saturation)
       this.thrustDuration = Math.min(this.thrustDuration + dt * 1000, 2000);
-    } else {
+    } else if (!isMobileInput) {
       this._lastThrustKeyWasDown = false;
-      // Decay thrust duration quickly when not thrusting
+      // Decay thrust duration quickly when not thrusting (desktop only)
       this.thrustDuration = Math.max(this.thrustDuration - dt * 5000, 0);
     }
-    if (input.down) {
+
+    // Mobile thrust decay when joystick released
+    const isMobileDevice = typeof DeviceDetect !== 'undefined' && DeviceDetect.isMobile;
+    if (isMobileDevice && (!isMobileInput || input.thrustMagnitude === 0)) {
+      this.thrustDuration = Math.max(this.thrustDuration - dt * 5000, 0);
+    }
+
+    // Reverse thrust (desktop only)
+    if (!isMobileInput && input.down) {
       this.velocity.x -= Math.cos(this.rotation) * speed * 0.5 * dt;
       this.velocity.y -= Math.sin(this.rotation) * speed * 0.5 * dt;
     }

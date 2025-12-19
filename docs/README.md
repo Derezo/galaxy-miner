@@ -8,6 +8,7 @@ Welcome to the Galaxy Miner technical documentation. This documentation provides
 - [Project Overview](../CLAUDE.md) - Quick reference for developers
 - [Architecture Overview](architecture/overview.md) - System architecture and design principles
 - [Game Loop](architecture/game-loop.md) - Client and server game loop architecture
+- [Deployment Guide](deployment.md) - Production setup and configuration
 
 ### API Reference
 - [Socket.io Events](api/socket-events.md) - Complete list of client-server events
@@ -18,10 +19,14 @@ Welcome to the Galaxy Miner technical documentation. This documentation provides
 - [Networking](systems/networking.md) - Client-server communication protocol
 - [Resources](systems/resources.md) - Resource types, values, and generation
 
+### Architecture
+- [Graphics System](architecture/graphics-system.md) - Canvas rendering and visual modules
+- [Input System](architecture/input-system.md) - Keyboard, mouse, and touch controls
+- [AI System](architecture/ai-system.md) - Modular NPC AI architecture
+
 ### Game Systems
 - [Ship Upgrades](systems/ship-upgrades.md) - Ship component upgrade system
 - [NPC Factions](systems/npc-factions.md) - Faction behaviors and spawn mechanics
-- [AI System](architecture/ai-system.md) - Modular AI architecture
 - [Loot Pools](systems/loot-pools.md) - Loot generation and drop mechanics
 - [Relics](systems/relics.md) - Rare collectible system
 - [Components](systems/components.md) - Upgrade component system for tier 6+
@@ -32,6 +37,10 @@ Welcome to the Galaxy Miner technical documentation. This documentation provides
 
 ### UI & Client
 - [UI System](systems/ui-system.md) - Component-based UI architecture
+- [Mobile Support](systems/mobile.md) - Touch controls and responsive design
+
+### Development
+- [Testing Guide](development/testing.md) - Test patterns and utilities
 
 ## Documentation Standards
 

@@ -30,7 +30,7 @@ const ProfileModal = {
       <div class="modal-content profile-modal-content">
         <div class="modal-header">
           <h2>Profile</h2>
-          <button class="modal-close">&times;</button>
+          <button class="modal-close" aria-label="Close profile modal">&times;</button>
         </div>
         <div class="profile-tabs">
           <button class="profile-tab active" data-tab="avatar">Avatar</button>
@@ -367,7 +367,7 @@ const ProfileModal = {
         display: flex;
         align-items: center;
         justify-content: center;
-        z-index: 10000;
+        z-index: var(--z-modal-high, 2000);
         opacity: 0;
         transition: opacity 0.2s ease;
       }

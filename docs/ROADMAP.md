@@ -1,7 +1,7 @@
 # Galaxy Miner Development Roadmap
 
-**Last Updated:** December 9, 2025
-**Version:** 1.0
+**Last Updated:** December 17, 2025
+**Version:** 1.1
 
 This roadmap outlines the planned development direction for Galaxy Miner, organized by priority and implementation phases. Features are designed to enhance multiplayer social gameplay and expand content depth while maintaining the game's focus on emergent player-driven experiences.
 
@@ -24,12 +24,14 @@ These items address existing systems that are partially implemented or need imme
 
 ### Technical Debt: Duplicate Network Handler Definitions
 
-**Status:** Critical architectural issue identified
+**Status:** RESOLVED (December 2025)
 **Priority:** Critical
 **Estimated Effort:** 1-2 days
 
-**Description:**
-The client networking code has duplicate socket event handlers defined in two locations:
+**Resolution:** Implemented Option B (modular handlers). Network handlers are now organized in `/client/js/network/` with 88 handlers across 10 modules. See `/client/js/network/README.md` for documentation.
+
+**Original Description:**
+The client networking code had duplicate socket event handlers defined in two locations:
 - `/client/js/network.js` - Main network module (actively used)
 - `/client/js/network/npc.js` - Modular handler file (NOT being used)
 
@@ -932,44 +934,50 @@ Expand platform support and improve accessibility for diverse players.
 
 ### Touch-Optimized Controls
 
+**Status:** IMPLEMENTED (December 2025)
 **Priority:** High
 **Estimated Effort:** 3-4 weeks
 
 **Description:**
-Full mobile device support with touch-friendly UI and controls. Galaxy Miner's simple graphics make it ideal for mobile play.
+Full mobile device support with touch-friendly UI and controls implemented.
 
-**Touch Controls:**
+**Implemented Features:**
 
-**Virtual Joystick:**
-- Left side: Movement joystick (WASD replacement)
-- Right side: Aim joystick (mouse replacement)
-- Semi-transparent overlay, customizable position
+**Virtual Joystick:** `/client/js/mobile/virtual-joystick.js`
+- Left 40% of screen: Floating movement joystick
+- 15% deadzone, analog thrust/rotation output
+- Appears at touch point, disappears on release
 
-**Action Buttons:**
-- Fire button (right side, large)
-- Mining button (right side)
-- Boost button (left side, near joystick)
-- Auto-fire toggle (hold fire button for 2s)
+**Action Buttons:** `/client/js/mobile/mobile-hud.js`
+- Fire button (80px, red, continuous fire while held)
+- Context action button (64px, dynamic label: Mine/Collect/Wormhole/Plunder)
+- Menu button (48px, opens terminal)
 
-**UI Adjustments:**
-- Larger tap targets (minimum 44x44px)
-- Simplified HUD layout for smaller screens
-- Swipe gestures for terminal panel (swipe up to open, down to close)
-- Pinch-to-zoom on radar
-- Long-press for context menus
+**Auto-Fire System:** `/client/js/mobile/auto-fire.js`
+- Automatic firing when aimed at enemies within 30°
+- Respects weapon cooldown and tier
+- Disabled during manual fire button hold
 
-**Performance Optimizations:**
-- Reduced particle effects on mobile (configurable)
-- Lower render resolution option
-- 30 FPS mode for battery saving
-- Reduced radar update frequency
+**Device Detection:** `/client/js/mobile/device-detect.js`
+- User agent + touch capability detection
+- Body classes: `is-mobile`, `is-touch`, `is-landscape`, `is-portrait`
+- Touch behavior prevention (double-tap zoom, pull-to-refresh)
 
-**Implementation:**
-- Mobile detection in `input.js`
-- New module: `/client/js/input-mobile.js`
-- Virtual joystick library or custom implementation
-- Responsive CSS breakpoints for UI panels
-- Touch event handlers throughout UI
+**UI Adjustments:** `/client/css/mobile.css`
+- Minimum 44px touch targets
+- Full-screen panel takeover on mobile
+- Safe area insets for notch support
+- Portrait mode rotation prompt
+- CSS media queries for responsive sizing
+
+**Documentation:** `/docs/systems/mobile.md`, `/client/js/mobile/README.md`
+
+**Remaining Items:**
+- [ ] Mobile settings panel (joystick size, sensitivity)
+- [ ] First-launch tutorial overlay
+- [ ] Gesture support (swipe, pinch, long-press)
+- [ ] Haptic feedback
+- [ ] Portrait mode gameplay option
 
 ---
 
