@@ -128,16 +128,22 @@ function cleanupExpiredDebuffs() {
 /**
  * Handle player death with wreckage spawning
  * Spawns wreckage at death location containing 50% of dropped cargo (25% of original inventory)
+ * Now emits respawn OPTIONS for player to choose from (deferred respawn)
  * @param {Object} player - The player object (from connectedPlayers)
  * @param {string} killedBy - Description of what killed the player
  * @param {string} socketId - The player's socket ID
+ * @param {Object} killerInfo - Additional info about what killed the player
+ * @param {string} killerInfo.cause - 'star' | 'npc' | 'player' | 'comet' | 'environment'
+ * @param {string} killerInfo.type - 'player' | 'npc' | 'environment'
+ * @param {string} killerInfo.name - Name of killer (NPC/player name)
+ * @param {string} killerInfo.faction - Faction for NPCs (pirate, swarm, etc.)
  * @returns {Object} Death result for event emission
  */
-function handlePlayerDeathWithWreckage(player, killedBy, socketId) {
-  // Get death position BEFORE respawn changes it
+function handlePlayerDeathWithWreckage(player, killedBy, socketId, killerInfo = {}) {
+  // Get death position BEFORE any changes
   const deathPosition = { x: player.position.x, y: player.position.y };
 
-  // Handle death with position for wreckage
+  // Handle death with position for wreckage (no longer respawns immediately)
   const deathResult = combat.handleDeath(player.id, deathPosition);
 
   // Spawn player wreckage if there's anything to drop
@@ -173,18 +179,27 @@ function handlePlayerDeathWithWreckage(player, killedBy, socketId) {
     logger.log(`[WRECKAGE] Player ${player.id} death spawned wreckage ${wreckage.id} with ${wreckage.contents.length} items`);
   }
 
-  // Emit death event to player
+  // Emit death event with respawn OPTIONS (player chooses where to respawn)
   io.to(socketId).emit('player:death', {
     killedBy,
-    respawnPosition: deathResult.respawnPosition,
+    // Enhanced killer info for better death messaging
+    cause: killerInfo.cause || 'unknown',
+    killerType: killerInfo.type || 'unknown',
+    killerName: killerInfo.name || null,
+    killerFaction: killerInfo.faction || null,
+    // Death position for replay/visualization
+    deathPosition,
+    // Cargo lost info
     droppedCargo: deathResult.droppedCargo,
-    wreckageSpawned: deathResult.wreckageContents && deathResult.wreckageContents.length > 0
+    wreckageSpawned: deathResult.wreckageContents && deathResult.wreckageContents.length > 0,
+    // Respawn options for player to choose from
+    respawnOptions: deathResult.respawnOptions
   });
 
-  // Update player state
-  player.position = deathResult.respawnPosition;
-  player.hull = player.hullMax;
-  player.shield = player.shieldMax;
+  // Mark player as dead - DON'T respawn immediately, wait for respawn:select event
+  player.isDead = true;
+  player.deathTime = Date.now();
+  player.deathPosition = deathPosition;
 
   return deathResult;
 }
@@ -307,7 +322,11 @@ function updatePlayers(deltaTime) {
 
         // Handle death from DoT with wreckage spawning
         if (result.isDead) {
-          handlePlayerDeathWithWreckage(player, 'Acid damage', socketId);
+          handlePlayerDeathWithWreckage(player, 'Acid damage', socketId, {
+            cause: 'environment',
+            type: 'environment',
+            name: 'Swarm Acid'
+          });
         }
       }
     }
@@ -964,7 +983,13 @@ function updateNPCs(deltaTime) {
 
             if (result.isDead) {
               // Handle player death with wreckage spawning
-              handlePlayerDeathWithWreckage(targetPlayer, npcEntity.name, socketId);
+              handlePlayerDeathWithWreckage(targetPlayer, npcEntity.name, socketId, {
+                cause: 'npc',
+                type: 'npc',
+                name: npcEntity.name,
+                faction: npcEntity.faction,
+                npcType: npcEntity.type
+              });
             }
             break;
           }
@@ -1573,7 +1598,11 @@ function updateComets(deltaTime) {
 
               // Handle death from comet collision with wreckage spawning
               if (result.isDead) {
-                handlePlayerDeathWithWreckage(player, 'Comet impact', socketId);
+                handlePlayerDeathWithWreckage(player, 'Comet impact', socketId, {
+                  cause: 'comet',
+                  type: 'environment',
+                  name: 'Comet'
+                });
               }
             }
           }

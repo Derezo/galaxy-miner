@@ -81,6 +81,11 @@ const PlayerDeathEffect = {
     // Clear any previous text particles
     this.textParticles = [];
 
+    // Start death replay (120 frames = 2 seconds at 60fps)
+    if (typeof DeathReplay !== 'undefined') {
+      DeathReplay.startReplay(120);
+    }
+
     Logger.log('[PlayerDeathEffect] Triggered:', data);
   },
 
@@ -228,22 +233,29 @@ const PlayerDeathEffect = {
   },
 
   /**
-   * Complete the death sequence and trigger respawn
+   * Complete the death sequence and show respawn location UI
    */
   completeDeathSequence() {
     this.active = false;
     this.phase = 'inactive';
 
-    // Apply invulnerability
+    // Apply invulnerability (will be refreshed when player actually respawns)
     this.invulnerableUntil = Date.now() + this.TIMINGS.INVULNERABILITY_DURATION;
 
-    // Trigger respawn if we have queued data
-    if (this.respawnData && typeof window.handleRespawnComplete === 'function') {
-      window.handleRespawnComplete(this.respawnData);
+    // If we already have respawn data queued (server sent respawn before UI shown), use it
+    if (this.respawnData) {
+      if (typeof window.handleRespawnComplete === 'function') {
+        window.handleRespawnComplete(this.respawnData);
+      }
       this.respawnData = null;
+    } else if (this.deathData && this.deathData.respawnOptions) {
+      // Show respawn location selection UI
+      if (typeof RespawnLocationUI !== 'undefined') {
+        RespawnLocationUI.show(this.deathData.respawnOptions);
+      }
     }
 
-    Logger.log('[PlayerDeathEffect] Sequence complete, invulnerable until:', this.invulnerableUntil);
+    Logger.log('[PlayerDeathEffect] Sequence complete, showing respawn UI');
   },
 
   /**
@@ -267,6 +279,15 @@ const PlayerDeathEffect = {
     ctx.save();
 
     if (this.active) {
+      // Draw death replay during early phases (impact and text_fadein)
+      if (typeof DeathReplay !== 'undefined' && DeathReplay.isActive()) {
+        const camera = {
+          x: typeof Renderer !== 'undefined' ? Renderer.camera.x : 0,
+          y: typeof Renderer !== 'undefined' ? Renderer.camera.y : 0
+        };
+        DeathReplay.render(ctx, camera);
+      }
+
       // Draw white flash
       if (this.whiteFlashAlpha > 0) {
         ctx.fillStyle = `rgba(255, 255, 255, ${this.whiteFlashAlpha * 0.8})`;
@@ -378,17 +399,26 @@ const PlayerDeathEffect = {
     // Info fade in slightly after main text
     const infoAlpha = Math.min(1.0, this.textAlpha);
 
-    // Killer info
+    // Killer info with enhanced faction display
     let killerText = '';
+    let killerSubtext = '';
+
     switch (this.deathData.killerType) {
       case 'player':
         killerText = `by ${this.deathData.killerName || 'another player'}`;
         break;
       case 'npc':
         killerText = `by ${this.deathData.killerName || 'hostile forces'}`;
+        if (this.deathData.killerFaction) {
+          killerSubtext = `(${this.formatFactionName(this.deathData.killerFaction)})`;
+        }
         break;
       case 'star':
-        killerText = 'by stellar radiation';
+      case 'environment':
+        killerText = `by ${this.deathData.killerName || 'stellar radiation'}`;
+        break;
+      case 'comet':
+        killerText = 'by comet impact';
         break;
       default:
         killerText = 'cause unknown';
@@ -396,7 +426,17 @@ const PlayerDeathEffect = {
 
     ctx.fillStyle = `rgba(200, 100, 100, ${infoAlpha})`;
     ctx.fillText(killerText, centerX, currentY);
-    currentY += lineHeight + 10;
+    currentY += lineHeight;
+
+    // Show faction subtext if present
+    if (killerSubtext) {
+      ctx.font = '16px "Courier New", monospace';
+      ctx.fillStyle = `rgba(150, 100, 100, ${infoAlpha * 0.8})`;
+      ctx.fillText(killerSubtext, centerX, currentY);
+      currentY += 20;
+    }
+
+    currentY += 10;
 
     // Cargo lost (up to 4 items)
     if (this.deathData.droppedCargo && this.deathData.droppedCargo.length > 0) {
@@ -420,13 +460,68 @@ const PlayerDeathEffect = {
       currentY += 10;
     }
 
-    // Survival time
+    // Session statistics section
     ctx.font = '18px "Courier New", monospace';
     ctx.fillStyle = `rgba(150, 150, 200, ${infoAlpha})`;
-    const survivalText = `Survived: ${this.formatSurvivalTime(this.deathData.survivalTime)}`;
+
+    // Get session stats
+    const stats = typeof Player !== 'undefined' ? Player.getSessionStats() : null;
+
+    // Survival time (use stats or deathData)
+    const survivalTime = stats?.survivalTime || this.deathData.survivalTime;
+    const survivalText = `Survived: ${this.formatSurvivalTime(survivalTime)}`;
     ctx.fillText(survivalText, centerX, currentY);
+    currentY += 25;
+
+    // Additional stats if available
+    if (stats) {
+      ctx.font = '14px "Courier New", monospace';
+      ctx.fillStyle = `rgba(130, 130, 180, ${infoAlpha * 0.9})`;
+
+      // Distance traveled
+      if (stats.distanceTraveled > 0) {
+        const distText = `Distance: ${this.formatDistance(stats.distanceTraveled)}`;
+        ctx.fillText(distText, centerX, currentY);
+        currentY += 18;
+      }
+
+      // NPCs destroyed
+      if (stats.npcsKilled > 0) {
+        ctx.fillStyle = `rgba(200, 100, 100, ${infoAlpha * 0.9})`;
+        const killsText = `Enemies destroyed: ${stats.npcsKilled}`;
+        ctx.fillText(killsText, centerX, currentY);
+        currentY += 18;
+      }
+
+      // Resources mined
+      if (stats.resourcesMined > 0) {
+        ctx.fillStyle = `rgba(130, 130, 180, ${infoAlpha * 0.9})`;
+        const mineText = `Resources mined: ${stats.resourcesMined}`;
+        ctx.fillText(mineText, centerX, currentY);
+        currentY += 18;
+      }
+
+      // Credits earned
+      if (stats.creditsEarned > 0) {
+        ctx.fillStyle = `rgba(200, 180, 100, ${infoAlpha * 0.9})`;
+        const creditsText = `Credits earned: ${stats.creditsEarned.toLocaleString()}`;
+        ctx.fillText(creditsText, centerX, currentY);
+      }
+    }
 
     ctx.restore();
+  },
+
+  /**
+   * Format distance for display
+   * @param {number} distance - Distance in units
+   * @returns {string} Formatted distance
+   */
+  formatDistance(distance) {
+    if (distance >= 10000) {
+      return (distance / 1000).toFixed(1) + 'k units';
+    }
+    return Math.round(distance) + ' units';
   },
 
   /**
@@ -626,6 +721,22 @@ const PlayerDeathEffect = {
       return `${minutes}m ${seconds}s`;
     }
     return `${seconds}s`;
+  },
+
+  /**
+   * Format faction name for display
+   * @param {string} faction - Faction key
+   * @returns {string} Formatted faction name
+   */
+  formatFactionName(faction) {
+    const factionNames = {
+      pirate: 'Pirates',
+      scavenger: 'Scavengers',
+      swarm: 'The Swarm',
+      void: 'Void Entities',
+      rogue_miner: 'Rogue Miners'
+    };
+    return factionNames[faction] || faction;
   }
 };
 

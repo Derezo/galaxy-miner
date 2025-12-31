@@ -45,8 +45,8 @@ async function register(username, password) {
     // Create user and ship
     const userId = createUserWithShip(username, passwordHash);
 
-    // Set safe spawn location (default 0,0 might be inside a star)
-    const safeSpawn = world.findSafeSpawnLocation(0, 0, 5000);
+    // Set deep space spawn location (far from stars to avoid gravity trap)
+    const safeSpawn = world.findDeepSpaceSpawnLocation();
     const sectorX = Math.floor(safeSpawn.x / config.SECTOR_SIZE);
     const sectorY = Math.floor(safeSpawn.y / config.SECTOR_SIZE);
     statements.setShipPosition.run(safeSpawn.x, safeSpawn.y, sectorX, sectorY, userId);

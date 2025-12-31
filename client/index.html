@@ -7,6 +7,7 @@
   <link rel="stylesheet" href="css/index.css">
   <link rel="stylesheet" href="css/ship-upgrade.css">
   <link rel="stylesheet" href="css/wormhole-transit.css">
+  <link rel="stylesheet" href="css/respawn-location.css">
   <link rel="stylesheet" href="css/mobile.css">
 </head>
 <body>
@@ -244,6 +245,8 @@
   <script src="/shared/debug-sync.js?v=1"></script>
   <!-- Debug settings (loads early for rendering/logging access) -->
   <script src="js/debug/DebugSettings.js?v=3"></script>
+  <!-- Graphics settings (loads early for graphics modules) -->
+  <script src="js/graphics/GraphicsSettings.js"></script>
   <!-- DOM Cache (loads early for optimal performance) -->
   <script src="js/dom-cache.js"></script>
   <!-- Audio system -->
@@ -285,6 +288,7 @@
   <script src="js/graphics/linked-damage.js"></script>
   <script src="js/graphics/formation-succession.js"></script>
   <script src="js/graphics/player-death.js"></script>
+  <script src="js/graphics/death-replay.js"></script>
   <!-- New HUD visual modules -->
   <script src="js/graphics/shield-visual.js"></script>
   <script src="js/graphics/hull-bar.js"></script>
@@ -338,6 +342,7 @@
   <script src="js/ui/panels/RelicsPanel.js"></script>
   <script src="js/ui/panels/SettingsPanel.js"></script>
   <script src="js/ui/WormholeTransitUI.js"></script>
+  <script src="js/ui/RespawnLocationUI.js"></script>
   <script src="js/ui/credit-animation.js"></script>
   <script src="js/ui/profile-modal.js?v=2"></script>
   <script src="js/ui/terminal.js"></script>

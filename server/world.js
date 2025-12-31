@@ -1019,6 +1019,60 @@ function findSafeSpawnLocation(preferX = 0, preferY = 0, searchRadius = 3000) {
 }
 
 /**
+ * Find a spawn location in deep space, far from any star systems.
+ * Searches super-sector boundaries where stars are least likely to exist.
+ * Used for new player spawns to avoid the gravity trap problem.
+ * @returns {{x: number, y: number}} Deep space spawn position
+ */
+function findDeepSpaceSpawnLocation() {
+  const superSectorSize = config.SUPER_SECTOR_SIZE || 6000;
+  const sectorSize = config.SECTOR_SIZE || 1000;
+  const minDistFromStar = (config.STAR_SIZE_MAX || 800) * 3; // Stay 3x max star size away
+
+  // Strategy: Search at super-sector boundaries (edges between super-sectors)
+  // where stars are least likely to exist. Stars spawn near super-sector centers.
+  // Search in expanding rings from origin, checking boundary positions.
+  for (let ring = 1; ring <= 15; ring++) {
+    // Calculate positions at the edges/corners of super-sectors
+    // These are the midpoints between super-sector centers
+    const boundaryOffset = superSectorSize * 0.5; // Halfway between super-sector centers
+
+    const positions = [
+      // Cardinal directions (between super-sectors)
+      { x: ring * superSectorSize + boundaryOffset, y: boundaryOffset },
+      { x: -ring * superSectorSize - boundaryOffset, y: boundaryOffset },
+      { x: boundaryOffset, y: ring * superSectorSize + boundaryOffset },
+      { x: boundaryOffset, y: -ring * superSectorSize - boundaryOffset },
+      // Diagonal corners (maximum distance from any star center)
+      { x: ring * superSectorSize + boundaryOffset, y: ring * superSectorSize + boundaryOffset },
+      { x: -ring * superSectorSize - boundaryOffset, y: -ring * superSectorSize - boundaryOffset },
+      { x: ring * superSectorSize + boundaryOffset, y: -ring * superSectorSize - boundaryOffset },
+      { x: -ring * superSectorSize - boundaryOffset, y: ring * superSectorSize + boundaryOffset }
+    ];
+
+    // Shuffle positions to add variety
+    for (let i = positions.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [positions[i], positions[j]] = [positions[j], positions[i]];
+    }
+
+    for (const pos of positions) {
+      // Check if this location is truly safe (far from all stars)
+      if (isLocationSafe(pos.x, pos.y, minDistFromStar)) {
+        // Double-check by scanning a wider area for any nearby stars
+        const wideScan = isLocationSafe(pos.x, pos.y, minDistFromStar * 1.5);
+        if (wideScan) {
+          return { x: Math.round(pos.x), y: Math.round(pos.y) };
+        }
+      }
+    }
+  }
+
+  // Fallback to original method if deep space search fails
+  return findSafeSpawnLocation(0, 0, 10000);
+}
+
+/**
  * Check if a location is safe (not too close to any star)
  */
 function isLocationSafe(x, y, minDistFromStar) {
@@ -1102,6 +1156,7 @@ module.exports = {
   isObjectDepleted,
   depleteObject,
   findSafeSpawnLocation,
+  findDeepSpaceSpawnLocation,
   isLocationSafe,
   findNearestWormhole
 };

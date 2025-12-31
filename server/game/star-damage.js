@@ -2,8 +2,10 @@
 // Applies damage to players who get too close to stars
 
 const world = require('../world');
+const combat = require('./combat');
 const Physics = require('../../shared/physics');
 const config = require('../config');
+const loot = require('./loot');
 
 // Track last zone for each player (to detect zone changes)
 const playerZones = new Map();
@@ -149,51 +151,60 @@ function applyDamage(player, shieldDrain, hullDamage, io, socketId) {
 
 /**
  * Handle player death from star damage
+ * Uses deferred respawn system - player chooses where to respawn
  * @param {Object} player - Player data
  * @param {Object} io - Socket.io instance
  * @param {string} socketId - Player's socket ID
  * @param {string} starId - ID of the star that killed them
  */
 function handlePlayerDeath(player, io, socketId, starId) {
-  // Emit death event
+  // Get death position
+  const deathPosition = { x: player.position.x, y: player.position.y };
+
+  // Handle death with deferred respawn (no immediate respawn)
+  const deathResult = combat.handleDeath(player.id, deathPosition);
+
+  // Spawn player wreckage if there's anything to drop
+  if (deathResult.wreckageContents && deathResult.wreckageContents.length > 0) {
+    const playerEntity = {
+      type: 'player',
+      name: deathResult.playerName || player.username || 'Unknown',
+      faction: null,
+      creditReward: 0
+    };
+
+    const wreckage = loot.spawnWreckage(
+      playerEntity,
+      deathPosition,
+      deathResult.wreckageContents,
+      null,
+      { source: 'player', playerId: player.id }
+    );
+
+    // Note: Wreckage broadcast would need connectedPlayers which we don't have here
+    // The wreckage will still be visible when players get nearby
+  }
+
+  // Emit death event with respawn OPTIONS (player chooses where to respawn)
   io.to(socketId).emit('player:death', {
+    killedBy: 'Stellar radiation',
     cause: 'star',
+    killerType: 'environment',
+    killerName: 'Star',
     starId: starId,
-    message: 'You flew too close to the sun!'
+    deathPosition,
+    droppedCargo: deathResult.droppedCargo,
+    wreckageSpawned: deathResult.wreckageContents && deathResult.wreckageContents.length > 0,
+    respawnOptions: deathResult.respawnOptions
   });
 
-  // Respawn player at safe location
-  respawnPlayer(player, io, socketId);
-}
-
-/**
- * Respawn player at a safe location
- * @param {Object} player - Player data
- * @param {Object} io - Socket.io instance
- * @param {string} socketId - Player's socket ID
- */
-function respawnPlayer(player, io, socketId) {
-  // Find a safe spawn location away from stars
-  const safePos = world.findSafeSpawnLocation(
-    player.position.x,
-    player.position.y,
-    5000
-  );
-
-  player.position = safePos;
-  player.velocity = { x: 0, y: 0 };
-  player.hull = player.hullMax || 100;
-  player.shield = player.shieldMax || 50;
+  // Mark player as dead - DON'T respawn immediately, wait for respawn:select event
+  player.isDead = true;
+  player.deathTime = Date.now();
+  player.deathPosition = deathPosition;
 
   // Clear zone state
   playerZones.delete(player.id);
-
-  // Notify player of respawn
-  io.to(socketId).emit('player:respawn', {
-    position: player.position,
-    hull: player.hull,
-    shield: player.shield
-  });
 }
 
 /**

@@ -25,6 +25,11 @@ function register(socket) {
       AudioManager.play('mining_complete');
     }
 
+    // Track resources mined for session statistics
+    if (typeof Player !== 'undefined' && data.quantity) {
+      Player.onResourceMined(data.quantity);
+    }
+
     Player.onMiningComplete(data);
   });
 

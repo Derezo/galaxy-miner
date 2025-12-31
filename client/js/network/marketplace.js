@@ -71,6 +71,11 @@ function register(socket) {
 
   // Seller notification when their listing is sold
   socket.on('market:sold', (data) => {
+    // Track credits earned for session statistics
+    if (typeof Player !== 'undefined' && data.totalCredits > 0) {
+      Player.onCreditsEarned(data.totalCredits);
+    }
+
     // Animate credit gain instead of toast
     if (typeof CreditAnimation !== 'undefined' && data.totalCredits > 0) {
       CreditAnimation.addCredits(data.totalCredits);

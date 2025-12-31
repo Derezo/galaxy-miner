@@ -506,7 +506,10 @@ const CONSTANTS = {
     FALLOFF_POWER: 2,             // Inverse square falloff
     INFLUENCE_RADIUS_FACTOR: 2.5, // Gravity extends to 2.5x star radius (reduced from 3)
     ESCAPE_THRUST_FACTOR: 1.2,    // Thrust multiplier needed to escape (reduced from 1.5)
-    ENGINE_TIER_REDUCTION: 0.20   // 20% gravity reduction per engine tier above 1 (buffed)
+    ENGINE_TIER_REDUCTION: 0.20,  // 20% gravity reduction per engine tier above 1 (buffed)
+    // Tier-based gravity scaling (inverted - new players get help, veterans face full challenge)
+    // Index = engine tier, value = gravity multiplier
+    TIER_GRAVITY_SCALE: [0, 0.50, 0.70, 0.85, 0.95, 1.0]  // T1=50%, T2=70%, T3=85%, T4=95%, T5=100%
   },
 
   // Star Spectral Classes - astronomically accurate star types

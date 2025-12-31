@@ -30,7 +30,7 @@ function register(socket) {
   });
 
   socket.on('player:death', (data) => {
-    window.Logger.log('Player died:', data.cause, data.message);
+    window.Logger.log('Player died:', data.cause, data.killedBy);
 
     // Play player death sound (non-spatial, always audible)
     if (typeof AudioManager !== 'undefined' && AudioManager.isReady && AudioManager.isReady()) {
@@ -40,34 +40,26 @@ function register(socket) {
     // Calculate survival time before death
     const survivalTime = Player.getSurvivalTime();
 
-    // Determine killer type and name
-    let killerType = 'unknown';
-    let killerName = null;
-
-    if (data.cause === 'star' || data.cause === 'stellar_radiation') {
-      killerType = 'star';
-    } else if (data.killerType) {
-      killerType = data.killerType;
-      killerName = data.killerName;
-    } else if (data.cause === 'npc' || data.npcName) {
-      killerType = 'npc';
-      killerName = data.npcName || data.cause;
-    } else if (data.cause === 'player' || data.killerName) {
-      killerType = 'player';
-      killerName = data.killerName;
-    }
+    // Use enhanced killer info from server (new deferred respawn system)
+    const killerType = data.killerType || data.cause || 'unknown';
+    const killerName = data.killerName || null;
+    const killerFaction = data.killerFaction || null;
 
     // Prepare death data for visual effect
     const deathData = {
       killerType,
       killerName,
+      killerFaction,
+      cause: data.cause,
       droppedCargo: data.droppedCargo || [],
       survivalTime,
-      deathPosition: {
+      deathPosition: data.deathPosition || {
         x: Player.position.x,
         y: Player.position.y
       },
-      message: data.message
+      message: data.message,
+      // New: respawn options for location selection
+      respawnOptions: data.respawnOptions
     };
 
     // Mark player as dead
@@ -77,29 +69,42 @@ function register(socket) {
     if (typeof PlayerDeathEffect !== 'undefined') {
       PlayerDeathEffect.trigger(deathData);
     } else {
-      // Fallback to notification if effect module not loaded
-      if (typeof NotificationManager !== 'undefined' && data.message) {
+      // Fallback: show respawn UI directly if no death effect
+      if (typeof RespawnLocationUI !== 'undefined' && data.respawnOptions) {
+        RespawnLocationUI.show(data.respawnOptions);
+      } else if (typeof NotificationManager !== 'undefined' && data.message) {
         NotificationManager.error(data.message);
       }
     }
   });
 
   socket.on('player:respawn', (data) => {
-    window.Logger.log('Player respawn received:', data.position);
+    window.Logger.log('Player respawn received:', data.position, 'at', data.locationName);
+
+    // Hide respawn location UI if visible
+    if (typeof RespawnLocationUI !== 'undefined' && RespawnLocationUI.isVisible()) {
+      RespawnLocationUI.hide();
+    }
 
     // Prepare respawn data
     const respawnData = {
       position: data.position,
       hull: data.hull,
-      shield: data.shield
+      shield: data.shield,
+      locationName: data.locationName
     };
 
-    // If death effect is active, queue respawn for after sequence
+    // If death effect is still active, queue respawn
     if (typeof PlayerDeathEffect !== 'undefined' && PlayerDeathEffect.isActive()) {
       PlayerDeathEffect.queueRespawn(respawnData);
     } else {
       // Apply respawn immediately
       Player.onRespawn(respawnData);
+    }
+
+    // Show respawn notification
+    if (typeof NotificationManager !== 'undefined' && data.locationName) {
+      NotificationManager.info('Respawned at ' + data.locationName);
     }
   });
 

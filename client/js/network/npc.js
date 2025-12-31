@@ -70,6 +70,11 @@ function register(socket) {
     // Get NPC data BEFORE removing it
     const npc = Entities.npcs.get(data.id);
 
+    // Track NPC kill for session statistics if this player killed it
+    if (typeof Player !== 'undefined' && data.destroyedBy === Player.id) {
+      Player.onNPCKill();
+    }
+
     // Play death sound based on faction
     if (npc && typeof AudioManager !== 'undefined' && AudioManager.isReady && AudioManager.isReady()) {
       AudioManager.playAt('death_' + npc.faction, npc.position.x, npc.position.y);
@@ -832,6 +837,11 @@ function register(socket) {
   socket.on('base:reward', (data) => {
     // Display notification for base destruction rewards
     window.Logger.category('combat', `Base destroyed! Earned ${data.credits} credits (${data.teamMultiplier}x team bonus)`);
+
+    // Track credits earned for session statistics
+    if (typeof Player !== 'undefined' && data.credits > 0) {
+      Player.onCreditsEarned(data.credits);
+    }
 
     // Animate credit gain
     if (typeof CreditAnimation !== 'undefined' && data.credits > 0) {

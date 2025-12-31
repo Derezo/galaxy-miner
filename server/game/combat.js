@@ -185,10 +185,33 @@ function applyDamage(targetUserId, damage, damageType = 'kinetic', shieldPiercin
 }
 
 /**
- * Handle player death - calculate dropped cargo, spawn wreckage, and respawn
+ * Build respawn options for player death UI
+ * @param {number} userId - Player's user ID
+ * @param {Object} deathPosition - Where the player died
+ * @returns {Object} Respawn options for the client
+ */
+function buildRespawnOptions(userId, deathPosition) {
+  const ship = statements.getShipByUserId.get(userId);
+
+  // Deep space is always available
+  const options = {
+    deepSpace: { available: true },
+    lastSafe: {
+      available: ship && ship.last_safe_x !== null && ship.last_safe_x !== undefined,
+      position: ship && ship.last_safe_x !== null ? { x: ship.last_safe_x, y: ship.last_safe_y } : null
+    },
+    factionBases: [] // Could be populated with discovered friendly bases in future
+  };
+
+  return options;
+}
+
+/**
+ * Handle player death - calculate dropped cargo and spawn wreckage
+ * Does NOT respawn immediately - waits for player to select respawn location
  * @param {number} userId - Player's user ID
  * @param {Object} deathPosition - { x, y } position where player died (for wreckage)
- * @returns {Object} Death result with droppedCargo, wreckageContents, respawnPosition, deathPosition
+ * @returns {Object} Death result with droppedCargo, wreckageContents, respawnOptions, deathPosition
  */
 function handleDeath(userId, deathPosition = null) {
   const ship = statements.getShipByUserId.get(userId);
@@ -230,18 +253,69 @@ function handleDeath(userId, deathPosition = null) {
     }
   }
 
-  // Find safe respawn position (away from stars)
-  const safePos = world.findSafeSpawnLocation(0, 0, 5000);
+  // Build respawn options for player to choose from
+  const respawnOptions = buildRespawnOptions(userId, deathPosition);
 
-  // Respawn ship
-  statements.respawnShip.run(safePos.x, safePos.y, userId);
+  // NOTE: We no longer respawn immediately - wait for player selection via respawn:select event
 
   return {
     droppedCargo,
     wreckageContents, // For spawning wreckage
-    respawnPosition: safePos,
+    respawnOptions,   // Options for player to choose from
     deathPosition: deathPosition || { x: ship?.x || 0, y: ship?.y || 0 },
     playerName: ship?.username || 'Unknown'
+  };
+}
+
+/**
+ * Apply respawn after player selects location
+ * @param {number} userId - Player's user ID
+ * @param {string} respawnType - 'deep_space' | 'last_safe' | 'faction_base'
+ * @param {string|null} targetId - Optional base ID for faction_base respawn
+ * @returns {Object} Respawn result with position and location name
+ */
+function applyRespawn(userId, respawnType = 'deep_space', targetId = null) {
+  const ship = statements.getShipByUserId.get(userId);
+  let respawnPosition;
+  let locationName = 'Deep Space';
+
+  switch (respawnType) {
+    case 'deep_space':
+      respawnPosition = world.findDeepSpaceSpawnLocation();
+      locationName = 'Deep Space';
+      break;
+
+    case 'last_safe':
+      if (ship && ship.last_safe_x !== null && ship.last_safe_x !== undefined) {
+        respawnPosition = { x: ship.last_safe_x, y: ship.last_safe_y };
+        locationName = 'Last Safe Location';
+      } else {
+        // Fallback to deep space if no last safe location
+        respawnPosition = world.findDeepSpaceSpawnLocation();
+        locationName = 'Deep Space';
+      }
+      break;
+
+    case 'faction_base':
+      // Future: lookup base position from targetId
+      // For now, fallback to deep space
+      respawnPosition = world.findDeepSpaceSpawnLocation();
+      locationName = 'Deep Space';
+      break;
+
+    default:
+      respawnPosition = world.findDeepSpaceSpawnLocation();
+      locationName = 'Deep Space';
+  }
+
+  // Apply the respawn to database
+  statements.respawnShip.run(respawnPosition.x, respawnPosition.y, userId);
+
+  return {
+    position: respawnPosition,
+    locationName,
+    hull: ship?.hull_max || config.DEFAULT_HULL_HP,
+    shield: ship?.shield_max || config.DEFAULT_SHIELD_HP
   };
 }
 
@@ -297,6 +371,7 @@ module.exports = {
   checkHit,
   applyDamage,
   handleDeath,
+  applyRespawn,
   updateShieldRecharge,
   getWeaponRange,
   getHullResistances,

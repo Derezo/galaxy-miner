@@ -166,7 +166,7 @@
     const baseStrength = gravity.BASE_STRENGTH || 800;
     const falloffPower = gravity.FALLOFF_POWER || 2;
     const influenceFactor = gravity.INFLUENCE_RADIUS_FACTOR || 3;
-    const tierReduction = gravity.ENGINE_TIER_REDUCTION || 0.15;
+    const tierGravityScale = gravity.TIER_GRAVITY_SCALE || null;
 
     const dx = star.x - shipX;
     const dy = star.y - shipY;
@@ -182,9 +182,17 @@
     const normalizedDist = Math.max(dist / star.size, 0.5); // Prevent extreme values
     const strength = baseStrength / Math.pow(normalizedDist, falloffPower);
 
-    // Engine tier reduces gravity effect (min 40% effect at tier 5)
-    const tierFactor = 1 - (engineTier - 1) * tierReduction;
-    const effectiveStrength = strength * Math.max(tierFactor, 0.4);
+    // Use tier-based gravity scaling (new players get reduced gravity)
+    // T1=50%, T2=70%, T3=85%, T4=95%, T5=100% gravity
+    let tierFactor = 1.0;
+    if (tierGravityScale && tierGravityScale[engineTier] !== undefined) {
+      tierFactor = tierGravityScale[engineTier];
+    } else {
+      // Fallback to old linear reduction if scale not defined
+      const tierReduction = gravity.ENGINE_TIER_REDUCTION || 0.15;
+      tierFactor = Math.max(1 - (engineTier - 1) * tierReduction, 0.4);
+    }
+    const effectiveStrength = strength * tierFactor;
 
     // Direction toward star
     const dirX = dx / dist;

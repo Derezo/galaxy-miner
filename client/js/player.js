@@ -52,6 +52,15 @@ const Player = {
   isDead: false,
   sessionStartTime: 0,  // When this life started (for survival time calculation)
 
+  // Session statistics (tracked per life for death screen display)
+  sessionStats: {
+    distanceTraveled: 0,
+    lastPosition: null,
+    npcsKilled: 0,
+    resourcesMined: 0,
+    creditsEarned: 0
+  },
+
   // Wormhole transit state
   inWormholeTransit: false,
   wormholeTransitPhase: null,  // 'selecting' | 'transit'
@@ -120,6 +129,15 @@ const Player = {
     // Initialize survival tracking
     this.isDead = false;
     this.sessionStartTime = Date.now();
+
+    // Reset session statistics
+    this.sessionStats = {
+      distanceTraveled: 0,
+      lastPosition: { x: this.position.x, y: this.position.y },
+      npcsKilled: 0,
+      resourcesMined: 0,
+      creditsEarned: 0
+    };
 
     // Reset wormhole transit state
     this.inWormholeTransit = false;
@@ -258,6 +276,9 @@ const Player = {
     // Update position
     this.position.x += this.velocity.x * dt;
     this.position.y += this.velocity.y * dt;
+
+    // Track distance traveled for session stats
+    this.updateSessionStats();
 
     // Send position to server periodically
     this.sendPositionUpdate();
@@ -852,6 +873,14 @@ const Player = {
       this.shield.current = data.shield;
     }
 
+    // Reset session statistics for new life
+    this.resetSessionStats();
+
+    // Clear death replay buffer for new life
+    if (typeof DeathReplay !== 'undefined') {
+      DeathReplay.clearBuffer();
+    }
+
     // Reset audio state (engine sounds are one-shot, not loops)
     if (typeof AudioManager !== 'undefined') {
       this._engineLoopActive = false;
@@ -1168,5 +1197,80 @@ const Player = {
   onWormholeError(data) {
     NotificationManager.error(data.error || 'Wormhole error');
     Logger.error('[Wormhole] Error:', data.error);
+  },
+
+  // ==================== Session Statistics Methods ====================
+
+  /**
+   * Update session statistics (called each frame)
+   * Tracks distance traveled
+   */
+  updateSessionStats() {
+    if (this.isDead) return;
+
+    // Track distance traveled
+    if (this.sessionStats.lastPosition) {
+      const dx = this.position.x - this.sessionStats.lastPosition.x;
+      const dy = this.position.y - this.sessionStats.lastPosition.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+
+      // Only track if moved at least 1 unit to avoid floating point accumulation
+      if (dist > 1) {
+        this.sessionStats.distanceTraveled += dist;
+        this.sessionStats.lastPosition = { x: this.position.x, y: this.position.y };
+      }
+    } else {
+      this.sessionStats.lastPosition = { x: this.position.x, y: this.position.y };
+    }
+  },
+
+  /**
+   * Record an NPC kill for session statistics
+   */
+  onNPCKill() {
+    this.sessionStats.npcsKilled++;
+  },
+
+  /**
+   * Record resources mined for session statistics
+   * @param {number} quantity - Amount of resources mined
+   */
+  onResourceMined(quantity) {
+    this.sessionStats.resourcesMined += quantity;
+  },
+
+  /**
+   * Record credits earned for session statistics
+   * @param {number} amount - Amount of credits earned
+   */
+  onCreditsEarned(amount) {
+    this.sessionStats.creditsEarned += amount;
+  },
+
+  /**
+   * Get current session statistics for death screen display
+   * @returns {Object} Session statistics
+   */
+  getSessionStats() {
+    return {
+      survivalTime: this.getSurvivalTime(),
+      distanceTraveled: Math.round(this.sessionStats.distanceTraveled),
+      npcsKilled: this.sessionStats.npcsKilled,
+      resourcesMined: this.sessionStats.resourcesMined,
+      creditsEarned: this.sessionStats.creditsEarned
+    };
+  },
+
+  /**
+   * Reset session statistics (called on respawn)
+   */
+  resetSessionStats() {
+    this.sessionStats = {
+      distanceTraveled: 0,
+      lastPosition: { x: this.position.x, y: this.position.y },
+      npcsKilled: 0,
+      resourcesMined: 0,
+      creditsEarned: 0
+    };
   }
 };

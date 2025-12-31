@@ -96,6 +96,11 @@ function register(socket) {
   socket.on('team:creditReward', (data) => {
     window.Logger.category('teams', 'Received credit share:', data.credits, 'from team kill');
 
+    // Track credits earned for session statistics
+    if (typeof Player !== 'undefined' && data.credits > 0) {
+      Player.onCreditsEarned(data.credits);
+    }
+
     // Show reward pop-up
     if (typeof NotificationManager !== 'undefined') {
       NotificationManager.queueReward({ credits: data.credits });

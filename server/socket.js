@@ -150,6 +150,44 @@ module.exports = function(io) {
       });
     });
 
+    // Respawn: Player selects respawn location
+    socket.on('respawn:select', (data) => {
+      if (!authenticatedUserId) return;
+
+      const player = connectedPlayers.get(socket.id);
+      if (!player) return;
+
+      // Validate player is actually dead
+      if (!player.isDead) {
+        logger.warn(`Player ${player.username} tried to respawn but isn't dead`);
+        return;
+      }
+
+      const { type, targetId } = data;
+
+      // Apply respawn at selected location
+      const respawnResult = combat.applyRespawn(authenticatedUserId, type, targetId);
+
+      // Update player state
+      player.position = respawnResult.position;
+      player.velocity = { x: 0, y: 0 };
+      player.hull = respawnResult.hull;
+      player.shield = respawnResult.shield;
+      player.isDead = false;
+      player.deathTime = null;
+      player.deathPosition = null;
+
+      // Emit respawn event to player
+      socket.emit('player:respawn', {
+        position: respawnResult.position,
+        hull: respawnResult.hull,
+        shield: respawnResult.shield,
+        locationName: respawnResult.locationName
+      });
+
+      logger.log(`Player ${player.username} respawned at ${respawnResult.locationName} (${respawnResult.position.x.toFixed(0)}, ${respawnResult.position.y.toFixed(0)})`);
+    });
+
     // Combat: Fire weapon
     socket.on('combat:fire', (data) => {
       if (!authenticatedUserId) return;

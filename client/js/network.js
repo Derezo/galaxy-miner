@@ -2347,5 +2347,11 @@ const Network = {
   sendPlunderBase(baseId) {
     if (!this.connected) return;
     this.socket.emit('relic:plunder', { baseId });
+  },
+
+  // Respawn location selection
+  sendRespawnSelect(type, targetId = null) {
+    if (!this.connected) return;
+    this.socket.emit('respawn:select', { type, targetId });
   }
 };
