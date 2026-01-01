@@ -1,197 +1,62 @@
 /**
- * Respawn Location UI Styles
+ * Respawn Button Styles
+ * Simple centered button shown after death animation
  */
 
-/* Full-screen overlay */
-.respawn-location-overlay {
+.respawn-button {
   position: fixed;
-  top: 0;
-  left: 0;
-  width: 100vw;
-  height: 100vh;
-  z-index: 1000;
-  pointer-events: all;
-}
-
-.respawn-location-overlay.hidden {
-  display: none;
-}
-
-/* Canvas fills the background */
-#respawn-location-canvas {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  background: radial-gradient(ellipse at center, #0a0515 0%, #050210 50%, #000005 100%);
-}
-
-/* Content layer above canvas */
-.respawn-content {
-  position: relative;
-  z-index: 1;
-  width: 100%;
-  height: 100%;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  pointer-events: none;
-  padding: 20px;
-  box-sizing: border-box;
-}
-
-/* Title */
-.respawn-title {
-  font-size: 2rem;
-  font-weight: bold;
-  color: #8888ff;
-  text-shadow: 0 0 20px #4444ff, 0 0 40px #2222aa;
-  letter-spacing: 0.2em;
-  margin-bottom: 40px;
-  animation: respawn-title-pulse 2s ease-in-out infinite;
-}
-
-@keyframes respawn-title-pulse {
-  0%, 100% { opacity: 0.8; text-shadow: 0 0 20px #4444ff, 0 0 40px #2222aa; }
-  50% { opacity: 1; text-shadow: 0 0 30px #6666ff, 0 0 60px #4444ff; }
-}
-
-/* Options container */
-.respawn-options {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-  width: 100%;
-  max-width: 400px;
-  pointer-events: all;
-}
-
-/* Option button */
-.respawn-option {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  padding: 16px 24px;
-  min-height: 60px;
-  background: rgba(30, 30, 60, 0.8);
-  border: 2px solid rgba(100, 100, 200, 0.5);
-  border-radius: 8px;
-  color: #aaaaff;
-  cursor: pointer;
-  transition: all 0.2s ease;
-  text-align: left;
-}
-
-.respawn-option:hover {
-  background: rgba(50, 50, 100, 0.9);
-  border-color: rgba(150, 150, 255, 0.8);
-  transform: translateY(-2px);
-  box-shadow: 0 4px 20px rgba(100, 100, 255, 0.3);
-}
-
-.respawn-option:active {
-  transform: translateY(0);
-}
-
-.respawn-option.recommended {
-  border-color: rgba(100, 200, 255, 0.7);
-  background: rgba(30, 50, 80, 0.9);
-}
-
-.respawn-option.recommended:hover {
-  border-color: rgba(150, 220, 255, 1);
-  box-shadow: 0 4px 25px rgba(100, 180, 255, 0.4);
-}
-
-.respawn-option.disabled {
-  opacity: 0.5;
-  pointer-events: none;
-}
-
-/* Option icon */
-.option-icon {
+  bottom: 80px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 20px 60px;
   font-size: 24px;
-  width: 40px;
-  text-align: center;
-  flex-shrink: 0;
-}
-
-/* Option text container */
-.option-text {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-/* Option name */
-.option-name {
-  font-size: 16px;
+  font-family: 'Courier New', monospace;
   font-weight: bold;
-  color: #ccccff;
+  background: linear-gradient(180deg, #2a5a2a 0%, #1a3a1a 100%);
+  border: 2px solid #4a8a4a;
+  color: #8fdf8f;
+  cursor: pointer;
+  text-shadow: 0 0 10px #4a8a4a;
+  box-shadow: 0 0 20px rgba(74, 138, 74, 0.5);
+  z-index: 1001;
+  letter-spacing: 0.1em;
+  transition: all 0.2s ease;
 }
 
-/* Option description */
-.option-desc {
-  font-size: 12px;
-  color: #8888aa;
+.respawn-button:hover {
+  background: linear-gradient(180deg, #3a7a3a 0%, #2a5a2a 100%);
+  box-shadow: 0 0 30px rgba(74, 138, 74, 0.8);
+  transform: translateX(-50%) scale(1.05);
 }
 
-/* Timer */
-.respawn-timer {
-  margin-top: 30px;
-  font-size: 14px;
-  color: #ffaa44;
-  text-shadow: 0 0 10px rgba(255, 170, 68, 0.5);
+.respawn-button:active {
+  transform: translateX(-50%) scale(0.98);
+  box-shadow: 0 0 15px rgba(74, 138, 74, 0.6);
 }
 
-.timer-value {
-  font-weight: bold;
-  color: #ffcc66;
+.respawn-button:focus {
+  outline: 2px solid #8fdf8f;
+  outline-offset: 4px;
 }
 
 /* Mobile responsive */
 @media (max-width: 768px) {
-  .respawn-title {
-    font-size: 1.5rem;
-    letter-spacing: 0.1em;
-    margin-bottom: 30px;
-  }
-
-  .respawn-options {
-    max-width: 100%;
-    padding: 0 10px;
-  }
-
-  .respawn-option {
-    padding: 20px;
-    min-height: 80px;
-  }
-
-  .option-icon {
-    font-size: 28px;
-    width: 50px;
-  }
-
-  .option-name {
-    font-size: 18px;
-  }
-
-  .option-desc {
-    font-size: 14px;
+  .respawn-button {
+    padding: 24px 50px;
+    font-size: 20px;
+    min-width: 200px;
   }
 }
 
-/* Touch-friendly for mobile */
+/* Touch-friendly */
 @media (hover: none) {
-  .respawn-option:hover {
-    transform: none;
-    box-shadow: none;
+  .respawn-button:hover {
+    transform: translateX(-50%);
+    box-shadow: 0 0 20px rgba(74, 138, 74, 0.5);
   }
 
-  .respawn-option:active {
-    background: rgba(60, 60, 120, 0.9);
-    border-color: rgba(180, 180, 255, 1);
+  .respawn-button:active {
+    background: linear-gradient(180deg, #4a9a4a 0%, #3a7a3a 100%);
+    box-shadow: 0 0 35px rgba(74, 138, 74, 0.9);
   }
 }

@@ -26,6 +26,21 @@ function register(socket) {
     Entities.removeWreckage(data.wreckageId);
   });
 
+  // Nearby wreckage response (from loot:getNearby request)
+  socket.on('loot:nearby', (data) => {
+    window.Logger.log('Nearby wreckage:', data.wreckage?.length || 0);
+
+    // Update entities with nearby wreckage for radar display
+    if (typeof Entities !== 'undefined' && data.wreckage) {
+      Entities.nearbyWreckage = data.wreckage;
+    }
+
+    // Update UI if loot panel is open
+    if (typeof LootPanel !== 'undefined' && LootPanel.isVisible) {
+      LootPanel.updateNearbyList(data.wreckage);
+    }
+  });
+
   // Loot collection events
   socket.on('loot:started', (data) => {
     Player.onLootCollectionStarted(data);
@@ -148,9 +163,8 @@ function register(socket) {
     }
   });
 
-  socket.on('buff:expired', (data) => {
-    Player.onBuffExpired(data);
-  });
+  // Note: 'buff:expired' handler removed - server never emits this event.
+  // Buff expiration is handled client-side via timers in Player.onBuffApplied()
 
   // Relic collection events
   socket.on('relic:collected', (data) => {

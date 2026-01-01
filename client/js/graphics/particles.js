@@ -79,19 +79,36 @@ const ParticleSystem = {
   active: [],
   quality: 'high',
 
-  init(quality = 'high') {
+  init(quality = null) {
     this.pool = [];
     this.active = [];
-    this.quality = quality;
 
-    const poolSize = PARTICLE_QUALITY[quality] || PARTICLE_QUALITY.high;
+    // Use GraphicsSettings if available, otherwise fall back to parameter or 'high'
+    if (quality === null && typeof GraphicsSettings !== 'undefined') {
+      quality = GraphicsSettings.getLevel();
+    }
+    this.quality = quality || 'high';
+
+    const poolSize = PARTICLE_QUALITY[this.quality] || PARTICLE_QUALITY.high;
     PARTICLE_POOL_SIZE = poolSize;
 
     for (let i = 0; i < poolSize; i++) {
       this.pool.push(new Particle());
     }
 
-    Logger.log(`ParticleSystem initialized with ${poolSize} particles (${quality} quality)`);
+    Logger.log(`ParticleSystem initialized with ${poolSize} particles (${this.quality} quality)`);
+  },
+
+  /**
+   * Get particle count multiplier based on current graphics settings
+   * Use this when spawning particles to reduce counts on lower settings
+   * @returns {number} Multiplier (0.4 for low, 0.7 for medium, 1.0 for high)
+   */
+  getParticleMultiplier() {
+    if (typeof GraphicsSettings !== 'undefined') {
+      return GraphicsSettings.get('particleMultiplier') || 1.0;
+    }
+    return 1.0;
   },
 
   /**
@@ -154,7 +171,10 @@ const ParticleSystem = {
   },
 
   spawnBurst(config, count, spread = {}) {
-    for (let i = 0; i < count; i++) {
+    // Apply particle multiplier to reduce particle counts on lower settings
+    const adjustedCount = Math.max(1, Math.round(count * this.getParticleMultiplier()));
+
+    for (let i = 0; i < adjustedCount; i++) {
       this.spawn({
         ...config,
         x: config.x + (Math.random() - 0.5) * (spread.x || 0),
@@ -173,8 +193,9 @@ const ParticleSystem = {
    * @param {number} y - World Y position
    */
   spawnPlunderEffect(x, y) {
-    // Gold coin burst - 20 particles radiating outward
-    for (let i = 0; i < 20; i++) {
+    // Gold coin burst - apply particle multiplier
+    const particleCount = Math.max(5, Math.round(20 * this.getParticleMultiplier()));
+    for (let i = 0; i < particleCount; i++) {
       const angle = Math.random() * Math.PI * 2;
       const speed = 50 + Math.random() * 100;
       this.spawn({

@@ -620,8 +620,11 @@ function updateNPCs(deltaTime) {
       delete npcEntity.rageExpires;
     }
 
-    // Get players in NPC's aggro range for AI
+    // Get players in NPC's aggro range for AI (exclude dead players)
     const nearbyPlayers = players.filter(p => {
+      // Don't target dead players
+      if (p.isDead) return false;
+
       const dx = p.position.x - npcEntity.position.x;
       const dy = p.position.y - npcEntity.position.y;
       return Math.sqrt(dx * dx + dy * dy) <= npcEntity.aggroRange;
@@ -847,6 +850,12 @@ function updateNPCs(deltaTime) {
     if (action && action.action === 'fire') {
       // NPC fired at player - use proper damage calculation
       const targetPlayer = action.target;
+
+      // CRITICAL: Skip if target player is already dead
+      // Prevents looping death events from multiple NPCs hitting same dead player
+      if (targetPlayer.isDead) {
+        continue; // Skip to next NPC
+      }
 
       // VALIDATION: Re-verify distance before applying damage
       // This prevents hits when player has moved out of range since AI check

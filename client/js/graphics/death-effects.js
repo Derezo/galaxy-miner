@@ -172,8 +172,14 @@ const DeathEffects = {
     const config = effect.config;
     const isInward = config.inward;
 
-    for (let i = 0; i < config.particles; i++) {
-      const angle = (Math.PI * 2 * i) / config.particles + Math.random() * 0.5;
+    // Apply death effect multiplier from graphics settings
+    const deathMultiplier = typeof GraphicsSettings !== 'undefined'
+      ? (GraphicsSettings.get('deathEffectMultiplier') || 1.0)
+      : 1.0;
+    const particleCount = Math.max(5, Math.round(config.particles * deathMultiplier));
+
+    for (let i = 0; i < particleCount; i++) {
+      const angle = (Math.PI * 2 * i) / particleCount + Math.random() * 0.5;
       const speed = config.particleSpeed * (0.5 + Math.random() * 0.5);
       const size = config.particleSize.min +
         Math.random() * (config.particleSize.max - config.particleSize.min);
@@ -197,8 +203,14 @@ const DeathEffects = {
   generateDebris(effect) {
     const config = effect.config;
 
-    for (let i = 0; i < config.debrisCount; i++) {
-      const angle = (Math.PI * 2 * i) / config.debrisCount + Math.random() * 0.3;
+    // Apply death effect multiplier from graphics settings
+    const deathMultiplier = typeof GraphicsSettings !== 'undefined'
+      ? (GraphicsSettings.get('deathEffectMultiplier') || 1.0)
+      : 1.0;
+    const debrisCount = Math.max(2, Math.round(config.debrisCount * deathMultiplier));
+
+    for (let i = 0; i < debrisCount; i++) {
+      const angle = (Math.PI * 2 * i) / debrisCount + Math.random() * 0.3;
       const speed = config.particleSpeed * 0.4;
       const size = 8 + Math.random() * 12;
 
@@ -219,7 +231,13 @@ const DeathEffects = {
   generateSparks(effect) {
     const config = effect.config;
 
-    for (let i = 0; i < (config.sparkCount || 10); i++) {
+    // Apply death effect multiplier from graphics settings
+    const deathMultiplier = typeof GraphicsSettings !== 'undefined'
+      ? (GraphicsSettings.get('deathEffectMultiplier') || 1.0)
+      : 1.0;
+    const sparkCount = Math.max(3, Math.round((config.sparkCount || 10) * deathMultiplier));
+
+    for (let i = 0; i < sparkCount; i++) {
       const angle = Math.random() * Math.PI * 2;
       const speed = 150 + Math.random() * 100;
 

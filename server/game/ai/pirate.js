@@ -500,8 +500,13 @@ class PirateStrategy {
       const target = nearbyPlayers[0];
       npc.targetPlayer = target.id;
       npc.raidTargetPos = { x: target.position.x, y: target.position.y };
+      const wasPatrol = npc.state === 'patrol';
       npc.state = 'raid';
-      logger.log(`[PIRATE] Fighter ${npc.id} spotted player ${target.id}`);
+      // Only log on state transition, not on re-entry from brief interruptions
+      if (wasPatrol && npc.lastRaidTarget !== target.id) {
+        logger.log(`[PIRATE] Fighter ${npc.id} spotted player ${target.id}`);
+        npc.lastRaidTarget = target.id;
+      }
       return null;
     }
 
@@ -510,8 +515,13 @@ class PirateStrategy {
     if (intel && Date.now() - intel.reportedAt < this.INTEL_VALIDITY_DURATION) {
       npc.targetPlayer = intel.targetId;
       npc.raidTargetPos = intel.targetPos;
+      const wasPatrol = npc.state === 'patrol';
       npc.state = 'raid';
-      logger.log(`[PIRATE] Fighter ${npc.id} received intel, raiding ${intel.targetType}`);
+      // Only log on state transition for new intel targets
+      if (wasPatrol && npc.lastIntelTarget !== intel.targetId) {
+        logger.log(`[PIRATE] Fighter ${npc.id} received intel, raiding ${intel.targetType}`);
+        npc.lastIntelTarget = intel.targetId;
+      }
       return null;
     }
 
@@ -593,6 +603,9 @@ class PirateStrategy {
       npc.state = 'patrol';
       npc.targetPlayer = null;
       npc.targetNPC = null;
+      // Clear target tracking to allow re-logging on new encounter
+      npc.lastRaidTarget = null;
+      npc.lastIntelTarget = null;
       return null;
     }
 
@@ -601,10 +614,17 @@ class PirateStrategy {
     const chaseDistY = targetPos.y - npc.position.y;
     const chaseDist = Math.sqrt(chaseDistX * chaseDistX + chaseDistY * chaseDistY);
     if (chaseDist > this.RAID_CHASE_DISTANCE) {
+      const hadActiveTarget = npc.targetPlayer || npc.targetNPC;
       npc.state = 'patrol';
       npc.targetPlayer = null;
       npc.targetNPC = null;
-      logger.log(`[PIRATE] Fighter ${npc.id} lost target - too far (${Math.round(chaseDist)} units)`);
+      // Clear target tracking to allow re-logging on new encounter
+      npc.lastRaidTarget = null;
+      npc.lastIntelTarget = null;
+      // Only log if we actually had an active target (not just stale coordinates)
+      if (hadActiveTarget) {
+        logger.log(`[PIRATE] Fighter ${npc.id} lost target - too far (${Math.round(chaseDist)} units)`);
+      }
       return null;
     }
 
@@ -859,8 +879,13 @@ class PirateStrategy {
         targetId: intel.targetId,
         spawnedFromIntel: true
       });
+      const wasIdle = npc.state === 'idle';
       npc.state = 'raid';
-      logger.log(`[PIRATE] Captain ${npc.id} responding to intel, raiding ${intel.targetType}`);
+      // Only log on state transition for new targets
+      if (wasIdle && npc.lastIntelTarget !== intel.targetId) {
+        logger.log(`[PIRATE] Captain ${npc.id} responding to intel, raiding ${intel.targetType}`);
+        npc.lastIntelTarget = intel.targetId;
+      }
       return null;
     }
 
@@ -869,8 +894,13 @@ class PirateStrategy {
       const target = nearbyPlayers[0];
       npc.targetPlayer = target.id;
       npc.raidTargetPos = { x: target.position.x, y: target.position.y };
+      const wasIdle = npc.state === 'idle';
       npc.state = 'raid';
-      logger.log(`[PIRATE] Captain ${npc.id} spotted player ${target.id}`);
+      // Only log on state transition for new targets
+      if (wasIdle && npc.lastRaidTarget !== target.id) {
+        logger.log(`[PIRATE] Captain ${npc.id} spotted player ${target.id}`);
+        npc.lastRaidTarget = target.id;
+      }
       return null;
     }
 

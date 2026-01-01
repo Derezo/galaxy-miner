@@ -8,7 +8,9 @@
     "dev": "node --watch server/index.js",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "vitest run --coverage",
+    "audit:network": "node scripts/audit-network-events.js",
+    "audit:network:verbose": "node scripts/audit-network-events.js --verbose"
   },
   "dependencies": {
     "bcrypt": "^5.1.1",

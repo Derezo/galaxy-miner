@@ -189,6 +189,12 @@ const ShieldVisual = {
    * @param {number} tier - Shield tier (1-5)
    */
   addImpact(worldX, worldY, shipX, shipY, tier = 1) {
+    // Skip ripple effects if disabled in graphics settings
+    if (typeof GraphicsSettings !== 'undefined' &&
+        GraphicsSettings.get('shieldRipples') === false) {
+      return;
+    }
+
     // Calculate impact angle relative to ship center
     const angle = Math.atan2(worldY - shipY, worldX - shipX);
 

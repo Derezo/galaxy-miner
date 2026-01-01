@@ -633,6 +633,12 @@ const FloatingTextSystem = {
    * @param {object} options - { color, size, duration, rise, font }
    */
   add(x, y, text, options = {}) {
+    // Check if floating text is enabled in graphics settings
+    if (typeof GraphicsSettings !== 'undefined' &&
+        GraphicsSettings.get('floatingText') === false) {
+      return; // Skip floating text on low graphics
+    }
+
     // Validate coordinates
     if (!Number.isFinite(x) || !Number.isFinite(y)) return;
 

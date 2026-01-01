@@ -91,8 +91,8 @@ function register(ctx) {
     player.velocity = { x: 0, y: 0 };
     player.rotation = ship.rotation;
 
-    // Confirm respawn to client
-    socket.emit('player:respawned', {
+    // Confirm respawn to client (using player:respawn to match client handler)
+    socket.emit('player:respawn', {
       hull: player.hull,
       shield: player.shield,
       position: player.position,

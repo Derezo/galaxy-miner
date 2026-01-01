@@ -35,6 +35,16 @@ const StarEffects = {
   update(dt, stars, playerPosition) {
     this.playerPosition = playerPosition;
 
+    // Check if corona flares are enabled in graphics settings
+    const coronaFlaresEnabled = typeof GraphicsSettings === 'undefined' ||
+      GraphicsSettings.get('coronaFlares') !== false;
+
+    if (!coronaFlaresEnabled) {
+      // Skip flare spawning, just update heat overlay
+      this.updateHeatOverlay(stars, playerPosition, dt);
+      return;
+    }
+
     const config = CONSTANTS.CORONA_FLARE || {};
     const spawnMin = config.SPAWN_INTERVAL_MIN || 2000;
     const spawnMax = config.SPAWN_INTERVAL_MAX || 5000;

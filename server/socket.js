@@ -152,14 +152,24 @@ module.exports = function(io) {
 
     // Respawn: Player selects respawn location
     socket.on('respawn:select', (data) => {
-      if (!authenticatedUserId) return;
+      logger.log(`[RESPAWN] respawn:select received, type: ${data?.type}, userId: ${authenticatedUserId}`);
+
+      if (!authenticatedUserId) {
+        logger.warn('[RESPAWN] No authenticated user');
+        return;
+      }
 
       const player = connectedPlayers.get(socket.id);
-      if (!player) return;
+      if (!player) {
+        logger.warn('[RESPAWN] Player not found in connectedPlayers');
+        return;
+      }
+
+      logger.log(`[RESPAWN] Player ${player.username} isDead: ${player.isDead}, hull: ${player.hull}`);
 
       // Validate player is actually dead
       if (!player.isDead) {
-        logger.warn(`Player ${player.username} tried to respawn but isn't dead`);
+        logger.warn(`[RESPAWN] Player ${player.username} tried to respawn but isDead=${player.isDead}`);
         return;
       }
 
@@ -1515,6 +1525,8 @@ module.exports = function(io) {
     }
 
     // Setup player data
+    // Check if player died (hull <= 0) - mark as dead so they must respawn
+    const wasDead = playerData.hull_hp <= 0;
     const player = {
       id: playerData.id,
       username: playerData.username,
@@ -1530,25 +1542,44 @@ module.exports = function(io) {
       weaponTier: playerData.weapon_tier,
       credits: playerData.credits,
       colorId: playerData.ship_color_id || 'green',
-      profileId: playerData.profile_id || 'pilot'
+      profileId: playerData.profile_id || 'pilot',
+      isDead: wasDead,
+      deathTime: wasDead ? Date.now() : null
     };
 
     connectedPlayers.set(socket.id, player);
     userSockets.set(playerData.id, socket.id);
 
-    logger.log(`Player ${playerData.username} authenticated`);
+    logger.log(`Player ${playerData.username} authenticated${wasDead ? ' (dead - needs respawn)' : ''}`);
 
-    // Notify nearby players of new player
-    broadcastToNearby(socket, player, 'player:update', {
-      id: playerData.id,
-      username: playerData.username,
-      x: player.position.x,
-      y: player.position.y,
-      rotation: player.rotation,
-      hull: player.hull,
-      shield: player.shield,
-      colorId: player.colorId || 'green'
-    });
+    // If player was dead (reconnected while dead), send death event so client shows respawn UI
+    if (wasDead) {
+      const respawnOptions = combat.buildRespawnOptions(playerData.id, player.position);
+      socket.emit('player:death', {
+        killedBy: 'Reconnected while dead',
+        cause: 'reconnect',
+        killerType: 'environment',
+        killerName: null,
+        deathPosition: player.position,
+        droppedCargo: [],
+        wreckageSpawned: false,
+        respawnOptions
+      });
+    }
+
+    // Notify nearby players of new player (only if alive)
+    if (!wasDead) {
+      broadcastToNearby(socket, player, 'player:update', {
+        id: playerData.id,
+        username: playerData.username,
+        x: player.position.x,
+        y: player.position.y,
+        rotation: player.rotation,
+        hull: player.hull,
+        shield: player.shield,
+        colorId: player.colorId || 'green'
+      });
+    }
   }
 
   // Helper: Cleanup player on disconnect

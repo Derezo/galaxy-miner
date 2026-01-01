@@ -29,8 +29,8 @@ const Input = {
         TerminalUI.toggle();
         break;
       case 'KeyE':
-        // Toggle emote wheel
-        if (typeof EmoteWheel !== 'undefined') {
+        // Toggle emote wheel (not while dead)
+        if (typeof EmoteWheel !== 'undefined' && !Player.isDead) {
           EmoteWheel.toggle();
         }
         break;
@@ -46,6 +46,9 @@ const Input = {
         }
         break;
       case 'KeyM':
+        // Cannot perform actions while dead
+        if (Player.isDead) break;
+
         // Priority: Wormhole > Plunder > Mining > Loot collection
         Logger.log('[Input] M pressed - wormhole:', Player._nearestWormhole, 'hasGem:', Player.hasRelic('WORMHOLE_GEM'),
           'nearestBase:', Player._nearestBase, 'hasSkullAndBones:', Player.hasRelic('SKULL_AND_BONES'),
@@ -64,8 +67,10 @@ const Input = {
         }
         break;
       case 'Space':
-        // Fire weapon
-        Player.fire();
+        // Fire weapon (cannot fire while dead)
+        if (!Player.isDead) {
+          Player.fire();
+        }
         break;
     }
   },

@@ -14,7 +14,7 @@ The network handlers are organized into separate modules by functionality:
 - **chat.js** - Chat and emote handlers (`chat:message`, `emote:broadcast`, `pong`)
 - **ship.js** - Ship customization and upgrades (`ship:colorChanged`, `upgrade:success`, `upgrade:error`)
 - **loot.js** - Loot collection, wreckage, buffs, relics (`loot:started`, `loot:complete`, `buff:applied`, `relic:collected`)
-- **wormhole.js** - Wormhole transit handlers (`wormhole:entered`, `wormhole:transitProgress`, etc.)
+- **wormhole.js** - Wormhole transit handlers (`wormhole:entered`, `wormhole:progress`, etc.)
 - **npc.js** - NPC and base handlers (`npc:spawn`, `npc:destroyed`, `base:damaged`, swarm/queen events, etc.)
 - **index.js** - Exports `registerAllHandlers()` to initialize all modules
 

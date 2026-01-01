@@ -108,6 +108,12 @@ function applyDamage(targetUserId, damage, damageType = 'kinetic', shieldPiercin
   const ship = statements.getShipByUserId.get(targetUserId);
   if (!ship) return null;
 
+  // CRITICAL: Don't apply damage to dead players (hull <= 0)
+  // This prevents multiple death events from stacking damage
+  if (ship.hull_hp <= 0) {
+    return null;
+  }
+
   let { shieldDamage, hullDamage } = damage;
   let newShield = ship.shield_hp;
   let newHull = ship.hull_hp;
@@ -372,6 +378,7 @@ module.exports = {
   applyDamage,
   handleDeath,
   applyRespawn,
+  buildRespawnOptions,
   updateShieldRecharge,
   getWeaponRange,
   getHullResistances,

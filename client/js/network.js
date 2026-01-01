@@ -43,13 +43,7 @@ const Network = {
       AuthUI.showError(error.message);
     });
 
-    this.socket.on('player:update', (data) => {
-      Entities.updatePlayer(data);
-    });
-
-    this.socket.on('player:leave', (playerId) => {
-      Entities.removePlayer(playerId);
-    });
+    // player:update, player:leave - handled in /client/js/network/player.js
 
     // Ship color customization events
     this.socket.on('ship:colorChanged', (data) => {
@@ -252,9 +246,8 @@ const Network = {
       Entities.clearPlayerMining(data.playerId);
     });
 
-    this.socket.on('combat:event', (data) => {
-      // Handle combat events (hits, deaths, etc.)
-    });
+    // Note: 'combat:event' was a legacy placeholder removed in network audit
+    // Combat events are handled in /client/js/network/combat.js
 
     // NPC events - spawn, update, destroyed
     this.socket.on('npc:spawn', (data) => {
@@ -301,95 +294,7 @@ const Network = {
       Entities.updateNPC(npcData);
     });
 
-    this.socket.on('npc:destroyed', (data) => {
-      // Get NPC data BEFORE removing it
-      const npc = Entities.npcs.get(data.id);
-
-      // Play death sound based on faction
-      if (npc && typeof AudioManager !== 'undefined' && AudioManager.isReady && AudioManager.isReady()) {
-        AudioManager.playAt('death_' + npc.faction, npc.position.x, npc.position.y);
-      }
-
-      // Trigger death effect
-      if (npc && typeof DeathEffects !== 'undefined') {
-        // Queen gets special extended death sequence
-        if (npc.type === 'swarm_queen') {
-          DeathEffects.triggerQueenDeath(
-            npc.position.x,
-            npc.position.y,
-            npc.phase || 'HUNT',
-            npc.rotation || 0
-          );
-        } else if (npc.type === 'scavenger_hauler' || npc.type === 'scavenger_barnacle_king') {
-          // Hauler and Barnacle King get deconstruction death effect
-          DeathEffects.trigger(
-            npc.position.x,
-            npc.position.y,
-            'deconstruction',
-            npc.faction,
-            { rotation: npc.rotation || 0, npcType: npc.type }
-          );
-        } else {
-          // Standard faction-specific death effect
-          const effectType = DeathEffects.getEffectForFaction(npc.faction);
-          DeathEffects.trigger(npc.position.x, npc.position.y, effectType, npc.faction);
-        }
-      }
-
-      // Now remove the NPC
-      Entities.removeNPC(data.id);
-    });
-
-    // Swarm Queen spawning minions
-    this.socket.on('npc:queenSpawn', (data) => {
-      // Visual effect: organic burst at queen location
-      if (typeof ParticleSystem !== 'undefined') {
-        // Green organic burst
-        for (let i = 0; i < 20; i++) {
-          const angle = (Math.PI * 2 * i) / 20 + Math.random() * 0.3;
-          const speed = 50 + Math.random() * 100;
-          ParticleSystem.spawn({
-            x: data.queenX,
-            y: data.queenY,
-            vx: Math.cos(angle) * speed,
-            vy: Math.sin(angle) * speed,
-            life: 400 + Math.random() * 200,
-            color: '#00ff66',
-            size: 4 + Math.random() * 4,
-            type: 'glow',
-            drag: 0.92,
-            decay: 1
-          });
-        }
-
-        // Bio-electric "birth lines" to each spawned unit
-        if (data.spawned && Array.isArray(data.spawned)) {
-          for (const minion of data.spawned) {
-            // Draw connecting particles from queen to minion
-            const dx = minion.x - data.queenX;
-            const dy = minion.y - data.queenY;
-            const dist = Math.sqrt(dx * dx + dy * dy);
-            const steps = Math.floor(dist / 20);
-
-            for (let i = 0; i < steps; i++) {
-              const t = i / steps;
-              ParticleSystem.spawn({
-                x: data.queenX + dx * t,
-                y: data.queenY + dy * t,
-                vx: (Math.random() - 0.5) * 20,
-                vy: (Math.random() - 0.5) * 20,
-                life: 300 + i * 30,
-                color: i % 2 === 0 ? '#00ff66' : '#00cc44',
-                size: 2 + Math.random() * 2,
-                type: 'glow',
-                drag: 0.98,
-                decay: 1
-              });
-            }
-          }
-        }
-      }
-    });
+    // npc:destroyed, npc:queenSpawn - handled in /client/js/network/npc.js
 
     // Swarm linked damage visualization
     this.socket.on('swarm:linkedDamage', (data) => {
@@ -1042,37 +947,13 @@ const Network = {
       }
     });
 
-    // Combat hit visualization
-    this.socket.on('combat:hit', (data) => {
-      // Skip if this is an NPC attack - NPCWeaponEffects handles hit timing
-      if (data.attackerType === 'npc') {
-        return; // Hit effect will be triggered by projectile/beam arrival
-      }
-
-      // Play hit sound
-      if (typeof AudioManager !== 'undefined' && AudioManager.isReady && AudioManager.isReady()) {
-        const isShieldHit = data.shieldDamage > 0 || data.hitShield;
-        const tier = data.targetTier || 1;
-        const soundId = isShieldHit ? 'hit_shield_' + tier : 'hit_hull_' + tier;
-        AudioManager.playAt(soundId, data.targetX || data.x, data.targetY || data.y);
-      }
-
-      // Visual feedback for player-to-player hits
-      if (typeof HitEffectRenderer !== 'undefined') {
-        const isShieldHit = data.shieldDamage > 0 || data.hitShield;
-        HitEffectRenderer.addHit(data.targetX || data.x, data.targetY || data.y, isShieldHit);
-      }
-    });
-
-    this.socket.on('combat:playerHit', (data) => {
-      // Visual feedback for player-to-player combat
-      if (typeof HitEffectRenderer !== 'undefined') {
-        HitEffectRenderer.addHit(data.targetX, data.targetY, data.hitShield);
-      }
-    });
+    // combat:hit, combat:playerHit - handled in /client/js/network/combat.js
 
     // When local player takes damage
     this.socket.on('player:damaged', (data) => {
+      // Ignore damage events while dead (server may still send these briefly)
+      if (typeof Player !== 'undefined' && Player.isDead) return;
+
       Player.onDamaged(data);
       // Visual feedback at player's position
       if (typeof HitEffectRenderer !== 'undefined') {
@@ -1083,6 +964,9 @@ const Network = {
 
     // Star heat damage
     this.socket.on('star:damage', (data) => {
+      // Ignore damage events while dead
+      if (typeof Player !== 'undefined' && Player.isDead) return;
+
       Player.hull.current = data.hull;
       Player.shield.current = data.shield;
       // Heat damage is visual via StarEffects heat overlay
@@ -1109,34 +993,25 @@ const Network = {
       // Calculate survival time before death
       const survivalTime = Player.getSurvivalTime();
 
-      // Determine killer type and name
-      let killerType = 'unknown';
-      let killerName = null;
-
-      if (data.cause === 'star' || data.cause === 'stellar_radiation') {
-        killerType = 'star';
-      } else if (data.killerType) {
-        killerType = data.killerType;
-        killerName = data.killerName;
-      } else if (data.cause === 'npc' || data.npcName) {
-        killerType = 'npc';
-        killerName = data.npcName || data.cause;
-      } else if (data.cause === 'player' || data.killerName) {
-        killerType = 'player';
-        killerName = data.killerName;
-      }
+      // Use enhanced killer info from server (new deferred respawn system)
+      const killerType = data.killerType || data.cause || 'unknown';
+      const killerName = data.killerName || null;
+      const killerFaction = data.killerFaction || null;
 
       // Prepare death data for visual effect
       const deathData = {
         killerType,
         killerName,
+        killerFaction,
+        cause: data.cause,
         droppedCargo: data.droppedCargo || [],
         survivalTime,
-        deathPosition: {
+        deathPosition: data.deathPosition || {
           x: Player.position.x,
           y: Player.position.y
         },
-        message: data.message
+        message: data.message,
+        respawnOptions: data.respawnOptions
       };
 
       // Mark player as dead
@@ -1145,42 +1020,13 @@ const Network = {
       // Trigger cinematic death effect
       if (typeof PlayerDeathEffect !== 'undefined') {
         PlayerDeathEffect.trigger(deathData);
-      } else {
+      } else if (typeof NotificationManager !== 'undefined' && data.message) {
         // Fallback to notification if effect module not loaded
-        if (typeof NotificationManager !== 'undefined' && data.message) {
-          NotificationManager.error(data.message);
-        }
+        NotificationManager.error(data.message);
       }
     });
 
-    // Player respawn after death
-    this.socket.on('player:respawn', (data) => {
-      Logger.log('Player respawn received:', data.position);
-
-      // Prepare respawn data
-      const respawnData = {
-        position: data.position,
-        hull: data.hull,
-        shield: data.shield
-      };
-
-      // If death effect is active, queue respawn for after sequence
-      if (typeof PlayerDeathEffect !== 'undefined' && PlayerDeathEffect.isActive()) {
-        PlayerDeathEffect.queueRespawn(respawnData);
-
-        // Safety: Set a timeout to force respawn if death effect doesn't complete
-        // This handles edge cases where the death sequence gets stuck
-        setTimeout(() => {
-          if (Player.isDead && !PlayerDeathEffect.isActive()) {
-            Logger.log('[Respawn Safety] Forcing respawn - isDead stuck after death effect completed');
-            Player.onRespawn(respawnData);
-          }
-        }, PlayerDeathEffect.TIMINGS.TOTAL_DURATION + 500);
-      } else {
-        // Apply respawn immediately
-        Player.onRespawn(respawnData);
-      }
-    });
+    // player:respawn - handled in /client/js/network/player.js
 
     // Other players' weapon fire visualization
     this.socket.on('combat:fire', (data) => {
@@ -1253,37 +1099,7 @@ const Network = {
       }
     });
 
-    // NPC hit feedback when we hit an NPC
-    this.socket.on('combat:npcHit', (data) => {
-      Logger.log('NPC hit:', data);
-
-      // Get NPC position for hit effect
-      const npcEntity = Entities.npcs.get(data.npcId);
-
-      if (npcEntity) {
-        // Register hit with WeaponRenderer for projectile-timed effects
-        if (typeof WeaponRenderer !== 'undefined') {
-          WeaponRenderer.registerHit(
-            npcEntity.position.x,
-            npcEntity.position.y,
-            { isShieldHit: data.hitShield || false, damage: data.damage }
-          );
-        }
-
-        // Show damage notification
-        if (typeof Renderer !== 'undefined') {
-          Renderer.addEffect({
-            type: 'damage_number',
-            x: npcEntity.position.x,
-            y: npcEntity.position.y,
-            damage: data.damage,
-            duration: 1000
-          });
-        }
-      }
-
-      // NPC destroyed notification removed - rewards are now shown when collecting scrap
-    });
+    // combat:npcHit - handled in /client/js/network/combat.js
 
     // ============================================
     // TESLA CANNON EFFECTS (TIER 5 WEAPON)
@@ -2079,9 +1895,8 @@ const Network = {
       }
     });
 
-    this.socket.on('buff:expired', (data) => {
-      Player.onBuffExpired(data);
-    });
+    // Note: buff:expired handler removed - server never emits this event.
+    // Buff expiration is handled client-side via timers in Player.onBuffApplied()
 
     // Relic collection events
     this.socket.on('relic:collected', (data) => {
@@ -2116,43 +1931,10 @@ const Network = {
       }
     });
 
-    // Wormhole transit events
-    this.socket.on('wormhole:entered', (data) => {
-      Player.onWormholeEntered(data);
-    });
-
-    this.socket.on('wormhole:transitStarted', (data) => {
-      Player.onWormholeTransitStarted(data);
-    });
-
-    this.socket.on('wormhole:transitProgress', (data) => {
-      Player.onWormholeTransitProgress(data);
-    });
-
-    this.socket.on('wormhole:exitComplete', (data) => {
-      Player.onWormholeExitComplete(data);
-    });
-
-    this.socket.on('wormhole:cancelled', (data) => {
-      Player.onWormholeTransitCancelled(data);
-    });
-
-    this.socket.on('wormhole:error', (data) => {
-      Player.onWormholeError(data);
-    });
-
-    // Wormhole nearest position (for gem directional indicator)
-    this.socket.on('wormhole:nearestPosition', (data) => {
-      if (data) {
-        Logger.log('[Network] Received nearest wormhole at', Math.round(data.x), Math.round(data.y));
-      } else {
-        Logger.log('[Network] Received null wormhole position');
-      }
-      if (typeof RadarObjects !== 'undefined') {
-        RadarObjects.cachedNearestWormhole = data;
-        RadarObjects.lastWormholeUpdate = Date.now();
-      }
-    });
+    // Wormhole transit events - handled in /client/js/network/wormhole.js
+    // Events: wormhole:entered, wormhole:transitStarted, wormhole:progress,
+    //         wormhole:exitComplete, wormhole:cancelled, wormhole:error,
+    //         wormhole:nearestPosition
 
     // Skull and Bones plunder events
     this.socket.on('relic:plunderSuccess', (data) => {

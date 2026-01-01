@@ -37,6 +37,39 @@ function register(socket) {
     }
   });
 
+  // Ship data response (from ship:getData request)
+  socket.on('ship:data', (data) => {
+    window.Logger.log('Ship data received:', data);
+
+    // Update player ship state
+    if (typeof Player !== 'undefined') {
+      // Update tier values using snake_case from server
+      Player.ship.engineTier = data.engine_tier;
+      Player.ship.weaponTier = data.weapon_tier;
+      Player.ship.shieldTier = data.shield_tier;
+      Player.ship.miningTier = data.mining_tier;
+      Player.ship.cargoTier = data.cargo_tier;
+      Player.ship.radarTier = data.radar_tier;
+      Player.ship.energyCoreTier = data.energy_core_tier;
+      Player.ship.hullTier = data.hull_tier;
+      Player.credits = data.credits;
+      Player.colorId = data.ship_color_id;
+      Player.ship.profileId = data.profile_id;
+    }
+
+    // Refresh UI panels that depend on ship data
+    if (typeof ShipUpgradePanel !== 'undefined') {
+      ShipUpgradePanel.updateData({
+        ship: Player.ship,
+        inventory: Player.inventory || [],
+        credits: Player.credits
+      });
+    }
+    if (typeof UpgradesUI !== 'undefined') {
+      UpgradesUI.refresh();
+    }
+  });
+
   // Upgrade event handlers
   socket.on('upgrade:success', (data) => {
     window.Logger.log('Upgrade success:', data.component, 'to tier', data.newTier);

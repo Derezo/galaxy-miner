@@ -5,9 +5,8 @@
  * @param {Socket} socket - Socket.io client instance
  */
 function register(socket) {
-  socket.on('combat:event', (data) => {
-    // Handle combat events (hits, deaths, etc.)
-  });
+  // Note: 'combat:event' was a legacy placeholder removed in network audit
+  // All combat events now use specific event names: combat:hit, combat:fire, etc.
 
   socket.on('combat:hit', (data) => {
     // Skip if this is an NPC attack - NPCWeaponEffects handles hit timing
@@ -30,12 +29,8 @@ function register(socket) {
     }
   });
 
-  socket.on('combat:playerHit', (data) => {
-    // Visual feedback for player-to-player combat
-    if (typeof HitEffectRenderer !== 'undefined') {
-      HitEffectRenderer.addHit(data.targetX, data.targetY, data.hitShield);
-    }
-  });
+  // Note: combat:playerHit handler removed - server never emits this event.
+  // Player-vs-player hit feedback is handled by combat:hit when attackerType is 'player'.
 
   socket.on('combat:fire', (data) => {
     // Skip if it's our own fire event
@@ -168,6 +163,46 @@ function register(socket) {
       // StarEffects handles zone changes internally based on player position
       // This is just a server confirmation of zone state
       window.Logger.log('Star zone:', data.zone);
+    }
+  });
+
+  // Base hit feedback when player attacks enemy bases
+  socket.on('combat:baseHit', (data) => {
+    window.Logger.log('Base hit:', data);
+
+    // Update base health in Entities
+    if (typeof Entities !== 'undefined') {
+      const base = Entities.bases.get(data.baseId);
+      if (base) {
+        base.health = data.health;
+        base.maxHealth = data.maxHealth;
+      }
+    }
+
+    // Show damage number at base position
+    if (typeof Renderer !== 'undefined' && data.damage) {
+      const base = Entities.bases?.get(data.baseId);
+      if (base) {
+        Renderer.addEffect({
+          type: 'damage_number',
+          x: base.x,
+          y: base.y,
+          damage: data.damage,
+          duration: 1000
+        });
+      }
+    }
+
+    // Play hit sound
+    if (typeof AudioManager !== 'undefined' && AudioManager.isReady && AudioManager.isReady()) {
+      AudioManager.play('base_hit');
+    }
+
+    // Base destruction notification
+    if (data.destroyed) {
+      if (typeof NotificationManager !== 'undefined') {
+        NotificationManager.show('Base destroyed!', 'success');
+      }
     }
   });
 }

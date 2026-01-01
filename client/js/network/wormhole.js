@@ -13,7 +13,8 @@ function register(socket) {
     Player.onWormholeTransitStarted(data);
   });
 
-  socket.on('wormhole:transitProgress', (data) => {
+  // Note: Server emits 'wormhole:progress', not 'wormhole:transitProgress'
+  socket.on('wormhole:progress', (data) => {
     Player.onWormholeTransitProgress(data);
   });
 

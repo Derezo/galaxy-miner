@@ -22,6 +22,7 @@ Complete documentation of all real-time Socket.io events used in Galaxy Miner fo
 - [Queen Events](#queen-events)
 - [Team Events](#team-events)
 - [Utility Events](#utility-events)
+- [Hazard Events](#hazard-events)
 - [Event Flow Examples](#event-flow-examples)
 - [Notes](#notes)
 
@@ -3520,6 +3521,73 @@ socket.on('wormhole:exitComplete', (data) => {
 
 ---
 
+## Hazard Events
+
+Environmental hazards that can damage players.
+
+### `comet:warning`
+
+Warning that a comet is approaching the player's location.
+
+**Direction:** Server → Client
+
+**Payload:**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `cometId` | string | Unique identifier for the comet |
+| `x` | number | Comet X position |
+| `y` | number | Comet Y position |
+| `angle` | number | Comet trajectory angle (radians) |
+| `size` | number | Comet size multiplier |
+
+**Trigger:** Server emits when player is within 1500 units of comet path
+
+**Client Handler:** `/client/js/network/npc.js` - Plays warning sound, shows notification, spawns warning particles
+
+**Example:**
+```javascript
+socket.on('comet:warning', (data) => {
+  AudioManager.playAt('comet_warning', data.x, data.y);
+  NotificationManager.show('Comet incoming!', 'warning');
+});
+```
+
+---
+
+### `comet:collision`
+
+Player has collided with a comet and taken damage.
+
+**Direction:** Server → Client
+
+**Payload:**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `cometId` | string | Comet that hit the player |
+| `damage` | number | Damage dealt by collision |
+| `hull` | number | Updated player hull after damage |
+| `shield` | number | Updated player shield after damage |
+| `knockbackX` | number | X component of knockback force |
+| `knockbackY` | number | Y component of knockback force |
+
+**Trigger:** Server emits when player collides with a comet
+
+**Client Handler:** `/client/js/network/npc.js` - Updates player health, applies knockback, plays collision sound, shows damage notification, triggers screen shake
+
+**Example:**
+```javascript
+socket.on('comet:collision', (data) => {
+  Player.hull.current = data.hull;
+  Player.shield.current = data.shield;
+  AudioManager.play('comet_collision');
+  Renderer.shake(10, 300);
+});
+```
+
+---
+
 ## Notes
 
 ### Broadcast Ranges
@@ -3562,8 +3630,18 @@ Several events have rate limiting:
 
 ## Version Information
 
-**API Version:** 1.0
-**Last Updated:** 2025-12-09
+**API Version:** 1.1
+**Last Updated:** 2026-01-01
 **Game Version:** Galaxy Miner Alpha
 **Server Tick Rate:** 20 ticks/second
 **Client Frame Rate:** 60 FPS (requestAnimationFrame)
+
+### Changelog
+
+#### v1.1 (2026-01-01)
+- Added Hazard Events section (`comet:warning`, `comet:collision`)
+- Removed deprecated `combat:event` placeholder
+- Added comprehensive network event documentation at `/docs/network/`
+
+#### v1.0 (2025-12-09)
+- Initial documentation

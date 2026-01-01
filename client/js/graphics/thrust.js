@@ -192,7 +192,12 @@ const ThrustRenderer = {
   },
 
   spawnParticles(position, velocity, angle, config, intensity, dt) {
-    const spawnRate = config.particleCount * intensity;
+    // Apply thrust trail length multiplier from graphics settings
+    const trailMultiplier = typeof GraphicsSettings !== 'undefined'
+      ? (GraphicsSettings.get('thrustTrailLength') || 1.0)
+      : 1.0;
+
+    const spawnRate = config.particleCount * intensity * trailMultiplier;
     this.particleAccumulator += spawnRate * dt;
 
     while (this.particleAccumulator >= 1) {
@@ -377,7 +382,12 @@ const ThrustRenderer = {
   },
 
   spawnBoostParticles(position, velocity, angle, intensity, dt) {
-    const spawnRate = 60 * BOOST_CONFIG.particleMultiplier * intensity;
+    // Apply thrust trail length multiplier from graphics settings
+    const trailMultiplier = typeof GraphicsSettings !== 'undefined'
+      ? (GraphicsSettings.get('thrustTrailLength') || 1.0)
+      : 1.0;
+
+    const spawnRate = 60 * BOOST_CONFIG.particleMultiplier * intensity * trailMultiplier;
     this.particleAccumulator += spawnRate * dt;
 
     while (this.particleAccumulator >= 1) {

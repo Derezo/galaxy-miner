@@ -97,12 +97,85 @@ const ProfileModal = {
     const container = this.modal.querySelector('#profile-settings-content');
     if (!container) return;
 
-    // Use SettingsPanel to generate the HTML
+    // Get current graphics level
+    const currentLevel = typeof GraphicsSettings !== 'undefined'
+      ? GraphicsSettings.getLevel()
+      : 'high';
+
+    // Build graphics section HTML
+    const graphicsHTML = `
+      <div class="settings-panel">
+        <div class="settings-section">
+          <h3 class="settings-section-title">Graphics</h3>
+          <p class="settings-section-desc">Reduce visual effects for better performance on older devices</p>
+
+          <div class="graphics-quality-row">
+            <span class="graphics-label">Quality</span>
+            <select id="graphics-quality-select" class="graphics-select">
+              <option value="low" ${currentLevel === 'low' ? 'selected' : ''}>Low</option>
+              <option value="medium" ${currentLevel === 'medium' ? 'selected' : ''}>Medium</option>
+              <option value="high" ${currentLevel === 'high' ? 'selected' : ''}>High</option>
+            </select>
+          </div>
+
+          <div class="graphics-level-desc" id="graphics-level-desc">
+            ${this._getGraphicsLevelDescription(currentLevel)}
+          </div>
+        </div>
+      </div>
+    `;
+
+    // Combine graphics and audio settings
+    let audioHTML = '';
     if (typeof SettingsPanel !== 'undefined') {
-      container.innerHTML = SettingsPanel.renderForModal();
+      audioHTML = SettingsPanel.renderForModal();
+    }
+
+    container.innerHTML = graphicsHTML + audioHTML;
+
+    // Bind events
+    this._bindGraphicsEvents(container);
+    if (typeof SettingsPanel !== 'undefined') {
       SettingsPanel.bindModalEvents(container);
-    } else {
-      container.innerHTML = '<p style="color: var(--color-text-muted);">Settings unavailable</p>';
+    }
+  },
+
+  /**
+   * Get description text for a graphics level
+   * @param {string} level - 'low', 'medium', or 'high'
+   * @returns {string} Description HTML
+   */
+  _getGraphicsLevelDescription(level) {
+    const descriptions = {
+      low: 'Minimal particles, no screen shake, no floating text. Best for older devices.',
+      medium: 'Balanced visuals with reduced particle counts. Good performance.',
+      high: 'Full visual effects including all particles and screen shake. Recommended.'
+    };
+    return `<span class="graphics-desc-text">${descriptions[level] || descriptions.high}</span>`;
+  },
+
+  /**
+   * Bind graphics settings event handlers
+   * @param {HTMLElement} container - Container element
+   */
+  _bindGraphicsEvents(container) {
+    const select = container.querySelector('#graphics-quality-select');
+    const descContainer = container.querySelector('#graphics-level-desc');
+
+    if (select) {
+      select.addEventListener('change', () => {
+        const level = select.value;
+
+        // Update GraphicsSettings
+        if (typeof GraphicsSettings !== 'undefined') {
+          GraphicsSettings.setLevel(level);
+        }
+
+        // Update description
+        if (descContainer) {
+          descContainer.innerHTML = this._getGraphicsLevelDescription(level);
+        }
+      });
     }
   },
 
@@ -766,6 +839,77 @@ const ProfileModal = {
 
       .debug-settings-body {
         transition: opacity 0.2s ease;
+      }
+
+      /* Graphics settings styles */
+      .settings-section-title {
+        font-size: 14px;
+        font-weight: bold;
+        color: var(--color-primary-lighter, #88aaff);
+        margin: 0 0 8px 0;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+      }
+
+      .settings-section-desc {
+        font-size: 12px;
+        color: var(--color-text-muted, #888);
+        margin: 0 0 16px 0;
+      }
+
+      .graphics-quality-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 12px 0;
+      }
+
+      .graphics-label {
+        font-size: 14px;
+        color: var(--color-text, #eee);
+      }
+
+      .graphics-select {
+        padding: 8px 32px 8px 12px;
+        background: rgba(0, 0, 0, 0.4);
+        border: 1px solid var(--color-border, #334);
+        border-radius: 6px;
+        color: var(--color-text, #eee);
+        font-size: 14px;
+        cursor: pointer;
+        appearance: none;
+        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23888' d='M6 8L2 4h8z'/%3E%3C/svg%3E");
+        background-repeat: no-repeat;
+        background-position: right 10px center;
+        min-width: 120px;
+      }
+
+      .graphics-select:hover {
+        border-color: var(--color-primary, #4466ff);
+      }
+
+      .graphics-select:focus {
+        outline: none;
+        border-color: var(--color-primary, #4466ff);
+        box-shadow: 0 0 8px rgba(68, 102, 255, 0.3);
+      }
+
+      .graphics-level-desc {
+        padding: 12px;
+        background: rgba(0, 0, 0, 0.3);
+        border-radius: 6px;
+        border-left: 3px solid var(--color-primary, #4466ff);
+        margin-bottom: 20px;
+      }
+
+      .graphics-desc-text {
+        font-size: 12px;
+        color: var(--color-text-muted, #888);
+        line-height: 1.4;
+      }
+
+      .settings-section {
+        margin-bottom: 16px;
       }
     `;
 

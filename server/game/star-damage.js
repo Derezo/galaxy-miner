@@ -6,6 +6,7 @@ const combat = require('./combat');
 const Physics = require('../../shared/physics');
 const config = require('../config');
 const loot = require('./loot');
+const { statements } = require('../database');
 
 // Track last zone for each player (to detect zone changes)
 const playerZones = new Map();
@@ -22,6 +23,9 @@ function update(connectedPlayers, io, deltaTime) {
   const dt = deltaTime / 1000; // Convert to seconds
 
   for (const [socketId, player] of connectedPlayers) {
+    // Skip dead players - they can't take damage
+    if (player.isDead) continue;
+
     const damage = checkStarDamage(player, dt);
 
     if (damage.totalDamage > 0 || damage.zoneChanged) {
@@ -139,6 +143,14 @@ function applyDamage(player, shieldDrain, hullDamage, io, socketId) {
   if (hullDamage > 0 && player.shield <= 0) {
     player.hull = Math.max(0, player.hull - hullDamage);
   }
+
+  // Persist damage to database (critical for reconnection handling)
+  // This ensures hull/shield state survives socket reconnects
+  statements.updateShipHealth.run(
+    Math.floor(player.hull),
+    Math.floor(player.shield),
+    player.id
+  );
 
   // Notify player of damage
   io.to(socketId).emit('star:damage', {

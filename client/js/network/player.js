@@ -21,6 +21,9 @@ function register(socket) {
   });
 
   socket.on('player:damaged', (data) => {
+    // Ignore damage events while dead
+    if (typeof Player !== 'undefined' && Player.isDead) return;
+
     Player.onDamaged(data);
     // Visual feedback at player's position
     if (typeof HitEffectRenderer !== 'undefined') {
@@ -68,44 +71,29 @@ function register(socket) {
     // Trigger cinematic death effect
     if (typeof PlayerDeathEffect !== 'undefined') {
       PlayerDeathEffect.trigger(deathData);
-    } else {
-      // Fallback: show respawn UI directly if no death effect
-      if (typeof RespawnLocationUI !== 'undefined' && data.respawnOptions) {
-        RespawnLocationUI.show(data.respawnOptions);
-      } else if (typeof NotificationManager !== 'undefined' && data.message) {
-        NotificationManager.error(data.message);
-      }
+    } else if (typeof NotificationManager !== 'undefined' && data.message) {
+      // Fallback to notification if effect module not loaded
+      NotificationManager.error(data.message);
     }
   });
 
   socket.on('player:respawn', (data) => {
-    window.Logger.log('Player respawn received:', data.position, 'at', data.locationName);
-
-    // Hide respawn location UI if visible
-    if (typeof RespawnLocationUI !== 'undefined' && RespawnLocationUI.isVisible()) {
-      RespawnLocationUI.hide();
-    }
+    window.Logger.log('Player respawn received:', data.position);
 
     // Prepare respawn data
     const respawnData = {
       position: data.position,
       hull: data.hull,
-      shield: data.shield,
-      locationName: data.locationName
+      shield: data.shield
     };
 
-    // If death effect is still active, queue respawn
-    if (typeof PlayerDeathEffect !== 'undefined' && PlayerDeathEffect.isActive()) {
-      PlayerDeathEffect.queueRespawn(respawnData);
-    } else {
-      // Apply respawn immediately
-      Player.onRespawn(respawnData);
+    // Notify death effect system to cleanup
+    if (typeof PlayerDeathEffect !== 'undefined') {
+      PlayerDeathEffect.onRespawnConfirmed(respawnData);
     }
 
-    // Show respawn notification
-    if (typeof NotificationManager !== 'undefined' && data.locationName) {
-      NotificationManager.info('Respawned at ' + data.locationName);
-    }
+    // Apply respawn to player
+    Player.onRespawn(respawnData);
   });
 
   socket.on('player:debuff', (data) => {
@@ -170,6 +158,34 @@ function register(socket) {
         duration: 800,
         color: '#44ff44'  // Green for acid damage
       });
+    }
+  });
+
+  // Respawn error when respawn fails
+  socket.on('respawn:error', (data) => {
+    window.Logger.log('Respawn error:', data);
+
+    // Show error notification
+    if (typeof NotificationManager !== 'undefined') {
+      NotificationManager.show(data.message || 'Respawn failed', 'error');
+    }
+
+    // Reset respawn UI state if applicable
+    if (typeof PlayerDeathEffect !== 'undefined' && PlayerDeathEffect.onRespawnError) {
+      PlayerDeathEffect.onRespawnError(data);
+    }
+  });
+
+  // Player health update (shield regeneration, healing, etc.)
+  socket.on('player:health', (data) => {
+    // Update player health from shield regeneration or other sources
+    if (typeof Player !== 'undefined') {
+      if (data.hull !== undefined) {
+        Player.hull.current = data.hull;
+      }
+      if (data.shield !== undefined) {
+        Player.shield.current = data.shield;
+      }
     }
   });
 }

@@ -51,6 +51,7 @@ const Player = {
   // Death and survival tracking
   isDead: false,
   sessionStartTime: 0,  // When this life started (for survival time calculation)
+  frozenSurvivalTime: 0,  // Survival time frozen at death (so it doesn't continue counting)
 
   // Session statistics (tracked per life for death screen display)
   sessionStats: {
@@ -129,6 +130,7 @@ const Player = {
     // Initialize survival tracking
     this.isDead = false;
     this.sessionStartTime = Date.now();
+    this.frozenSurvivalTime = 0;
 
     // Reset session statistics
     this.sessionStats = {
@@ -165,6 +167,11 @@ const Player = {
   },
 
   update(dt) {
+    // Skip all updates while dead - player cannot move or act
+    if (this.isDead) {
+      return;
+    }
+
     // Skip physics updates during wormhole transit
     if (this.inWormholeTransit) {
       return;
@@ -316,6 +323,9 @@ const Player = {
   },
 
   fire() {
+    // Cannot fire while dead
+    if (this.isDead) return;
+
     const now = Date.now();
     // Base cooldown from weapon tier
     let cooldown = CONSTANTS.BASE_WEAPON_COOLDOWN / Math.pow(CONSTANTS.TIER_MULTIPLIER, this.ship.weaponTier - 1);
@@ -825,6 +835,10 @@ const Player = {
    * @returns {number} Time in milliseconds
    */
   getSurvivalTime() {
+    // Return frozen time if dead (so timer doesn't continue counting)
+    if (this.isDead && this.frozenSurvivalTime > 0) {
+      return this.frozenSurvivalTime;
+    }
     if (this.sessionStartTime <= 0) return 0;
     return Date.now() - this.sessionStartTime;
   },
@@ -834,8 +848,11 @@ const Player = {
    * @param {Object} data - Death data from server
    */
   onDeath(data) {
+    // Freeze survival time BEFORE setting isDead, so we capture the actual survival time
+    this.frozenSurvivalTime = this.sessionStartTime > 0 ? Date.now() - this.sessionStartTime : 0;
+
     this.isDead = true;
-    // Note: Don't reset sessionStartTime here - we use it for survival time display
+    // Note: Don't reset sessionStartTime here - we use frozenSurvivalTime for display
 
     // Reset audio state (engine sounds are one-shot, not loops)
     if (typeof AudioManager !== 'undefined') {
@@ -854,6 +871,7 @@ const Player = {
   onRespawn(data) {
     this.isDead = false;
     this.sessionStartTime = Date.now(); // Start new survival timer
+    this.frozenSurvivalTime = 0; // Reset frozen time for new life
 
     // Update position from server
     if (data.position) {
@@ -875,11 +893,6 @@ const Player = {
 
     // Reset session statistics for new life
     this.resetSessionStats();
-
-    // Clear death replay buffer for new life
-    if (typeof DeathReplay !== 'undefined') {
-      DeathReplay.clearBuffer();
-    }
 
     // Reset audio state (engine sounds are one-shot, not loops)
     if (typeof AudioManager !== 'undefined') {

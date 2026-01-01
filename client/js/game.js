@@ -32,11 +32,6 @@ const Game = {
   },
 
   update(dt) {
-    // Record frame for death replay (before any updates)
-    if (typeof DeathReplay !== 'undefined') {
-      DeathReplay.recordFrame();
-    }
-
     // Update player (movement prediction)
     Player.update(dt);
 

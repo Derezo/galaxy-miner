@@ -4,21 +4,19 @@
 const PlayerDeathEffect = {
   // State
   active: false,
-  phase: 'inactive', // 'impact', 'text_fadein', 'info_display', 'text_explosion', 'respawn', 'inactive'
+  phase: 'inactive', // 'impact', 'text_fadein', 'info_display', 'respawn_waiting', 'inactive'
   startTime: 0,
   phaseStartTime: 0,
   deathData: null,
 
-  // Timings (milliseconds)
+  // Timings (milliseconds) - simplified to 4 seconds total
   TIMINGS: {
     IMPACT_DURATION: 500,
     TEXT_FADEIN_START: 500,
-    TEXT_FADEIN_DURATION: 1500,
-    INFO_DISPLAY_START: 2000,
+    TEXT_FADEIN_DURATION: 1000,
+    INFO_DISPLAY_START: 1500,
     INFO_DISPLAY_DURATION: 2500,
-    TEXT_EXPLOSION_START: 4500,
-    TEXT_EXPLOSION_DURATION: 500,
-    TOTAL_DURATION: 5000,
+    TOTAL_DURATION: 4000,
     INVULNERABILITY_DURATION: 3000
   },
 
@@ -39,12 +37,6 @@ const PlayerDeathEffect = {
   // Wreckage particles
   wreckageParticles: [],
 
-  // Text explosion particles
-  textParticles: [],
-
-  // Respawn data (queued from server)
-  respawnData: null,
-
   // Invulnerability tracking
   invulnerableUntil: 0,
 
@@ -58,6 +50,13 @@ const PlayerDeathEffect = {
    * @param {Object} data.deathPosition - {x, y} where player died
    */
   trigger(data) {
+    // CRITICAL: Don't restart if death sequence is already active
+    // This prevents NPC attacks from interrupting/looping the death sequence
+    if (this.active) {
+      Logger.log('[PlayerDeathEffect] Already active, ignoring duplicate trigger');
+      return;
+    }
+
     this.active = true;
     this.phase = 'impact';
     this.startTime = Date.now();
@@ -77,14 +76,6 @@ const PlayerDeathEffect = {
 
     // Create wreckage particles
     this.createWreckageParticles(data.deathPosition);
-
-    // Clear any previous text particles
-    this.textParticles = [];
-
-    // Start death replay (120 frames = 2 seconds at 60fps)
-    if (typeof DeathReplay !== 'undefined') {
-      DeathReplay.startReplay(120);
-    }
 
     Logger.log('[PlayerDeathEffect] Triggered:', data);
   },
@@ -110,34 +101,6 @@ const PlayerDeathEffect = {
         size: 5 + Math.random() * 10,
         alpha: 1.0,
         type: Math.floor(Math.random() * 3) // Different debris shapes
-      });
-    }
-  },
-
-  /**
-   * Create text explosion particles from the death message
-   */
-  createTextExplosionParticles(centerX, centerY) {
-    this.textParticles = [];
-    const text = "You've been destroyed.";
-    const numParticles = 40;
-
-    for (let i = 0; i < numParticles; i++) {
-      const angle = Math.random() * Math.PI * 2;
-      const speed = 100 + Math.random() * 200;
-      const char = text[Math.floor(Math.random() * text.length)];
-
-      this.textParticles.push({
-        x: centerX + (Math.random() - 0.5) * 200,
-        y: centerY + (Math.random() - 0.5) * 40,
-        vx: Math.cos(angle) * speed,
-        vy: Math.sin(angle) * speed,
-        char: char,
-        rotation: 0,
-        rotationSpeed: (Math.random() - 0.5) * 10,
-        alpha: 1.0,
-        scale: 0.5 + Math.random() * 0.5,
-        color: Math.random() > 0.3 ? '#8B0000' : '#FF4500' // Crimson or orange sparks
       });
     }
   },
@@ -175,15 +138,11 @@ const PlayerDeathEffect = {
     // Update overlay alpha (fade in during impact, stay during display)
     if (elapsed < T.IMPACT_DURATION) {
       this.overlayAlpha = (elapsed / T.IMPACT_DURATION) * 0.7;
-    } else if (elapsed < T.TEXT_EXPLOSION_START) {
-      this.overlayAlpha = 0.7;
     } else {
-      // Fade out during explosion
-      const explosionProgress = (elapsed - T.TEXT_EXPLOSION_START) / T.TEXT_EXPLOSION_DURATION;
-      this.overlayAlpha = 0.7 * (1 - explosionProgress);
+      this.overlayAlpha = 0.7;
     }
 
-    // Phase transitions and updates
+    // Phase transitions and updates (simplified - no text explosion)
     if (elapsed < T.IMPACT_DURATION) {
       this.phase = 'impact';
     } else if (elapsed < T.INFO_DISPLAY_START) {
@@ -192,25 +151,14 @@ const PlayerDeathEffect = {
       const fadeProgress = (elapsed - T.TEXT_FADEIN_START) / T.TEXT_FADEIN_DURATION;
       this.textAlpha = Math.min(1.0, fadeProgress);
       this.textScale = 0.9 + fadeProgress * 0.1; // Scale from 0.9 to 1.0
-    } else if (elapsed < T.TEXT_EXPLOSION_START) {
+    } else if (elapsed < T.TOTAL_DURATION) {
       this.phase = 'info_display';
       this.textAlpha = 1.0;
       this.textScale = 1.0;
-    } else if (elapsed < T.TOTAL_DURATION) {
-      if (this.phase !== 'text_explosion') {
-        this.phase = 'text_explosion';
-        // Create explosion particles when entering this phase
-        // We'll use screen center as the explosion origin
-        this.textExplosionTriggered = true;
-      }
-      // Update text explosion
-      const explosionProgress = (elapsed - T.TEXT_EXPLOSION_START) / T.TEXT_EXPLOSION_DURATION;
-      this.textScale = 1.0 + explosionProgress * 0.5; // Scale up
-      this.textAlpha = 1.0 - explosionProgress; // Fade out
-    } else {
-      // Sequence complete
-      this.phase = 'respawn';
-      this.completeDeathSequence();
+    } else if (this.phase !== 'respawn_waiting') {
+      // Animation complete - show respawn button
+      this.phase = 'respawn_waiting';
+      this.showRespawnButton();
     }
 
     // Update wreckage particles
@@ -222,49 +170,69 @@ const PlayerDeathEffect = {
       p.rotation += p.rotationSpeed * dt;
       p.alpha = Math.max(0, p.alpha - dt * 0.3);
     }
-
-    // Update text explosion particles
-    for (const p of this.textParticles) {
-      p.x += p.vx * dt;
-      p.y += p.vy * dt;
-      p.rotation += p.rotationSpeed * dt;
-      p.alpha = Math.max(0, p.alpha - dt * 2.5);
-    }
   },
 
   /**
-   * Complete the death sequence and show respawn location UI
+   * Show the respawn button after death animation completes
    */
-  completeDeathSequence() {
+  showRespawnButton() {
+    // Remove any existing button first
+    const existing = document.getElementById('respawn-button');
+    if (existing) existing.remove();
+
+    // Create simple centered button
+    const btn = document.createElement('button');
+    btn.id = 'respawn-button';
+    btn.className = 'respawn-button';
+    btn.textContent = 'RESPAWN';
+    btn.onclick = () => this.handleRespawn();
+
+    const container = document.getElementById('ui-container');
+    if (container) {
+      container.appendChild(btn);
+    }
+
+    Logger.log('[PlayerDeathEffect] Respawn button shown');
+  },
+
+  /**
+   * Handle respawn button click
+   */
+  handleRespawn() {
+    Logger.log('[PlayerDeathEffect] Respawn button clicked, Player.isDead:', Player?.isDead);
+
+    // Remove button
+    const btn = document.getElementById('respawn-button');
+    if (btn) btn.remove();
+
+    // Send respawn request to server (always deep_space for auto-respawn)
+    if (typeof Network !== 'undefined' && Network.socket) {
+      Logger.log('[PlayerDeathEffect] Sending respawn:select to server');
+      Network.sendRespawnSelect('deep_space', null);
+    } else {
+      Logger.error('[PlayerDeathEffect] Network not available for respawn!');
+    }
+
+    // Cleanup will happen when server confirms respawn via onRespawnConfirmed()
+  },
+
+  /**
+   * Called when server confirms respawn - cleanup death effect state
+   * @param {Object} data - Respawn data from server
+   */
+  onRespawnConfirmed(data) {
+    // Remove respawn button if still present
+    const btn = document.getElementById('respawn-button');
+    if (btn) btn.remove();
+
+    // End death effect
     this.active = false;
     this.phase = 'inactive';
 
-    // Apply invulnerability (will be refreshed when player actually respawns)
+    // Apply invulnerability
     this.invulnerableUntil = Date.now() + this.TIMINGS.INVULNERABILITY_DURATION;
 
-    // If we already have respawn data queued (server sent respawn before UI shown), use it
-    if (this.respawnData) {
-      if (typeof window.handleRespawnComplete === 'function') {
-        window.handleRespawnComplete(this.respawnData);
-      }
-      this.respawnData = null;
-    } else if (this.deathData && this.deathData.respawnOptions) {
-      // Show respawn location selection UI
-      if (typeof RespawnLocationUI !== 'undefined') {
-        RespawnLocationUI.show(this.deathData.respawnOptions);
-      }
-    }
-
-    Logger.log('[PlayerDeathEffect] Sequence complete, showing respawn UI');
-  },
-
-  /**
-   * Queue respawn data to be applied after death sequence
-   * @param {Object} data - Respawn data from server
-   */
-  queueRespawn(data) {
-    this.respawnData = data;
-    Logger.log('[PlayerDeathEffect] Respawn queued:', data);
+    Logger.log('[PlayerDeathEffect] Respawn confirmed, death effect ended');
   },
 
   /**
@@ -279,16 +247,7 @@ const PlayerDeathEffect = {
     ctx.save();
 
     if (this.active) {
-      // Draw death replay during early phases (impact and text_fadein)
-      if (typeof DeathReplay !== 'undefined' && DeathReplay.isActive()) {
-        const camera = {
-          x: typeof Renderer !== 'undefined' ? Renderer.camera.x : 0,
-          y: typeof Renderer !== 'undefined' ? Renderer.camera.y : 0
-        };
-        DeathReplay.render(ctx, camera);
-      }
-
-      // Draw white flash
+      // Draw white flash first
       if (this.whiteFlashAlpha > 0) {
         ctx.fillStyle = `rgba(255, 255, 255, ${this.whiteFlashAlpha * 0.8})`;
         ctx.fillRect(0, 0, width, height);
@@ -299,18 +258,13 @@ const PlayerDeathEffect = {
         this.drawVignetteOverlay(ctx, width, height);
       }
 
-      // Draw death text and info
-      if (this.phase === 'text_fadein' || this.phase === 'info_display' || this.phase === 'text_explosion') {
+      // Draw death text and info (including during respawn_waiting)
+      if (this.phase === 'text_fadein' || this.phase === 'info_display' || this.phase === 'respawn_waiting') {
         this.drawDeathText(ctx, width, height);
 
-        if (this.phase === 'info_display' || this.phase === 'text_explosion') {
+        if (this.phase === 'info_display' || this.phase === 'respawn_waiting') {
           this.drawDeathInfo(ctx, width, height);
         }
-      }
-
-      // Draw text explosion particles
-      if (this.phase === 'text_explosion') {
-        this.drawTextExplosionParticles(ctx);
       }
     }
 
@@ -319,17 +273,20 @@ const PlayerDeathEffect = {
 
   /**
    * Draw dark crimson vignette overlay
+   * @param {number} alphaMultiplier - Optional multiplier for overlay alpha (0-1, default 1.0)
    */
-  drawVignetteOverlay(ctx, width, height) {
+  drawVignetteOverlay(ctx, width, height, alphaMultiplier = 1.0) {
+    const effectiveAlpha = this.overlayAlpha * alphaMultiplier;
+
     // Create radial gradient for vignette effect
     const gradient = ctx.createRadialGradient(
       width / 2, height / 2, 0,
       width / 2, height / 2, Math.max(width, height) * 0.7
     );
 
-    gradient.addColorStop(0, `rgba(20, 0, 0, ${this.overlayAlpha * 0.3})`);
-    gradient.addColorStop(0.5, `rgba(40, 0, 0, ${this.overlayAlpha * 0.5})`);
-    gradient.addColorStop(1, `rgba(60, 0, 0, ${this.overlayAlpha * 0.8})`);
+    gradient.addColorStop(0, `rgba(20, 0, 0, ${effectiveAlpha * 0.3})`);
+    gradient.addColorStop(0.5, `rgba(40, 0, 0, ${effectiveAlpha * 0.5})`);
+    gradient.addColorStop(1, `rgba(60, 0, 0, ${effectiveAlpha * 0.8})`);
 
     ctx.fillStyle = gradient;
     ctx.fillRect(0, 0, width, height);
@@ -341,12 +298,6 @@ const PlayerDeathEffect = {
   drawDeathText(ctx, width, height) {
     const centerX = width / 2;
     const centerY = height / 2 - 50;
-
-    // Trigger text explosion particles on first draw of explosion phase
-    if (this.phase === 'text_explosion' && this.textExplosionTriggered) {
-      this.createTextExplosionParticles(centerX, centerY);
-      this.textExplosionTriggered = false;
-    }
 
     ctx.save();
     ctx.translate(centerX, centerY);
@@ -438,26 +389,52 @@ const PlayerDeathEffect = {
 
     currentY += 10;
 
-    // Cargo lost (up to 4 items)
+    // Cargo lost (all items in a two-column table with icons)
     if (this.deathData.droppedCargo && this.deathData.droppedCargo.length > 0) {
       ctx.fillStyle = `rgba(180, 120, 80, ${infoAlpha * 0.9})`;
       ctx.font = '16px "Courier New", monospace';
       ctx.fillText('Cargo lost:', centerX, currentY);
       currentY += 22;
 
-      const itemsToShow = this.deathData.droppedCargo.slice(0, 4);
-      for (const item of itemsToShow) {
+      // Draw all items in a two-column table
+      const items = this.deathData.droppedCargo;
+      const iconSize = 18;
+      const columnWidth = 140;
+      const rowHeight = 24;
+      const tableWidth = columnWidth * 2;
+      const tableLeft = centerX - tableWidth / 2;
+
+      ctx.font = '14px "Courier New", monospace';
+      ctx.textAlign = 'left';
+
+      for (let i = 0; i < items.length; i++) {
+        const item = items[i];
+        const col = i % 2;
+        const row = Math.floor(i / 2);
+
+        const itemX = tableLeft + col * columnWidth;
+        const itemY = currentY + row * rowHeight;
+
+        // Draw resource icon using IconCache
+        if (typeof IconCache !== 'undefined') {
+          const icon = IconCache.getResourceIcon(item.resource_type, iconSize);
+          if (icon && icon.complete) {
+            ctx.drawImage(icon, itemX, itemY - iconSize + 4, iconSize, iconSize);
+          }
+        }
+
+        // Draw quantity and name
+        ctx.fillStyle = `rgba(180, 120, 80, ${infoAlpha * 0.9})`;
         const itemText = `${item.quantity}x ${this.formatResourceName(item.resource_type)}`;
-        ctx.fillText(itemText, centerX, currentY);
-        currentY += 20;
+        ctx.fillText(itemText, itemX + iconSize + 4, itemY);
       }
 
-      if (this.deathData.droppedCargo.length > 4) {
-        ctx.fillText(`...and ${this.deathData.droppedCargo.length - 4} more`, centerX, currentY);
-        currentY += 20;
-      }
+      // Calculate how many rows we used
+      const totalRows = Math.ceil(items.length / 2);
+      currentY += totalRows * rowHeight + 10;
 
-      currentY += 10;
+      // Reset text alignment
+      ctx.textAlign = 'center';
     }
 
     // Session statistics section
@@ -522,42 +499,6 @@ const PlayerDeathEffect = {
       return (distance / 1000).toFixed(1) + 'k units';
     }
     return Math.round(distance) + ' units';
-  },
-
-  /**
-   * Draw text explosion particles
-   */
-  drawTextExplosionParticles(ctx) {
-    ctx.save();
-
-    for (const p of this.textParticles) {
-      if (p.alpha <= 0) continue;
-
-      ctx.save();
-      ctx.translate(p.x, p.y);
-      ctx.rotate(p.rotation);
-      ctx.scale(p.scale, p.scale);
-
-      ctx.font = 'bold 48px "Courier New", monospace';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.shadowColor = p.color;
-      ctx.shadowBlur = 15;
-      ctx.fillStyle = p.color.replace(')', `, ${p.alpha})`).replace('rgb', 'rgba').replace('#', '');
-
-      // Handle hex colors
-      if (p.color.startsWith('#')) {
-        const r = parseInt(p.color.slice(1, 3), 16);
-        const g = parseInt(p.color.slice(3, 5), 16);
-        const b = parseInt(p.color.slice(5, 7), 16);
-        ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${p.alpha})`;
-      }
-
-      ctx.fillText(p.char, 0, 0);
-      ctx.restore();
-    }
-
-    ctx.restore();
   },
 
   /**

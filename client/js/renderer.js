@@ -205,7 +205,12 @@ const Renderer = {
    * @param {number} duration - Duration of shake in milliseconds
    */
   triggerScreenShake(intensity, duration) {
-    this.screenShake.intensity = intensity;
+    // Apply screen shake multiplier from graphics settings
+    const shakeMultiplier = typeof GraphicsSettings !== 'undefined'
+      ? (GraphicsSettings.get('screenShakeMultiplier') || 1.0)
+      : 1.0;
+
+    this.screenShake.intensity = intensity * shakeMultiplier;
     this.screenShake.duration = duration;
     this.screenShake.startTime = Date.now();
   },
@@ -215,7 +220,12 @@ const Renderer = {
    * @param {number} intensity - Current shake intensity in pixels
    */
   setScreenShake(intensity) {
-    this.screenShake.intensity = intensity;
+    // Apply screen shake multiplier from graphics settings
+    const shakeMultiplier = typeof GraphicsSettings !== 'undefined'
+      ? (GraphicsSettings.get('screenShakeMultiplier') || 1.0)
+      : 1.0;
+
+    this.screenShake.intensity = intensity * shakeMultiplier;
     this.screenShake.duration = 100; // Short duration, updated continuously
     this.screenShake.startTime = Date.now();
   },

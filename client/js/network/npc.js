@@ -848,6 +848,145 @@ function register(socket) {
       CreditAnimation.addCredits(data.credits);
     }
   });
+
+  // ========================================
+  // COMET/HAZARD EVENTS
+  // ========================================
+
+  // Comet approaching warning - visual/audio alert
+  socket.on('comet:warning', (data) => {
+    Logger.log('Comet warning:', data);
+
+    // Play warning sound
+    if (typeof AudioManager !== 'undefined' && AudioManager.isReady && AudioManager.isReady()) {
+      AudioManager.playAt('comet_warning', data.x, data.y);
+    }
+
+    // Show warning notification
+    if (typeof NotificationManager !== 'undefined') {
+      NotificationManager.show('Comet incoming!', 'warning');
+    }
+
+    // Visual warning effect - particles at comet position
+    if (typeof ParticleSystem !== 'undefined') {
+      ParticleSystem.emit({
+        x: data.x,
+        y: data.y,
+        count: 20,
+        color: '#ff6600',
+        size: { min: 3, max: 6 },
+        speed: { min: 50, max: 100 },
+        lifetime: { min: 500, max: 1000 },
+        spread: Math.PI * 2
+      });
+    }
+  });
+
+  // Comet collision - damage and knockback feedback
+  socket.on('comet:collision', (data) => {
+    Logger.log('Comet collision:', data);
+
+    // Update player health from server
+    if (typeof Player !== 'undefined') {
+      Player.hull.current = data.hull;
+      Player.shield.current = data.shield;
+    }
+
+    // Apply visual knockback effect
+    if (typeof Player !== 'undefined' && data.knockbackX !== undefined) {
+      // Apply knockback to player velocity (if physics allows)
+      if (Player.velocity) {
+        Player.velocity.x += data.knockbackX;
+        Player.velocity.y += data.knockbackY;
+      }
+    }
+
+    // Play collision sound
+    if (typeof AudioManager !== 'undefined' && AudioManager.isReady && AudioManager.isReady()) {
+      AudioManager.play('comet_collision');
+    }
+
+    // Show damage notification
+    if (typeof NotificationManager !== 'undefined') {
+      NotificationManager.show(`Comet impact! -${data.damage} damage`, 'danger');
+    }
+
+    // Visual collision effect at player position
+    if (typeof HitEffectRenderer !== 'undefined' && typeof Player !== 'undefined') {
+      HitEffectRenderer.addHit(Player.x, Player.y, false); // false = hull hit
+    }
+
+    // Screen shake effect
+    if (typeof Renderer !== 'undefined' && Renderer.shake) {
+      Renderer.shake(10, 300); // intensity, duration
+    }
+  });
+
+  // NPC death (despawn without destruction - e.g., leash timeout, out of range)
+  socket.on('npc:death', (data) => {
+    Logger.log('NPC death (despawn):', data);
+
+    // Remove NPC from entities
+    if (typeof Entities !== 'undefined') {
+      Entities.npcs.delete(data.npcId);
+    }
+
+    // Play despawn sound (different from destruction)
+    if (typeof AudioManager !== 'undefined' && AudioManager.isReady && AudioManager.isReady()) {
+      AudioManager.playAt('npc_despawn', data.x, data.y);
+    }
+
+    // Optional: fade-out visual effect
+    if (typeof DeathEffects !== 'undefined' && DeathEffects.triggerDespawn) {
+      DeathEffects.triggerDespawn(data.x, data.y, data.faction);
+    }
+  });
+
+  // Swarm Queen death rage - guards become enraged when queen dies
+  socket.on('swarm:queenDeathRage', (data) => {
+    Logger.log('Queen death rage:', data);
+
+    // Visual effect: red shockwave from queen position
+    if (typeof ParticleSystem !== 'undefined') {
+      for (let i = 0; i < 50; i++) {
+        const angle = (Math.PI * 2 * i) / 50 + Math.random() * 0.2;
+        const speed = 200 + Math.random() * 200;
+        ParticleSystem.spawn({
+          x: data.queenX,
+          y: data.queenY,
+          vx: Math.cos(angle) * speed,
+          vy: Math.sin(angle) * speed,
+          life: 1000 + Math.random() * 1000,
+          color: i % 2 === 0 ? '#ff0000' : '#cc0000',
+          size: 4 + Math.random() * 4,
+          type: 'glow',
+          drag: 0.94,
+          decay: 1
+        });
+      }
+    }
+
+    // Mark raging guards with visual indicator
+    if (typeof Entities !== 'undefined' && data.ragingGuards) {
+      for (const guard of data.ragingGuards) {
+        const npc = Entities.npcs.get(guard.npcId);
+        if (npc) {
+          npc.isEnraged = true;
+          npc.enrageExpires = Date.now() + (data.rageDuration || 10000);
+        }
+      }
+    }
+
+    // Warning notification
+    if (typeof NotificationManager !== 'undefined') {
+      NotificationManager.show('Queen\'s guards are enraged!', 'danger');
+    }
+
+    // Screen shake
+    if (typeof Renderer !== 'undefined' && Renderer.shake) {
+      Renderer.shake(15, 500);
+    }
+  });
 }
 
 // Export for use in Network module
