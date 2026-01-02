@@ -54,6 +54,17 @@ const BOOST_CONFIG = {
   glowIntensity: 2.0
 };
 
+// Void-enhanced boost configuration (Subspace Warp Drive relic)
+const VOID_BOOST_CONFIG = {
+  color: { inner: '#9933ff', outer: '#660099', core: '#cc66ff' },
+  plumeMultiplier: 3.0,
+  particleMultiplier: 4,
+  particleColor: '#9933ff',
+  trailLength: 12,
+  glowIntensity: 2.5,
+  tunnelColor: { outer: '#330066', inner: '#000000', accent: '#9900ff' }
+};
+
 const ThrustRenderer = {
   particleAccumulator: 0,
   boostTrail: [], // Store recent positions for motion blur
@@ -226,6 +237,10 @@ const ThrustRenderer = {
     const baseConfig = THRUST_CONFIG[tier] || THRUST_CONFIG[1];
     const size = CONSTANTS.SHIP_SIZE;
 
+    // Check for Subspace Warp Drive relic for void-enhanced visuals
+    const hasVoidRelic = typeof Player !== 'undefined' && Player.hasRelic && Player.hasRelic('SUBSPACE_WARP_DRIVE');
+    const boostConfig = hasVoidRelic ? VOID_BOOST_CONFIG : BOOST_CONFIG;
+
     // Get exhaust position in world space
     const exhaustLocal = ShipGeometry.getExhaustPosition(tier);
     const exhaustWorld = {
@@ -242,41 +257,111 @@ const ThrustRenderer = {
 
     // Store position for motion blur trail
     this.boostTrail.unshift({ x: screenX, y: screenY, angle: thrustAngle });
-    if (this.boostTrail.length > BOOST_CONFIG.trailLength) {
+    if (this.boostTrail.length > boostConfig.trailLength) {
       this.boostTrail.pop();
     }
 
+    // Draw void tunnel effect behind ship (if void relic)
+    if (hasVoidRelic) {
+      this.drawVoidTunnel(ctx, position, rotation, camera, size, intensity);
+    }
+
     // Draw motion blur trail
-    this.drawMotionBlurTrail(ctx, size);
+    this.drawMotionBlurTrail(ctx, size, hasVoidRelic);
 
     ctx.save();
     ctx.translate(screenX, screenY);
     ctx.rotate(thrustAngle);
 
     // Draw intense boost glow
-    this.drawBoostGlow(ctx, size, intensity);
+    this.drawBoostGlow(ctx, size, intensity, hasVoidRelic);
 
     // Draw extended boost plume
-    this.drawBoostPlume(ctx, size, intensity);
+    this.drawBoostPlume(ctx, size, intensity, hasVoidRelic);
 
     // Draw boost core
-    this.drawBoostCore(ctx, size, intensity);
+    this.drawBoostCore(ctx, size, intensity, hasVoidRelic);
 
     // Draw energy rings
-    this.drawBoostRings(ctx, size, intensity);
+    this.drawBoostRings(ctx, size, intensity, hasVoidRelic);
 
     ctx.restore();
 
     // Spawn extra boost particles
-    this.spawnBoostParticles(exhaustWorld, velocity, thrustAngle, intensity, dt);
+    this.spawnBoostParticles(exhaustWorld, velocity, thrustAngle, intensity, dt, hasVoidRelic);
   },
 
-  drawMotionBlurTrail(ctx, size) {
+  /**
+   * Draw void tunnel effect around ship (subspace warp visual)
+   */
+  drawVoidTunnel(ctx, position, rotation, camera, size, intensity) {
+    const screenX = position.x - camera.x;
+    const screenY = position.y - camera.y;
+    const tunnelLength = size * 4;
+    const tunnelWidth = size * 1.5;
+    const time = Date.now() * 0.003;
+
+    ctx.save();
+    ctx.translate(screenX, screenY);
+    ctx.rotate(rotation);
+
+    // Outer dark tunnel edges
+    ctx.globalAlpha = 0.3 * intensity;
+    const outerGradient = ctx.createLinearGradient(-tunnelLength, 0, tunnelLength * 0.5, 0);
+    outerGradient.addColorStop(0, 'transparent');
+    outerGradient.addColorStop(0.3, VOID_BOOST_CONFIG.tunnelColor.outer);
+    outerGradient.addColorStop(0.7, VOID_BOOST_CONFIG.tunnelColor.inner);
+    outerGradient.addColorStop(1, 'transparent');
+
+    ctx.fillStyle = outerGradient;
+    ctx.beginPath();
+    ctx.ellipse(-tunnelLength * 0.3, 0, tunnelLength, tunnelWidth, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Animated void streaks
+    ctx.globalAlpha = 0.5 * intensity;
+    ctx.strokeStyle = VOID_BOOST_CONFIG.tunnelColor.accent;
+    ctx.lineWidth = 2;
+
+    for (let i = 0; i < 6; i++) {
+      const streakPhase = (time + i * 0.3) % 1;
+      const streakX = -tunnelLength * (1 - streakPhase);
+      const streakY = (Math.sin(i * 1.5) * tunnelWidth * 0.6);
+      const streakLength = tunnelLength * 0.3 * (1 - streakPhase * 0.5);
+
+      ctx.globalAlpha = (1 - streakPhase) * 0.4 * intensity;
+      ctx.beginPath();
+      ctx.moveTo(streakX, streakY);
+      ctx.lineTo(streakX + streakLength, streakY * 0.8);
+      ctx.stroke();
+    }
+
+    // Central void energy
+    ctx.globalAlpha = 0.2 * intensity;
+    const coreGradient = ctx.createRadialGradient(0, 0, 0, 0, 0, size * 2);
+    coreGradient.addColorStop(0, VOID_BOOST_CONFIG.tunnelColor.accent);
+    coreGradient.addColorStop(0.5, VOID_BOOST_CONFIG.tunnelColor.outer + '80');
+    coreGradient.addColorStop(1, 'transparent');
+
+    ctx.fillStyle = coreGradient;
+    ctx.beginPath();
+    ctx.arc(0, 0, size * 2, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.restore();
+    ctx.globalAlpha = 1;
+  },
+
+  drawMotionBlurTrail(ctx, size, isVoid = false) {
     if (this.boostTrail.length < 2) return;
+
+    const config = isVoid ? VOID_BOOST_CONFIG : BOOST_CONFIG;
+    const innerColor = isVoid ? '#9933ff' : '#88ddff';
+    const outerColor = isVoid ? '#660099' : '#44aaff';
 
     for (let i = 1; i < this.boostTrail.length; i++) {
       const point = this.boostTrail[i];
-      const alpha = (1 - i / this.boostTrail.length) * 0.3;
+      const alpha = (1 - i / this.boostTrail.length) * (isVoid ? 0.4 : 0.3);
       const trailSize = size * (1 - i / this.boostTrail.length) * 0.5;
 
       ctx.save();
@@ -285,8 +370,8 @@ const ThrustRenderer = {
 
       ctx.globalAlpha = alpha;
       const gradient = ctx.createRadialGradient(0, 0, 0, 0, 0, trailSize);
-      gradient.addColorStop(0, '#88ddff');
-      gradient.addColorStop(0.5, '#44aaff');
+      gradient.addColorStop(0, innerColor);
+      gradient.addColorStop(0.5, outerColor);
       gradient.addColorStop(1, 'transparent');
 
       ctx.fillStyle = gradient;
@@ -299,14 +384,22 @@ const ThrustRenderer = {
     ctx.globalAlpha = 1;
   },
 
-  drawBoostGlow(ctx, size, intensity) {
-    const glowRadius = size * BOOST_CONFIG.plumeMultiplier * BOOST_CONFIG.glowIntensity;
+  drawBoostGlow(ctx, size, intensity, isVoid = false) {
+    const config = isVoid ? VOID_BOOST_CONFIG : BOOST_CONFIG;
+    const glowRadius = size * config.plumeMultiplier * config.glowIntensity;
 
     const gradient = ctx.createRadialGradient(0, 0, 0, 0, 0, glowRadius);
-    gradient.addColorStop(0, 'rgba(136, 221, 255, 0.8)');
-    gradient.addColorStop(0.3, 'rgba(68, 170, 255, 0.5)');
-    gradient.addColorStop(0.6, 'rgba(34, 136, 255, 0.2)');
-    gradient.addColorStop(1, 'transparent');
+    if (isVoid) {
+      gradient.addColorStop(0, 'rgba(153, 51, 255, 0.8)');
+      gradient.addColorStop(0.3, 'rgba(102, 0, 153, 0.5)');
+      gradient.addColorStop(0.6, 'rgba(51, 0, 102, 0.2)');
+      gradient.addColorStop(1, 'transparent');
+    } else {
+      gradient.addColorStop(0, 'rgba(136, 221, 255, 0.8)');
+      gradient.addColorStop(0.3, 'rgba(68, 170, 255, 0.5)');
+      gradient.addColorStop(0.6, 'rgba(34, 136, 255, 0.2)');
+      gradient.addColorStop(1, 'transparent');
+    }
 
     ctx.globalAlpha = intensity;
     ctx.fillStyle = gradient;
@@ -316,8 +409,9 @@ const ThrustRenderer = {
     ctx.globalAlpha = 1;
   },
 
-  drawBoostPlume(ctx, size, intensity) {
-    const length = size * BOOST_CONFIG.plumeMultiplier * intensity;
+  drawBoostPlume(ctx, size, intensity, isVoid = false) {
+    const config = isVoid ? VOID_BOOST_CONFIG : BOOST_CONFIG;
+    const length = size * config.plumeMultiplier * intensity;
     const width = size * 0.5;
 
     const time = Date.now() * 0.02;
@@ -331,17 +425,25 @@ const ThrustRenderer = {
     ctx.closePath();
 
     const plumeGradient = ctx.createLinearGradient(0, 0, length, 0);
-    plumeGradient.addColorStop(0, BOOST_CONFIG.color.inner);
-    plumeGradient.addColorStop(0.2, BOOST_CONFIG.color.outer);
-    plumeGradient.addColorStop(0.5, '#2288ff');
-    plumeGradient.addColorStop(1, 'transparent');
+    if (isVoid) {
+      plumeGradient.addColorStop(0, config.color.core);
+      plumeGradient.addColorStop(0.2, config.color.inner);
+      plumeGradient.addColorStop(0.5, config.color.outer);
+      plumeGradient.addColorStop(1, 'transparent');
+    } else {
+      plumeGradient.addColorStop(0, config.color.inner);
+      plumeGradient.addColorStop(0.2, config.color.outer);
+      plumeGradient.addColorStop(0.5, '#2288ff');
+      plumeGradient.addColorStop(1, 'transparent');
+    }
 
     ctx.fillStyle = plumeGradient;
     ctx.fill();
   },
 
-  drawBoostCore(ctx, size, intensity) {
-    const coreLength = size * BOOST_CONFIG.plumeMultiplier * 0.6 * intensity;
+  drawBoostCore(ctx, size, intensity, isVoid = false) {
+    const config = isVoid ? VOID_BOOST_CONFIG : BOOST_CONFIG;
+    const coreLength = size * config.plumeMultiplier * 0.6 * intensity;
     const coreWidth = size * 0.25;
 
     ctx.beginPath();
@@ -351,19 +453,28 @@ const ThrustRenderer = {
     ctx.closePath();
 
     const coreGradient = ctx.createLinearGradient(0, 0, coreLength, 0);
-    coreGradient.addColorStop(0, '#ffffff');
-    coreGradient.addColorStop(0.3, '#aaeeff');
-    coreGradient.addColorStop(0.6, BOOST_CONFIG.color.outer);
-    coreGradient.addColorStop(1, 'transparent');
+    if (isVoid) {
+      coreGradient.addColorStop(0, '#ffffff');
+      coreGradient.addColorStop(0.3, config.color.core);
+      coreGradient.addColorStop(0.6, config.color.inner);
+      coreGradient.addColorStop(1, 'transparent');
+    } else {
+      coreGradient.addColorStop(0, '#ffffff');
+      coreGradient.addColorStop(0.3, '#aaeeff');
+      coreGradient.addColorStop(0.6, config.color.outer);
+      coreGradient.addColorStop(1, 'transparent');
+    }
 
     ctx.fillStyle = coreGradient;
     ctx.fill();
   },
 
-  drawBoostRings(ctx, size, intensity) {
+  drawBoostRings(ctx, size, intensity, isVoid = false) {
+    const config = isVoid ? VOID_BOOST_CONFIG : BOOST_CONFIG;
     const ringCount = 5;
-    const spacing = size * BOOST_CONFIG.plumeMultiplier * 0.3;
+    const spacing = size * config.plumeMultiplier * 0.3;
     const time = Date.now() * 0.005;
+    const ringColor = isVoid ? '#9933ff' : '#88eeff';
 
     for (let i = 0; i < ringCount; i++) {
       const phase = (time + i * 0.2) % 1;
@@ -371,7 +482,7 @@ const ThrustRenderer = {
       const radius = size * 0.2 * (1 - phase * 0.3);
       const alpha = (1 - phase) * intensity * 0.7;
 
-      ctx.strokeStyle = '#88eeff';
+      ctx.strokeStyle = ringColor;
       ctx.lineWidth = 2 + (1 - phase) * 2;
       ctx.globalAlpha = alpha;
       ctx.beginPath();
@@ -381,13 +492,15 @@ const ThrustRenderer = {
     ctx.globalAlpha = 1;
   },
 
-  spawnBoostParticles(position, velocity, angle, intensity, dt) {
+  spawnBoostParticles(position, velocity, angle, intensity, dt, isVoid = false) {
+    const config = isVoid ? VOID_BOOST_CONFIG : BOOST_CONFIG;
+
     // Apply thrust trail length multiplier from graphics settings
     const trailMultiplier = typeof GraphicsSettings !== 'undefined'
       ? (GraphicsSettings.get('thrustTrailLength') || 1.0)
       : 1.0;
 
-    const spawnRate = 60 * BOOST_CONFIG.particleMultiplier * intensity * trailMultiplier;
+    const spawnRate = 60 * config.particleMultiplier * intensity * trailMultiplier;
     this.particleAccumulator += spawnRate * dt;
 
     while (this.particleAccumulator >= 1) {
@@ -403,22 +516,23 @@ const ThrustRenderer = {
         vx: Math.cos(spreadAngle) * speed + velocity.x * inheritVelocity,
         vy: Math.sin(spreadAngle) * speed + velocity.y * inheritVelocity,
         life: 300 + Math.random() * 300,
-        color: BOOST_CONFIG.particleColor,
+        color: config.particleColor,
         size: 3 + Math.random() * 3,
         type: 'glow',
         drag: 0.97,
         decay: 1
       });
 
-      // Also spawn some white-hot particles
+      // Also spawn some bright core particles
       if (Math.random() < 0.3) {
+        const coreColor = isVoid ? '#cc66ff' : '#ffffff';
         ParticleSystem.spawn({
           x: position.x + (Math.random() - 0.5) * 4,
           y: position.y + (Math.random() - 0.5) * 4,
           vx: Math.cos(angle) * (speed * 0.8) + velocity.x * inheritVelocity,
           vy: Math.sin(angle) * (speed * 0.8) + velocity.y * inheritVelocity,
           life: 200 + Math.random() * 200,
-          color: '#ffffff',
+          color: coreColor,
           size: 2 + Math.random() * 2,
           type: 'glow',
           drag: 0.96,
