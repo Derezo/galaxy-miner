@@ -962,9 +962,8 @@ function updateNPCs(deltaTime) {
       const result = combat.applyDamage(targetPlayer.id, damage, action.weaponType || 'kinetic', shieldPiercing);
 
       if (result) {
-        // Update player state
-        targetPlayer.hull = result.hull;
-        targetPlayer.shield = result.shield;
+        // Update player state on the ORIGINAL (not the copy from AI)
+        // We'll update 'p' inside the loop when we find the matching player
 
         // Calculate total damage dealt for broadcasts
         const totalDamage = Math.round(damage.shieldDamage + damage.hullDamage);
@@ -982,9 +981,13 @@ function updateNPCs(deltaTime) {
           piercingDamage: result.piercingDamage
         });
 
-        // Find player socket
+        // Find player socket and update ORIGINAL player state
         for (const [socketId, p] of connectedPlayers) {
           if (p.id === targetPlayer.id) {
+            // Update hull/shield on the ORIGINAL player object
+            p.hull = result.hull;
+            p.shield = result.shield;
+
             io.to(socketId).emit('player:damaged', {
               attackerId: npcId,
               attackerType: 'npc',
@@ -995,7 +998,10 @@ function updateNPCs(deltaTime) {
 
             if (result.isDead) {
               // Handle player death with wreckage spawning
-              handlePlayerDeathWithWreckage(targetPlayer, npcEntity.name, socketId, {
+              // CRITICAL: Pass 'p' (original from connectedPlayers), not 'targetPlayer' (copy from AI)
+              // The AI creates copies with { ...player, distance }, so mutations on targetPlayer
+              // don't affect the original. We need isDead=true set on the original.
+              handlePlayerDeathWithWreckage(p, npcEntity.name, socketId, {
                 cause: 'npc',
                 type: 'npc',
                 name: npcEntity.name,
