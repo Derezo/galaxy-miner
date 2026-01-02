@@ -16,8 +16,8 @@ const NPC_TYPES = {
   pirate_scout: {
     name: 'Pirate Scout',
     faction: 'pirate',
-    hull: 50,
-    shield: 25,
+    hull: 40,
+    shield: 20,
     speed: 130,          // Fast for espionage/fleeing
     weaponType: 'pirate_light_blaster',
     weaponTier: 1,
@@ -222,12 +222,12 @@ const NPC_TYPES = {
   void_whisper: {
     name: 'Void Whisper',
     faction: 'void',
-    hull: 113,           // Was 45, +150%
-    shield: 88,          // Was 35, +150%
+    hull: 60,            // Nerfed for early game accessibility
+    shield: 40,          // Nerfed for early game accessibility
     speed: 140,
     weaponType: 'energy',
     weaponTier: 2,
-    weaponDamage: 7,
+    weaponDamage: 5,     // Nerfed from 7
     weaponRange: 250,
     aggroRange: 450,
     creditReward: 60,    // Increased reward for difficulty
@@ -236,12 +236,12 @@ const NPC_TYPES = {
   void_shadow: {
     name: 'Void Shadow',
     faction: 'void',
-    hull: 200,           // Was 80, +150%
-    shield: 150,         // Was 60, +150%
+    hull: 120,           // Nerfed for early game accessibility
+    shield: 80,          // Nerfed for early game accessibility
     speed: 120,
     weaponType: 'energy',
     weaponTier: 2,
-    weaponDamage: 12,
+    weaponDamage: 9,     // Nerfed from 12
     weaponRange: 280,
     aggroRange: 500,
     creditReward: 150,   // Increased reward for difficulty
@@ -250,12 +250,12 @@ const NPC_TYPES = {
   void_phantom: {
     name: 'Void Phantom',
     faction: 'void',
-    hull: 375,           // Was 150, +150%
-    shield: 300,         // Was 120, +150%
+    hull: 200,           // Nerfed for early game accessibility
+    shield: 150,         // Nerfed for early game accessibility
     speed: 100,
     weaponType: 'energy',
     weaponTier: 3,
-    weaponDamage: 18,
+    weaponDamage: 15,    // Nerfed from 18
     weaponRange: 320,
     aggroRange: 550,
     creditReward: 300,   // Increased reward for difficulty
