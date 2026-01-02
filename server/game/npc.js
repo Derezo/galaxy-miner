@@ -424,6 +424,44 @@ function getSectorKey(x, y) {
 }
 
 /**
+ * Check if a position is within The Graveyard safe zone
+ * The Graveyard is a 3x3 sector area at origin (sectors -1,-1 to 1,1)
+ * In this zone, hostile factions don't spawn bases and friendly NPCs are passive
+ * @param {number} x - World X coordinate
+ * @param {number} y - World Y coordinate
+ * @returns {boolean} True if position is in Graveyard
+ */
+function isInGraveyard(x, y) {
+  const config = CONSTANTS.GRAVEYARD_ZONE;
+  if (!config) return false;
+
+  const sectorSize = CONSTANTS.SECTOR_SIZE || 1000;
+  const sectorX = Math.floor(x / sectorSize);
+  const sectorY = Math.floor(y / sectorSize);
+
+  return sectorX >= config.MIN_SECTOR_X && sectorX <= config.MAX_SECTOR_X &&
+         sectorY >= config.MIN_SECTOR_Y && sectorY <= config.MAX_SECTOR_Y;
+}
+
+/**
+ * Check if an NPC should be passive (non-aggressive until attacked) based on location
+ * NPCs in Graveyard zone from non-hostile factions become passive
+ * @param {Object} npc - NPC object with position and faction
+ * @returns {boolean} True if NPC should be passive
+ */
+function shouldBePassive(npc) {
+  // Only scavengers and rogue miners are passive in Graveyard
+  const passiveFactions = ['scavenger', 'rogue_miner'];
+  if (!passiveFactions.includes(npc.faction)) return false;
+
+  // Check if NPC is in Graveyard zone
+  const x = npc.position ? npc.position.x : npc.x;
+  const y = npc.position ? npc.position.y : npc.y;
+
+  return isInGraveyard(x, y);
+}
+
+/**
  * Find nearest non-swarm base for drone targeting
  * @param {Object} drone - Drone NPC object
  * @param {number} searchRange - Search radius
@@ -3324,6 +3362,9 @@ module.exports = {
   removeFromFormation,
   cleanupFormations,
   SUCCESSION_TIER_SCORES,
+  // Graveyard safe zone
+  isInGraveyard,
+  shouldBePassive,
   // Swarm Assimilation System
   assimilationProgress,
   assimilatedBases,
