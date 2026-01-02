@@ -40,6 +40,10 @@ const PlayerDeathEffect = {
   // Invulnerability tracking
   invulnerableUntil: 0,
 
+  // Respawn location info (from server respawnOptions)
+  respawnType: 'graveyard',       // 'graveyard' | 'swarm_hive_core'
+  respawnMessage: null,           // Custom message from server
+
   /**
    * Trigger the death effect sequence
    * @param {Object} data - Death data from server
@@ -76,6 +80,15 @@ const PlayerDeathEffect = {
 
     // Create wreckage particles
     this.createWreckageParticles(data.deathPosition);
+
+    // Extract respawn options from death data
+    if (data.respawnOptions) {
+      this.respawnType = data.respawnOptions.type || 'graveyard';
+      this.respawnMessage = data.respawnOptions.message || null;
+    } else {
+      this.respawnType = 'graveyard';
+      this.respawnMessage = null;
+    }
 
     Logger.log('[PlayerDeathEffect] Triggered:', data);
   },
@@ -176,9 +189,29 @@ const PlayerDeathEffect = {
    * Show the respawn button after death animation completes
    */
   showRespawnButton() {
-    // Remove any existing button first
+    // Remove any existing button/message first
     const existing = document.getElementById('respawn-button');
     if (existing) existing.remove();
+    const existingMsg = document.getElementById('respawn-message');
+    if (existingMsg) existingMsg.remove();
+
+    const container = document.getElementById('ui-container');
+    if (!container) return;
+
+    // Create respawn message based on type
+    const msgDiv = document.createElement('div');
+    msgDiv.id = 'respawn-message';
+    msgDiv.className = 'respawn-message';
+
+    if (this.respawnType === 'swarm_hive_core') {
+      msgDiv.textContent = this.respawnMessage || 'Emerging from the Swarm Hive...';
+      msgDiv.classList.add('respawn-message--hive');
+    } else {
+      msgDiv.textContent = 'Returning to The Graveyard...';
+      msgDiv.classList.add('respawn-message--graveyard');
+    }
+
+    container.appendChild(msgDiv);
 
     // Create simple centered button
     const btn = document.createElement('button');
@@ -187,28 +220,30 @@ const PlayerDeathEffect = {
     btn.textContent = 'RESPAWN';
     btn.onclick = () => this.handleRespawn();
 
-    const container = document.getElementById('ui-container');
-    if (container) {
-      container.appendChild(btn);
-    }
+    container.appendChild(btn);
 
-    Logger.log('[PlayerDeathEffect] Respawn button shown');
+    Logger.log('[PlayerDeathEffect] Respawn button shown, type:', this.respawnType);
   },
 
   /**
    * Handle respawn button click
    */
   handleRespawn() {
-    Logger.log('[PlayerDeathEffect] Respawn button clicked, Player.isDead:', Player?.isDead);
+    Logger.log('[PlayerDeathEffect] Respawn button clicked, Player.isDead:', Player?.isDead, 'type:', this.respawnType);
 
-    // Remove button
+    // Remove button and message
     const btn = document.getElementById('respawn-button');
     if (btn) btn.remove();
+    const msg = document.getElementById('respawn-message');
+    if (msg) msg.remove();
 
-    // Send respawn request to server (always deep_space for auto-respawn)
+    // Send respawn request to server with correct respawn type
     if (typeof Network !== 'undefined' && Network.socket) {
-      Logger.log('[PlayerDeathEffect] Sending respawn:select to server');
-      Network.sendRespawnSelect('deep_space', null);
+      // Use the respawn type from server's respawnOptions
+      // For swarm_hive_core, include the hive ID if available
+      const targetId = this.deathData?.respawnOptions?.hiveId || null;
+      Logger.log('[PlayerDeathEffect] Sending respawn:select to server, type:', this.respawnType, 'targetId:', targetId);
+      Network.sendRespawnSelect(this.respawnType, targetId);
     } else {
       Logger.error('[PlayerDeathEffect] Network not available for respawn!');
     }
@@ -221,13 +256,19 @@ const PlayerDeathEffect = {
    * @param {Object} data - Respawn data from server
    */
   onRespawnConfirmed(data) {
-    // Remove respawn button if still present
+    // Remove respawn button and message if still present
     const btn = document.getElementById('respawn-button');
     if (btn) btn.remove();
+    const msg = document.getElementById('respawn-message');
+    if (msg) msg.remove();
 
     // End death effect
     this.active = false;
     this.phase = 'inactive';
+
+    // Reset respawn state
+    this.respawnType = 'graveyard';
+    this.respawnMessage = null;
 
     // Apply invulnerability
     this.invulnerableUntil = Date.now() + this.TIMINGS.INVULNERABILITY_DURATION;

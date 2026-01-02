@@ -1,8 +1,58 @@
 /**
- * Respawn Button Styles
- * Simple centered button shown after death animation
+ * Respawn Location Styles
+ * Message and button shown after death animation
  */
 
+/* Respawn destination message */
+.respawn-message {
+  position: fixed;
+  bottom: 140px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 12px 30px;
+  font-size: 18px;
+  font-family: 'Courier New', monospace;
+  font-weight: bold;
+  text-align: center;
+  z-index: 1001;
+  letter-spacing: 0.05em;
+  animation: respawn-message-fadein 0.5s ease-out;
+}
+
+@keyframes respawn-message-fadein {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
+}
+
+/* Graveyard respawn - muted gray/blue theme */
+.respawn-message--graveyard {
+  color: #8899aa;
+  text-shadow: 0 0 15px rgba(100, 120, 140, 0.6);
+}
+
+/* Swarm Hive Core respawn - ominous red/crimson theme */
+.respawn-message--hive {
+  color: #cc4444;
+  text-shadow: 0 0 15px rgba(180, 60, 60, 0.8), 0 0 30px rgba(139, 0, 0, 0.5);
+  animation: respawn-message-fadein 0.5s ease-out, hive-pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes hive-pulse {
+  0%, 100% {
+    text-shadow: 0 0 15px rgba(180, 60, 60, 0.8), 0 0 30px rgba(139, 0, 0, 0.5);
+  }
+  50% {
+    text-shadow: 0 0 20px rgba(200, 80, 80, 1), 0 0 40px rgba(160, 20, 20, 0.7);
+  }
+}
+
+/* Respawn button */
 .respawn-button {
   position: fixed;
   bottom: 80px;

@@ -399,6 +399,158 @@ const Network = {
       }
     });
 
+    // Hive Core Implosion - dramatic visual when player respawns using Swarm Hive Core relic
+    // The hive is consumed and explodes, killing nearby NPCs and creating wreckage
+    this.socket.on('hive:coreImplosion', (data) => {
+      Logger.log('Hive Core Implosion!', data);
+
+      // Validate position data
+      if (!data.position || !Number.isFinite(data.position.x) || !Number.isFinite(data.position.y)) {
+        Logger.warn('[hive:coreImplosion] Invalid position data');
+        return;
+      }
+
+      const { x, y } = data.position;
+      const radius = data.destructionRadius || 300;
+
+      // Screen shake for dramatic effect (stronger if player is nearby)
+      if (typeof Renderer !== 'undefined' && Renderer.shake && typeof Player !== 'undefined') {
+        const playerDist = Math.sqrt(
+          Math.pow(Player.position.x - x, 2) + Math.pow(Player.position.y - y, 2)
+        );
+        // Stronger shake when closer
+        const shakeIntensity = Math.max(5, 25 * (1 - playerDist / 2000));
+        Renderer.shake(shakeIntensity, 800);
+      }
+
+      // Play hive implosion sound (epic destruction)
+      if (typeof AudioManager !== 'undefined' && AudioManager.isReady && AudioManager.isReady()) {
+        AudioManager.playAt('base_destruction_swarm', x, y);
+      }
+
+      // Phase 1: Implosion - particles sucked inward
+      if (typeof ParticleSystem !== 'undefined') {
+        // Inward-spiraling crimson particles (implosion effect)
+        for (let i = 0; i < 60; i++) {
+          const angle = (Math.PI * 2 * i) / 60;
+          const startRadius = radius * (0.8 + Math.random() * 0.4);
+          const startX = x + Math.cos(angle) * startRadius;
+          const startY = y + Math.sin(angle) * startRadius;
+
+          ParticleSystem.spawn({
+            x: startX,
+            y: startY,
+            vx: Math.cos(angle + Math.PI) * (80 + Math.random() * 60), // Toward center
+            vy: Math.sin(angle + Math.PI) * (80 + Math.random() * 60),
+            life: 600 + Math.random() * 300,
+            color: i % 3 === 0 ? '#ff0000' : (i % 3 === 1 ? '#8b0000' : '#660000'),
+            size: 4 + Math.random() * 5,
+            type: 'glow',
+            drag: 0.92,
+            decay: 1
+          });
+        }
+
+        // Organic tendrils being pulled in
+        for (let i = 0; i < 30; i++) {
+          const angle = Math.random() * Math.PI * 2;
+          const startRadius = radius * 0.6 + Math.random() * radius * 0.4;
+          ParticleSystem.spawn({
+            x: x + Math.cos(angle) * startRadius,
+            y: y + Math.sin(angle) * startRadius,
+            vx: Math.cos(angle + Math.PI) * 40,
+            vy: Math.sin(angle + Math.PI) * 40,
+            life: 500 + Math.random() * 300,
+            color: '#440000',
+            size: 2 + Math.random() * 3,
+            type: 'trail',
+            drag: 0.95,
+            decay: 0.8
+          });
+        }
+      }
+
+      // Phase 2: Explosion outward (delayed)
+      setTimeout(() => {
+        if (typeof ParticleSystem !== 'undefined') {
+          // Massive crimson shockwave
+          for (let i = 0; i < 80; i++) {
+            const angle = (Math.PI * 2 * i) / 80;
+            const speed = 150 + Math.random() * 200;
+            ParticleSystem.spawn({
+              x: x,
+              y: y,
+              vx: Math.cos(angle) * speed,
+              vy: Math.sin(angle) * speed,
+              life: 800 + Math.random() * 500,
+              color: i % 4 === 0 ? '#ff4444' : (i % 4 === 1 ? '#ff0000' : (i % 4 === 2 ? '#8b0000' : '#cc2222')),
+              size: 5 + Math.random() * 6,
+              type: 'glow',
+              drag: 0.93,
+              decay: 0.9
+            });
+          }
+
+          // Inner white/yellow flash
+          for (let i = 0; i < 40; i++) {
+            const angle = Math.random() * Math.PI * 2;
+            const speed = 100 + Math.random() * 150;
+            ParticleSystem.spawn({
+              x: x,
+              y: y,
+              vx: Math.cos(angle) * speed,
+              vy: Math.sin(angle) * speed,
+              life: 400 + Math.random() * 300,
+              color: i % 2 === 0 ? '#ffffff' : '#ffcc00',
+              size: 3 + Math.random() * 4,
+              type: 'spark',
+              drag: 0.9,
+              decay: 1.5
+            });
+          }
+
+          // Bio-organic debris flying outward
+          for (let i = 0; i < 25; i++) {
+            const angle = Math.random() * Math.PI * 2;
+            const speed = 60 + Math.random() * 100;
+            ParticleSystem.spawn({
+              x: x + (Math.random() - 0.5) * 40,
+              y: y + (Math.random() - 0.5) * 40,
+              vx: Math.cos(angle) * speed,
+              vy: Math.sin(angle) * speed,
+              life: 1000 + Math.random() * 700,
+              color: '#331111',
+              size: 6 + Math.random() * 8,
+              type: 'smoke',
+              drag: 0.96,
+              decay: 0.7
+            });
+          }
+        }
+      }, 400); // Delay for implosion to complete
+
+      // Remove hive from entities
+      if (typeof Entities !== 'undefined' && data.hiveId) {
+        Entities.destroyBase(data.hiveId);
+      }
+
+      // Show notification
+      if (typeof NotificationManager !== 'undefined') {
+        if (data.playerName) {
+          NotificationManager.warning(`${data.playerName} emerged from the Swarm Hive, consuming it!`);
+        } else {
+          NotificationManager.warning('A Swarm Hive has been consumed by a Hive Core!');
+        }
+
+        // If many NPCs were killed, show additional message
+        if (data.killedNpcCount && data.killedNpcCount > 5) {
+          setTimeout(() => {
+            NotificationManager.info(`${data.killedNpcCount} Swarm creatures perished in the implosion.`);
+          }, 1500);
+        }
+      }
+    });
+
     // Queen aura regeneration effect
     this.socket.on('swarm:queenAura', (data) => {
       // Visual effect showing aura on affected bases
