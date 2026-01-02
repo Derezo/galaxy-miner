@@ -53,16 +53,16 @@ const CONSTANTS = {
   CLIENT_RENDER_RATE: 60,
 
   // Player defaults
-  DEFAULT_HULL_HP: 100,
-  DEFAULT_SHIELD_HP: 50,
+  DEFAULT_HULL_HP: 120,
+  DEFAULT_SHIELD_HP: 60,
   DEFAULT_CREDITS: 100,
-  BASE_SPEED: 150,
+  BASE_SPEED: 180,
   BASE_ROTATION_SPEED: 3,
   BASE_RADAR_RANGE: 500,
 
   // Ship component tiers
   MAX_TIER: 5,
-  TIER_MULTIPLIER: 1.5,
+  TIER_MULTIPLIER: 1.4,
   SHIELD_TIER_MULTIPLIER: 2.0,  // Shields scale 2x per tier (T5 = 800 HP base)
 
   // Radar tier configuration - progressive feature unlocks
@@ -150,7 +150,7 @@ const CONSTANTS = {
   BASE_WEAPON_RANGE: 300,  // Legacy - use WEAPON_RANGES for tier-specific ranges
   // Per-tier weapon ranges (must match client visual projectile travel distance)
   // Client calculates: speed * duration/1000 for projectiles, maxRange for beams
-  WEAPON_RANGES: [0, 180, 210, 360, 400, 400],  // [unused, tier1, tier2, tier3, tier4, tier5]
+  WEAPON_RANGES: [0, 200, 210, 360, 400, 400],  // [unused, tier1, tier2, tier3, tier4, tier5]
   PROJECTILE_SPEED: 800,  // Units per second for trajectory prediction
   SHIELD_RECHARGE_RATE: 2,
   SHIELD_RECHARGE_DELAY: 3000,
@@ -1761,7 +1761,45 @@ const CONSTANTS = {
 
   // Wreckage
   WRECKAGE_DESPAWN_TIME: 120000, // 2 minutes
-  WRECKAGE_COLLECT_RANGE: 50
+  WRECKAGE_COLLECT_RANGE: 50,
+
+  // Graveyard Zone - Safe 3x3 sector area at origin for new players
+  GRAVEYARD_ZONE: {
+    MIN_SECTOR_X: -1,
+    MAX_SECTOR_X: 1,
+    MIN_SECTOR_Y: -1,
+    MAX_SECTOR_Y: 1,
+    DERELICTS_PER_SECTOR_MIN: 4,
+    DERELICTS_PER_SECTOR_MAX: 6,
+    BLOCKED_FACTIONS: ['pirate', 'void', 'swarm']  // No hostile bases here
+  },
+
+  // Derelict Ship Configuration - Salvageable wrecks for new players
+  DERELICT_CONFIG: {
+    SIZE_MIN: 400,
+    SIZE_MAX: 600,
+    INTERACTION_RANGE: 100,
+    SALVAGE_COOLDOWN: 30000,  // 30 seconds
+    WRECKAGE_SPAWN_MIN: 1,
+    WRECKAGE_SPAWN_MAX: 3,
+    WRECKAGE_SPAWN_RADIUS_MIN: 50,
+    WRECKAGE_SPAWN_RADIUS_MAX: 100,
+    ORBITING_DEBRIS_MIN: 10,
+    ORBITING_DEBRIS_MAX: 20,
+    LOOT_TABLE: {
+      COMMON_CHANCE: 0.70,
+      COMMON_QTY_MIN: 2,
+      COMMON_QTY_MAX: 5,
+      UNCOMMON_CHANCE: 0.25,
+      UNCOMMON_QTY_MIN: 1,
+      UNCOMMON_QTY_MAX: 2,
+      CREDITS_CHANCE: 0.50,
+      CREDITS_MIN: 10,
+      CREDITS_MAX: 30,
+      RARE_CHANCE: 0.05,
+      RARE_QTY: 1
+    }
+  }
 };
 
 // Export for both Node.js and browser

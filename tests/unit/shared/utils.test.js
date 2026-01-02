@@ -20,15 +20,15 @@ describe('shared/utils', () => {
     });
 
     it('should return TIER_MULTIPLIER for tier 2', () => {
-      expect(utils.getTierMultiplier(2)).toBe(1.5);
+      expect(utils.getTierMultiplier(2)).toBe(CONSTANTS.TIER_MULTIPLIER);
     });
 
     it('should return TIER_MULTIPLIER^2 for tier 3', () => {
-      expect(utils.getTierMultiplier(3)).toBe(2.25);
+      expect(utils.getTierMultiplier(3)).toBeCloseTo(Math.pow(CONSTANTS.TIER_MULTIPLIER, 2));
     });
 
     it('should return TIER_MULTIPLIER^4 for tier 5', () => {
-      expect(utils.getTierMultiplier(5)).toBeCloseTo(5.0625);
+      expect(utils.getTierMultiplier(5)).toBeCloseTo(Math.pow(CONSTANTS.TIER_MULTIPLIER, 4));
     });
 
     it('should handle undefined tier as 1', () => {
@@ -90,11 +90,13 @@ describe('shared/utils', () => {
     });
 
     it('should return reduced time for higher tiers', () => {
-      expect(utils.getMiningTime(2)).toBe(2000);
+      const expected = CONSTANTS.BASE_MINING_TIME / utils.getTierMultiplier(2);
+      expect(utils.getMiningTime(2)).toBeCloseTo(expected);
     });
 
     it('should return significantly reduced time for tier 5', () => {
-      expect(utils.getMiningTime(5)).toBeCloseTo(592.59, 1);
+      const expected = CONSTANTS.BASE_MINING_TIME / utils.getTierMultiplier(5);
+      expect(utils.getMiningTime(5)).toBeCloseTo(expected, 1);
     });
   });
 
@@ -104,11 +106,13 @@ describe('shared/utils', () => {
     });
 
     it('should scale damage with tier', () => {
-      expect(utils.getWeaponDamage(2)).toBe(15);
+      const expected = CONSTANTS.BASE_WEAPON_DAMAGE * utils.getTierMultiplier(2);
+      expect(utils.getWeaponDamage(2)).toBeCloseTo(expected);
     });
 
     it('should return high damage for tier 5', () => {
-      expect(utils.getWeaponDamage(5)).toBeCloseTo(50.625);
+      const expected = CONSTANTS.BASE_WEAPON_DAMAGE * utils.getTierMultiplier(5);
+      expect(utils.getWeaponDamage(5)).toBeCloseTo(expected);
     });
   });
 
@@ -118,11 +122,13 @@ describe('shared/utils', () => {
     });
 
     it('should decrease cooldown with higher tiers', () => {
-      expect(utils.getWeaponCooldown(2)).toBeCloseTo(333.33, 1);
+      const expected = CONSTANTS.BASE_WEAPON_COOLDOWN / utils.getTierMultiplier(2);
+      expect(utils.getWeaponCooldown(2)).toBeCloseTo(expected, 1);
     });
 
     it('should have low cooldown for tier 5', () => {
-      expect(utils.getWeaponCooldown(5)).toBeCloseTo(98.77, 1);
+      const expected = CONSTANTS.BASE_WEAPON_COOLDOWN / utils.getTierMultiplier(5);
+      expect(utils.getWeaponCooldown(5)).toBeCloseTo(expected, 1);
     });
   });
 
@@ -145,15 +151,17 @@ describe('shared/utils', () => {
 
   describe('getMaxSpeed', () => {
     it('should return base speed for tier 1', () => {
-      expect(utils.getMaxSpeed(1)).toBe(150);
+      expect(utils.getMaxSpeed(1)).toBe(CONSTANTS.BASE_SPEED);
     });
 
     it('should increase speed with tier', () => {
-      expect(utils.getMaxSpeed(2)).toBe(225);
+      const expected = CONSTANTS.BASE_SPEED * utils.getTierMultiplier(2);
+      expect(utils.getMaxSpeed(2)).toBeCloseTo(expected);
     });
 
     it('should have high speed for tier 5', () => {
-      expect(utils.getMaxSpeed(5)).toBeCloseTo(759.375);
+      const expected = CONSTANTS.BASE_SPEED * utils.getTierMultiplier(5);
+      expect(utils.getMaxSpeed(5)).toBeCloseTo(expected);
     });
   });
 
