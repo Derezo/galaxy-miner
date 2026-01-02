@@ -7,8 +7,13 @@ const { statements } = require('./database');
 const Physics = require('../shared/physics');
 const StarSystem = require('../shared/star-system');
 const logger = require('../shared/logger');
-const { isGraveyardSector } = require('./game/npc');
+const { isGraveyardSector: isGraveyardSectorFn } = require('../shared/graveyard');
 const derelictModule = require('./game/derelict');
+
+// Wrapper for consistent API
+function isGraveyardSector(sectorX, sectorY) {
+  return isGraveyardSectorFn(sectorX, sectorY, config);
+}
 
 // Cache generated sectors
 const sectorCache = new Map();

@@ -3,6 +3,12 @@
 
 const config = require('../config');
 const logger = require('../../shared/logger');
+const { isGraveyardSector: isGraveyardSectorFn } = require('../../shared/graveyard');
+
+// Wrapper for consistent API
+function isGraveyardSector(sectorX, sectorY) {
+  return isGraveyardSectorFn(sectorX, sectorY, config);
+}
 
 // Track salvage cooldowns: derelictId -> cooldownExpiry timestamp
 const salvageCooldowns = new Map();
@@ -31,20 +37,6 @@ function hash(seed, x, y, extra = '') {
     h = h & h;
   }
   return Math.abs(h);
-}
-
-/**
- * Check if a sector is within The Graveyard zone
- * @param {number} sectorX - Sector X coordinate
- * @param {number} sectorY - Sector Y coordinate
- * @returns {boolean} True if in Graveyard
- */
-function isGraveyardSector(sectorX, sectorY) {
-  const zone = config.GRAVEYARD_ZONE;
-  if (!zone) return false;
-
-  return sectorX >= zone.MIN_SECTOR_X && sectorX <= zone.MAX_SECTOR_X &&
-         sectorY >= zone.MIN_SECTOR_Y && sectorY <= zone.MAX_SECTOR_Y;
 }
 
 /**
@@ -167,14 +159,15 @@ function generateDerelictsForSector(sectorX, sectorY) {
 function getDerelictById(derelictId) {
   // Parse derelict ID to get sector coordinates
   const parts = derelictId.split('_');
-  if (parts.length < 4 || parts[0] !== 'derelict') {
+  if (parts.length !== 4 || parts[0] !== 'derelict') {
     return null;
   }
 
   const sectorX = parseInt(parts[1]);
   const sectorY = parseInt(parts[2]);
+  const index = parseInt(parts[3]);
 
-  if (isNaN(sectorX) || isNaN(sectorY)) {
+  if (isNaN(sectorX) || isNaN(sectorY) || isNaN(index) || index < 0) {
     return null;
   }
 
@@ -318,6 +311,8 @@ function salvageDerelict(derelictId, playerPosition) {
 
 /**
  * Generate loot contents from a derelict based on LOOT_TABLE
+ * NOTE: Uses Math.random() intentionally - each salvage generates fresh loot
+ * (unlike derelict placement which is deterministic per-sector)
  * @returns {Array} Array of loot items
  */
 function generateDerelictLoot() {

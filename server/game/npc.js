@@ -7,6 +7,7 @@ const ai = require('./ai');
 const logger = require('../../shared/logger');
 const LootPools = require('./loot-pools');
 const CONSTANTS = require('../../shared/constants');
+const { isGraveyardSector: isGraveyardSectorFn, isInGraveyard: isInGraveyardFn } = require('../../shared/graveyard');
 
 // NPC types with faction, weapon, and tier info
 const NPC_TYPES = {
@@ -432,11 +433,7 @@ function getSectorKey(x, y) {
  * @returns {boolean} True if position is in Graveyard
  */
 function isGraveyardSector(sectorX, sectorY) {
-  const config = CONSTANTS.GRAVEYARD_ZONE;
-  if (!config) return false;
-
-  return sectorX >= config.MIN_SECTOR_X && sectorX <= config.MAX_SECTOR_X &&
-         sectorY >= config.MIN_SECTOR_Y && sectorY <= config.MAX_SECTOR_Y;
+  return isGraveyardSectorFn(sectorX, sectorY, CONSTANTS);
 }
 
 /**
@@ -446,11 +443,7 @@ function isGraveyardSector(sectorX, sectorY) {
  * @returns {boolean} True if position is in The Graveyard
  */
 function isInGraveyard(x, y) {
-  const sectorSize = CONSTANTS.SECTOR_SIZE || 1000;
-  const sectorX = Math.floor(x / sectorSize);
-  const sectorY = Math.floor(y / sectorSize);
-
-  return isGraveyardSector(sectorX, sectorY);
+  return isInGraveyardFn(x, y, CONSTANTS);
 }
 
 /**
