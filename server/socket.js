@@ -8,6 +8,8 @@ const npc = require('./game/npc');
 const engine = require('./game/engine');
 const wormhole = require('./game/wormhole');
 const LootPools = require('./game/loot-pools');
+const loot = require('./game/loot');
+const derelict = require('./game/derelict');
 const world = require('./world');
 const logger = require('../shared/logger');
 const Constants = require('../shared/constants');
@@ -543,6 +545,146 @@ module.exports = function(io) {
     socket.on('mining:cancel', () => {
       if (!authenticatedUserId) return;
       mining.cancelMining(authenticatedUserId);
+    });
+
+    // ==============================
+    // Derelict: Get nearby derelicts
+    // ==============================
+    socket.on('derelict:getNearby', () => {
+      if (!authenticatedUserId) return;
+
+      const player = connectedPlayers.get(socket.id);
+      if (!player) return;
+
+      // Get derelicts within radar range (expanded for large derelicts)
+      const radarRange = config.BASE_RADAR_RANGE * Math.pow(config.TIER_MULTIPLIER, player.radarTier - 1) * 2;
+      const nearby = derelict.getDerelictsInRange(player.position, radarRange);
+
+      socket.emit('derelict:nearby', {
+        derelicts: nearby.map(d => ({
+          id: d.id,
+          x: d.x,
+          y: d.y,
+          size: d.size,
+          rotation: d.rotation,
+          shipType: d.shipType,
+          orbitingDebrisCount: d.orbitingDebrisCount,
+          distance: d.distance,
+          onCooldown: d.onCooldown,
+          cooldownRemaining: d.cooldownRemaining
+        }))
+      });
+    });
+
+    // ==============================
+    // Derelict: Salvage derelict
+    // ==============================
+    socket.on('derelict:salvage', (data) => {
+      if (!authenticatedUserId) return;
+
+      const player = connectedPlayers.get(socket.id);
+      if (!player) return;
+
+      // Validate input
+      if (!data || typeof data.derelictId !== 'string') {
+        socket.emit('derelict:error', { message: 'Invalid derelict ID' });
+        return;
+      }
+
+      const { derelictId } = data;
+
+      // Attempt salvage
+      const result = derelict.salvageDerelict(derelictId, player.position);
+
+      if (!result.success) {
+        socket.emit('derelict:error', {
+          message: result.error,
+          cooldownRemaining: result.cooldownRemaining || 0
+        });
+        return;
+      }
+
+      // Salvage successful - spawn wreckage pieces
+      const spawnedWreckage = [];
+
+      for (let i = 0; i < result.wreckagePositions.length; i++) {
+        const pos = result.wreckagePositions[i];
+
+        // Distribute loot across wreckage pieces (first piece gets most/all)
+        const wreckageContents = i === 0 ? result.loot : [];
+
+        // Create wreckage entity
+        const wreckageEntity = {
+          id: `derelict_salvage_${derelictId}_${i}`,
+          type: 'derelict_salvage',
+          name: 'Derelict Salvage',
+          faction: null,
+          creditReward: 0 // Credits are in contents
+        };
+
+        const wreckage = loot.spawnWreckage(
+          wreckageEntity,
+          pos,
+          wreckageContents,
+          null, // No damage contributors
+          { source: 'derelict' }
+        );
+
+        spawnedWreckage.push(wreckage);
+
+        // Broadcast wreckage spawn to nearby players
+        broadcastToNearby(socket, player, 'wreckage:spawn', {
+          id: wreckage.id,
+          x: wreckage.position.x,
+          y: wreckage.position.y,
+          size: wreckage.size,
+          source: 'derelict',
+          faction: null,
+          npcType: 'derelict_salvage',
+          npcName: 'Derelict Salvage',
+          contentCount: wreckage.contents.length,
+          despawnTime: wreckage.despawnTime
+        });
+      }
+
+      // Emit salvage success to player
+      socket.emit('derelict:salvaged', {
+        derelictId,
+        wreckageIds: spawnedWreckage.map(w => w.id),
+        wreckageCount: spawnedWreckage.length,
+        cooldownMs: config.DERELICT_CONFIG?.SALVAGE_COOLDOWN || 30000
+      });
+
+      // Broadcast salvage effect to nearby players (for visual/audio feedback)
+      broadcastToNearby(socket, player, 'derelict:salvageEffect', {
+        derelictId,
+        derelictX: result.derelict.x,
+        derelictY: result.derelict.y,
+        playerId: authenticatedUserId
+      });
+
+      logger.log(`[DERELICT] Player ${authenticatedUserId} salvaged ${derelictId}, spawned ${spawnedWreckage.length} wreckage pieces`);
+    });
+
+    // ==============================
+    // Derelict: Check cooldown status
+    // ==============================
+    socket.on('derelict:checkCooldown', (data) => {
+      if (!authenticatedUserId) return;
+
+      if (!data || typeof data.derelictId !== 'string') {
+        return;
+      }
+
+      const { derelictId } = data;
+      const onCooldown = derelict.isOnCooldown(derelictId);
+      const remaining = derelict.getCooldownRemaining(derelictId);
+
+      socket.emit('derelict:cooldownStatus', {
+        derelictId,
+        onCooldown,
+        cooldownRemaining: remaining
+      });
     });
 
     // Chat: Send message

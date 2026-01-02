@@ -8,6 +8,7 @@ const Physics = require('../shared/physics');
 const StarSystem = require('../shared/star-system');
 const logger = require('../shared/logger');
 const { isGraveyardSector } = require('./game/npc');
+const derelictModule = require('./game/derelict');
 
 // Cache generated sectors
 const sectorCache = new Map();
@@ -99,6 +100,7 @@ function generateSectorFromStarSystem(sectorX, sectorY) {
     asteroids: [],
     wormholes: [],
     bases: [],
+    derelicts: [], // Ancient derelict ships in The Graveyard
     systems: [] // Reference to parent star systems
   };
 
@@ -258,6 +260,9 @@ function generateSectorFromStarSystem(sectorX, sectorY) {
     generateDeepSpaceContent(sector, sectorX, sectorY, rng);
   }
 
+  // Generate derelicts for Graveyard sectors
+  sector.derelicts = derelictModule.generateDerelictsForSector(sectorX, sectorY);
+
   // Cache management
   if (sectorCache.size >= MAX_CACHED_SECTORS) {
     const firstKey = sectorCache.keys().next().value;
@@ -360,7 +365,8 @@ function generateSectorLegacy(sectorX, sectorY) {
     planets: [],
     asteroids: [],
     wormholes: [],
-    bases: []
+    bases: [],
+    derelicts: [] // Ancient derelict ships in The Graveyard
   };
 
   // Track all placed objects for spacing checks
@@ -576,6 +582,9 @@ function generateSectorLegacy(sectorX, sectorY) {
     }
   }
 
+  // Generate derelicts for Graveyard sectors
+  sector.derelicts = derelictModule.generateDerelictsForSector(sectorX, sectorY);
+
   // Cache management
   if (sectorCache.size >= MAX_CACHED_SECTORS) {
     // Remove oldest entry
@@ -599,6 +608,8 @@ function findInSector(sector, type, objectId) {
     return sector.wormholes.find(w => w.id === objectId);
   } else if (type === 'base') {
     return sector.bases.find(b => b.id === objectId);
+  } else if (type === 'derelict') {
+    return sector.derelicts ? sector.derelicts.find(d => d.id === objectId) : null;
   }
   return null;
 }
