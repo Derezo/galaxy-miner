@@ -6,6 +6,7 @@ const world = require('../world');
 const logger = require('../../shared/logger');
 const npc = require('./npc');
 const loot = require('./loot');
+const Constants = require('../../shared/constants');
 
 // Track weapon cooldowns: playerId -> lastFireTime
 const weaponCooldowns = new Map();
@@ -409,7 +410,7 @@ function findGraveyardSpawnLocation() {
  * @returns {Object} Destruction result with killed NPCs and wreckage spawned
  */
 function destroyHiveWithAoE(hiveId, hiveBase) {
-  const HIVE_DESTRUCTION_RADIUS = 500; // Units
+  const HIVE_DESTRUCTION_RADIUS = Constants.RELIC_TYPES?.SWARM_HIVE_CORE?.effects?.hiveDestructionRadius || 500;
   const hivePosition = { x: hiveBase.x, y: hiveBase.y };
 
   // Get all Swarm NPCs within the destruction radius
