@@ -14,16 +14,29 @@ function register(socket) {
       faction: data.faction,
       npcName: data.npcName,
       contentCount: data.contentCount,
-      despawnTime: data.despawnTime
+      despawnTime: data.despawnTime,
+      source: data.source,  // 'npc', 'base', 'player', or 'derelict'
+      size: data.size,
+      // Origin for derelict spawn animation
+      originX: data.originX,
+      originY: data.originY
     });
   });
 
   socket.on('wreckage:despawn', (data) => {
     Entities.removeWreckage(data.id);
+    // If player was collecting this wreckage, cancel the collection state
+    if (Player.collectingWreckage && Player.collectingWreckage.id === data.id) {
+      Player.onLootCollectionCancelled({ reason: 'Wreckage despawned' });
+    }
   });
 
   socket.on('wreckage:collected', (data) => {
     Entities.removeWreckage(data.wreckageId);
+    // If player was collecting this wreckage (but someone else got it), cancel
+    if (Player.collectingWreckage && Player.collectingWreckage.id === data.wreckageId) {
+      Player.onLootCollectionCancelled({ reason: 'Wreckage collected by another player' });
+    }
   });
 
   // Nearby wreckage response (from loot:getNearby request)
@@ -51,6 +64,12 @@ function register(socket) {
   });
 
   socket.on('loot:complete', (data) => {
+    // Debug: log what we received
+    window.Logger?.category('loot', '[LOOT] loot:complete received:',
+      'wreckageId:', data.wreckageId,
+      'contents:', data.contents?.length || 0,
+      'results:', JSON.stringify(data.results));
+
     // Sounds are now played by RewardDisplay when each resource is displayed
     Player.onLootCollectionComplete(data);
     Entities.removeWreckage(data.wreckageId);
@@ -61,8 +80,8 @@ function register(socket) {
   });
 
   socket.on('loot:error', (data) => {
-    // Silently ignore "No wreckage within range" - not an error, just nothing to collect
-    const silentErrors = ['No wreckage within range'];
+    // Silently ignore common errors - these should fail silently without notification
+    const silentErrors = ['No wreckage within range', 'Too far from wreckage'];
     if (silentErrors.includes(data.message)) {
       // Reset state silently and return - no need to notify user
       if (typeof Player !== 'undefined') {
@@ -71,10 +90,12 @@ function register(socket) {
         Player.collectProgress = 0;
         Player.collectTotalTime = 0;
       }
+      window.Logger.log('[Loot] Error (silent):', data.message);
       return;
     }
 
-    window.Logger.error('Loot error:', data.message);
+    window.Logger.log('[Loot] Error:', data.message);
+    // Only show unexpected errors
     if (typeof NotificationManager !== 'undefined') {
       NotificationManager.error(data.message);
     }

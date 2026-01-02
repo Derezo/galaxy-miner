@@ -1,8 +1,9 @@
 // Galaxy Miner - Rogue Miner AI Strategy
-// NPCs mine asteroids/planets and return hauls to base
+// NPCs mine asteroids/planets/derelicts and return hauls to base
 
 const world = require('../../world');
 const logger = require('../../../shared/logger');
+const derelictModule = require('../derelict');
 
 /**
  * MiningStrategy - Rogue Miners mine resources and return to base
@@ -85,7 +86,9 @@ class MiningStrategy {
       npc.state = 'seeking';
       npc.miningTargetId = target.id;
       npc.miningTargetPos = { x: target.x, y: target.y };
-      // Asteroids are never orbital; planets only orbital if explicitly marked
+      npc.miningTargetSize = target.size || 0; // Track target size for range calculation
+      npc.miningTargetType = target.objectType; // Track type for different behaviors
+      // Asteroids/derelicts are never orbital; planets only orbital if explicitly marked
       npc.miningTargetIsOrbital = target.objectType === 'planet' && target.isOrbital;
       this.claimedTargets.set(target.id, npc.id);
       return this.seekTarget(npc, deltaTime, context);
@@ -98,8 +101,8 @@ class MiningStrategy {
   }
 
   /**
-   * Find a unique asteroid/planet within range of home base
-   * Only targets mining claim objects (IDs containing '_clm') to ensure client-server sync
+   * Find a unique asteroid/planet/derelict within range of home base
+   * Only targets mining claim objects (IDs containing '_clm') or derelicts
    */
   findMiningTarget(npc, context) {
     const homeBase = context.homeBase || npc.homeBasePosition;
@@ -109,7 +112,7 @@ class MiningStrategy {
     const sectorX = Math.floor(homeBase.x / 1000);
     const sectorY = Math.floor(homeBase.y / 1000);
 
-    // Search nearby sectors for mining claim asteroids/planets only
+    // Search nearby sectors for mining claim asteroids/planets and derelicts
     // Mining claim objects have IDs like "ss_X_Y_Z_asteroid_clmNaN" or "ss_X_Y_Z_planet_clmNaN"
     const candidates = [];
     for (let dx = -2; dx <= 2; dx++) {
@@ -138,20 +141,30 @@ class MiningStrategy {
             candidates.push({ ...planet, x: pos.x, y: pos.y, objectType: 'planet', distance: dist });
           }
         }
+
+        // Add derelicts in Graveyard sectors (rogue miners can salvage them)
+        const derelicts = derelictModule.generateDerelictsForSector(sectorX + dx, sectorY + dy);
+        for (const derelict of derelicts) {
+          const dist = this.distanceTo(homeBase, derelict);
+          if (dist <= this.MINING_SEARCH_RANGE && !this.claimedTargets.has(derelict.id)) {
+            candidates.push({
+              ...derelict,
+              objectType: 'derelict',
+              distance: dist
+            });
+          }
+        }
       }
     }
 
     if (candidates.length === 0) {
-      logger.log(`[ROGUE_MINER] ${npc.id} found no mining claim objects within range of base`);
       return null;
     }
 
     // Sort by distance and pick one of the closest
     candidates.sort((a, b) => a.distance - b.distance);
     const pickIndex = Math.floor(Math.random() * Math.min(5, candidates.length));
-    const target = candidates[pickIndex];
-    logger.log(`[ROGUE_MINER] ${npc.id} targeting claim object ${target.id} at ${target.x.toFixed(0)},${target.y.toFixed(0)}`);
-    return target;
+    return candidates[pickIndex];
   }
 
   /**
@@ -192,7 +205,12 @@ class MiningStrategy {
 
     npc.rotation = Math.atan2(dy, dx);
 
-    if (dist > this.MINING_RANGE) {
+    // Calculate effective mining range (from edge of target, not center)
+    // Derelicts are large (size 400-600), so we need to account for their radius
+    const targetSize = npc.miningTargetSize || 0;
+    const effectiveMiningRange = this.MINING_RANGE + (targetSize / 2);
+
+    if (dist > effectiveMiningRange) {
       npc.position.x += (dx / dist) * moveSpeed;
       npc.position.y += (dy / dist) * moveSpeed;
     } else {
@@ -571,6 +589,8 @@ class MiningStrategy {
     }
     npc.miningTargetId = null;
     npc.miningTargetPos = null;
+    npc.miningTargetSize = 0;
+    npc.miningTargetType = null;
     npc.miningTargetIsOrbital = false;
   }
 

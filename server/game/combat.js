@@ -6,6 +6,7 @@ const world = require('../world');
 const logger = require('../../shared/logger');
 const npc = require('./npc');
 const loot = require('./loot');
+const derelict = require('./derelict');
 const Constants = require('../../shared/constants');
 
 // Track weapon cooldowns: playerId -> lastFireTime
@@ -383,6 +384,7 @@ function applyRespawn(userId, respawnType = 'graveyard', targetId = null) {
 
 /**
  * Find a spawn location in The Graveyard safe zone (near origin)
+ * Avoids spawning inside derelict ships
  * @returns {Object} { x, y } spawn position in The Graveyard
  */
 function findGraveyardSpawnLocation() {
@@ -392,14 +394,40 @@ function findGraveyardSpawnLocation() {
   const sectorSize = config.SECTOR_SIZE || 1000;
   const graveyardRadius = sectorSize * 0.5; // Stay within ~500 units of origin
 
-  // Add random offset to avoid all players spawning on exact same spot
-  const angle = Math.random() * Math.PI * 2;
-  const distance = Math.random() * graveyardRadius;
+  // Get derelicts near origin to avoid spawning inside them
+  const nearbyDerelicts = derelict.getDerelictsInRange({ x: 0, y: 0 }, graveyardRadius * 2);
+  const maxAttempts = 10;
 
-  return {
-    x: Math.cos(angle) * distance,
-    y: Math.sin(angle) * distance
-  };
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    // Add random offset to avoid all players spawning on exact same spot
+    const angle = Math.random() * Math.PI * 2;
+    const distance = Math.random() * graveyardRadius;
+    const x = Math.cos(angle) * distance;
+    const y = Math.sin(angle) * distance;
+
+    // Check if this position is too close to any derelict
+    let tooClose = false;
+    for (const d of nearbyDerelicts) {
+      const dx = x - d.x;
+      const dy = y - d.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      // Keep minimum distance of derelict size + 100 units buffer
+      const minDist = (d.size || 400) * 0.6 + 100;
+      if (dist < minDist) {
+        tooClose = true;
+        break;
+      }
+    }
+
+    if (!tooClose) {
+      return { x, y };
+    }
+  }
+
+  // Fallback: If all attempts failed, spawn at a safe offset from origin
+  // This ensures player is not stuck in a derelict
+  logger.warn('[COMBAT] Could not find clear spawn location, using fallback');
+  return { x: graveyardRadius * 0.8, y: 0 };
 }
 
 /**

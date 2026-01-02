@@ -245,7 +245,12 @@ function register(ctx) {
     const collectSpeed = siphonEffects.wreckageCollectionSpeed || 0.5;
 
     // Find nearest wreckage within multi-collect range
-    const nearbyWreckage = engine.getWreckageInRange(player.position, multiRange);
+    // Exclude derelict salvage - it must be collected manually with tractor beam
+    const allNearbyWreckage = engine.getWreckageInRange(player.position, multiRange);
+    logger.log('[SIPHON] All nearby wreckage:', allNearbyWreckage.map(w => `${w.id}(source:${w.source})`).join(', '));
+
+    const nearbyWreckage = allNearbyWreckage.filter(w => w.source !== 'derelict');
+    logger.log('[SIPHON] After filtering derelict:', nearbyWreckage.map(w => `${w.id}(source:${w.source})`).join(', '));
 
     if (nearbyWreckage.length === 0) {
       socket.emit('loot:error', { message: 'No wreckage within range' });

@@ -1777,34 +1777,8 @@ const Network = {
       HUD.updateLatency(latency);
     });
 
-    // Wreckage events
-    this.socket.on('wreckage:spawn', (data) => {
-      Entities.updateWreckage({
-        id: data.id,
-        x: data.x,
-        y: data.y,
-        faction: data.faction,
-        npcName: data.npcName,
-        contentCount: data.contentCount,
-        despawnTime: data.despawnTime
-      });
-    });
-
-    this.socket.on('wreckage:despawn', (data) => {
-      Entities.removeWreckage(data.id);
-      // If player was collecting this wreckage, cancel the collection state
-      if (Player.collectingWreckage && Player.collectingWreckage.id === data.id) {
-        Player.onLootCollectionCancelled({ reason: 'Wreckage despawned' });
-      }
-    });
-
-    this.socket.on('wreckage:collected', (data) => {
-      Entities.removeWreckage(data.wreckageId);
-      // If player was collecting this wreckage (but someone else got it), cancel
-      if (Player.collectingWreckage && Player.collectingWreckage.id === data.wreckageId) {
-        Player.onLootCollectionCancelled({ reason: 'Wreckage collected by another player' });
-      }
-    });
+    // Wreckage events - handled in /client/js/network/loot.js
+    // (wreckage:spawn, wreckage:despawn, wreckage:collected)
 
     // Loot collection events - handled in /client/js/network/loot.js
     // (loot:started, loot:progress, loot:complete, loot:cancelled,

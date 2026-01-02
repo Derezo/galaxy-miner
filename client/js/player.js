@@ -376,9 +376,13 @@ const Player = {
       }
     }
 
-    // Update UI hint
+    // Update UI hint - only show if no higher-priority interaction available
+    // Priority: Wormhole > Plunder > Derelict > Mining
     const hint = document.getElementById('mining-hint');
-    if (nearestMineable && !this.miningTarget) {
+    const hasHigherPriority = this._nearestDerelict ||
+      (this._nearestWormhole && this.hasRelic('WORMHOLE_GEM')) ||
+      (this._nearestBase && this.hasRelic('SKULL_AND_BONES'));
+    if (nearestMineable && !this.miningTarget && !hasHigherPriority) {
       hint.classList.remove('hidden');
     } else {
       hint.classList.add('hidden');
@@ -611,28 +615,14 @@ const Player = {
   },
 
   onMiningError(data) {
-    // Debug logging for mining errors
-    Logger.error('[Mining Debug] Error received:', {
-      message: data.message,
-      serverRejectedObjectId: data.objectId,
-      clientTargetWas: this.miningTarget ? {
-        id: this.miningTarget.id,
-        pos: { x: Math.round(this.miningTarget.x), y: Math.round(this.miningTarget.y) },
-        isOrbital: this.miningTarget.isOrbital,
-        starId: this.miningTarget.starId
-      } : null,
-      idsMatch: this.miningTarget ? (this.miningTarget.id === data.objectId) : 'no target',
-      playerPos: { x: Math.round(this.position.x), y: Math.round(this.position.y) },
-      playerSector: {
-        x: Math.floor(this.position.x / CONSTANTS.SECTOR_SIZE),
-        y: Math.floor(this.position.y / CONSTANTS.SECTOR_SIZE)
-      }
-    });
+    // Debug logging for mining errors - suppressed from user view
+    // Common errors like "Object not found" and "Too far from resource" should fail silently
+    Logger.log('[Mining] Error (silent):', data.message);
 
     this.miningTarget = null;
     this.miningProgress = 0;
     this.miningConfirmed = false;
-    NotificationManager.error(data.message);
+    // Don't show notification - these errors should fail silently
   },
 
   onDamaged(data) {
@@ -755,7 +745,16 @@ const Player = {
       return;
     }
 
-    // Scrap Siphon multi-collect
+    // Check if there's any non-derelict wreckage in siphon range
+    // Derelict salvage must be collected manually with tractor beam
+    const siphonRange = CONSTANTS.RELIC_TYPES?.SCRAP_SIPHON?.effects?.multiWreckageRange || 300;
+    if (!Entities.hasNonDerelictWreckageInRange(this.position, siphonRange)) {
+      // No siphon-eligible wreckage - fall back to tractor beam collection
+      this.tryCollectWreckage();
+      return;
+    }
+
+    // Scrap Siphon multi-collect (only non-derelict wreckage)
     this.multiCollecting = true;
     this.collectProgress = 0;
     Network.sendMultiCollect();

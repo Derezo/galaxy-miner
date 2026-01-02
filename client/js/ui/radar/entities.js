@@ -7,6 +7,9 @@ const RadarEntities = {
     // Note: Bases are now drawn from world data in RadarObjects
     // Entities.bases is used for server-side health/damage tracking only
 
+    // Draw derelicts (ancient ships in The Graveyard)
+    this.drawDerelicts(ctx, center, scale, radarRange, playerPos);
+
     // Draw NPCs
     this.drawNPCs(ctx, center, scale, radarRange, radarTier, playerPos);
 
@@ -377,6 +380,63 @@ const RadarEntities = {
       }
 
       // Reset opacity
+      ctx.globalAlpha = 1;
+    }
+  },
+
+  // Draw derelict ships (ancient vessels in The Graveyard)
+  // Always visible regardless of radar tier - dark gray trapezoid with light gray border
+  drawDerelicts(ctx, center, scale, radarRange, playerPos) {
+    if (typeof DerelictRenderer === 'undefined' || !DerelictRenderer.derelicts) return;
+    if (DerelictRenderer.derelicts.size === 0) return;
+
+    for (const [id, derelict] of DerelictRenderer.derelicts) {
+      const distance = RadarBaseRenderer.getDistance(
+        derelict.x, derelict.y,
+        playerPos.x, playerPos.y
+      );
+
+      if (!RadarBaseRenderer.isInRange(distance, radarRange)) continue;
+
+      // Calculate edge fade opacity for smooth transitions
+      const edgeOpacity = RadarBaseRenderer.getEdgeOpacity(distance, radarRange);
+      if (edgeOpacity <= 0) continue;
+
+      const pos = RadarBaseRenderer.worldToRadar(
+        derelict.x, derelict.y,
+        playerPos.x, playerPos.y,
+        center, scale
+      );
+
+      ctx.globalAlpha = edgeOpacity;
+
+      // Draw trapezoid shape (wider at top, narrower at bottom)
+      // Size scales with derelict size (400-600 units) - show as 8-12 pixel icons
+      const size = Math.max(8, Math.min(12, (derelict.size || 400) / 50));
+      const rotation = derelict.rotation || 0;
+
+      ctx.save();
+      ctx.translate(pos.x, pos.y);
+      ctx.rotate(rotation);
+
+      // Trapezoid path - wider at front (right side), narrower at back
+      ctx.beginPath();
+      ctx.moveTo(size * 0.5, -size * 0.3);   // Front top
+      ctx.lineTo(size * 0.5, size * 0.3);    // Front bottom
+      ctx.lineTo(-size * 0.5, size * 0.2);   // Back bottom
+      ctx.lineTo(-size * 0.5, -size * 0.2);  // Back top
+      ctx.closePath();
+
+      // Fill with dark gray
+      ctx.fillStyle = '#3a3a3a';
+      ctx.fill();
+
+      // Light gray border
+      ctx.strokeStyle = '#888888';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+
+      ctx.restore();
       ctx.globalAlpha = 1;
     }
   },

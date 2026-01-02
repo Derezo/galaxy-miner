@@ -268,6 +268,9 @@ function generateSectorFromStarSystem(sectorX, sectorY) {
   // Generate derelicts for Graveyard sectors
   sector.derelicts = derelictModule.generateDerelictsForSector(sectorX, sectorY);
 
+  // Generate guaranteed friendly bases in Graveyard zone
+  generateGraveyardBases(sector, sectorX, sectorY, rng);
+
   // Cache management
   if (sectorCache.size >= MAX_CACHED_SECTORS) {
     const firstKey = sectorCache.keys().next().value;
@@ -355,6 +358,90 @@ function generateDeepSpaceContent(sector, sectorX, sectorY, rng) {
       isDeepSpace: true,
       isOrbital: false
     });
+  }
+}
+
+// Cache for guaranteed Graveyard bases (persists across sector regenerations)
+const graveyardBasesCache = new Map();
+let graveyardBasesGenerated = false;
+
+// Generate guaranteed friendly bases in Graveyard zone
+// These are placed once across all Graveyard sectors to ensure minimum counts
+function generateGraveyardBases(sector, sectorX, sectorY, rng) {
+  // Only process Graveyard sectors
+  if (!isGraveyardSector(sectorX, sectorY)) return;
+
+  const graveyardConfig = config.GRAVEYARD_ZONE;
+  const guaranteedBases = graveyardConfig?.GUARANTEED_BASES;
+  if (!guaranteedBases) return;
+
+  // Generate all Graveyard bases once (deterministic positions)
+  if (!graveyardBasesGenerated) {
+    const graveyardRng = seededRandom(hash(config.GALAXY_SEED, 'graveyard', 'bases'));
+    const sectorSize = config.SECTOR_SIZE || 1000;
+
+    // Get all Graveyard sector coordinates
+    const graveyardSectors = [];
+    for (let sx = graveyardConfig.MIN_SECTOR_X; sx <= graveyardConfig.MAX_SECTOR_X; sx++) {
+      for (let sy = graveyardConfig.MIN_SECTOR_Y; sy <= graveyardConfig.MAX_SECTOR_Y; sy++) {
+        graveyardSectors.push({ x: sx, y: sy });
+      }
+    }
+
+    // Generate bases for each type
+    for (const [baseType, count] of Object.entries(guaranteedBases)) {
+      const hubConfig = config.SPAWN_HUB_TYPES?.[baseType];
+      if (!hubConfig) continue;
+
+      for (let i = 0; i < count; i++) {
+        // Pick a random sector from the Graveyard
+        const sectorIdx = Math.floor(graveyardRng() * graveyardSectors.length);
+        const targetSector = graveyardSectors[sectorIdx];
+
+        // Generate position within that sector
+        const size = hubConfig.size || 100;
+        const sectorMinX = targetSector.x * sectorSize;
+        const sectorMinY = targetSector.y * sectorSize;
+        const x = sectorMinX + size + graveyardRng() * (sectorSize - size * 2);
+        const y = sectorMinY + size + graveyardRng() * (sectorSize - size * 2);
+
+        const baseId = `graveyard_${baseType}_${i}`;
+        const base = {
+          id: baseId,
+          x, y, size,
+          type: baseType,
+          faction: hubConfig.faction,
+          name: `${hubConfig.name} ${i + 1}`,
+          health: hubConfig.health,
+          maxHealth: hubConfig.health,
+          patrolRadius: hubConfig.patrolRadius || 3,
+          isGraveyardBase: true
+        };
+
+        // Store in cache keyed by sector
+        const cacheKey = `${targetSector.x}_${targetSector.y}`;
+        if (!graveyardBasesCache.has(cacheKey)) {
+          graveyardBasesCache.set(cacheKey, []);
+        }
+        graveyardBasesCache.get(cacheKey).push(base);
+
+        logger.log(`[WORLD] Generated guaranteed ${baseType} at sector (${targetSector.x}, ${targetSector.y}): ${base.name}`);
+      }
+    }
+
+    graveyardBasesGenerated = true;
+  }
+
+  // Add cached bases for this sector
+  const cacheKey = `${sectorX}_${sectorY}`;
+  const basesForSector = graveyardBasesCache.get(cacheKey);
+  if (basesForSector) {
+    for (const base of basesForSector) {
+      // Check if base already exists (avoid duplicates)
+      if (!sector.bases.find(b => b.id === base.id)) {
+        sector.bases.push(base);
+      }
+    }
   }
 }
 

@@ -124,8 +124,10 @@ function startCollection(wreckageId, playerId) {
       totalTime += 1000; // Default 1 second
     }
   }
-  // Ensure minimum collection time
-  wreckage.totalCollectionTime = Math.max(totalTime, 500);
+  // Derelict salvage requires minimum 3 seconds (for tractor beam visibility)
+  // Regular wreckage has minimum 500ms
+  const minTime = wreckage.source === 'derelict' ? 3000 : 500;
+  wreckage.totalCollectionTime = Math.max(totalTime, minTime);
 
   return { success: true, totalTime: wreckage.totalCollectionTime };
 }

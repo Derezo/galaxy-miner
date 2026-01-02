@@ -37,7 +37,11 @@ const DerelictRenderer = {
     alienGlow: '#00ffaa',       // Alien tech residue glow (teal)
     alienGlowDim: '#004433',    // Dim alien glow
     spark: '#ffffff',           // Electrical sparks
-    sparkCore: '#88ddff'        // Spark core color
+    sparkCore: '#88ddff',       // Spark core color
+    // Pre-computed RGB values for colors that need alpha blending
+    sparkCoreRGB: { r: 136, g: 221, b: 255 },
+    alienGlowDimRGB: { r: 0, g: 68, b: 51 },
+    interiorGlowRGB: { r: 51, g: 10, b: 10 }
   },
 
   // Ship type configurations (5 variants)
@@ -214,17 +218,36 @@ const DerelictRenderer = {
       // Draw electrical sparks
       this.drawSparks(ctx, derelict, screenX, screenY);
 
-      // Draw cooldown indicator if on cooldown
-      if (derelict.onCooldown) {
-        this.drawCooldownIndicator(ctx, derelict, screenX, screenY);
-      }
+      // Note: Cooldown visuals removed - derelicts should look the same regardless
+      // of cooldown state. Players can always attempt salvage and will silently fail
+      // if on cooldown.
 
-      // Draw interaction prompt if player is close enough
+      // Note: Interaction prompts are drawn separately via drawPrompts() to ensure
+      // they appear on top of all entities (ships, NPCs, etc.)
+    }
+  },
+
+  /**
+   * Draw interaction prompts on top of all entities
+   * Called separately after entities are drawn to ensure proper z-order
+   * @param {CanvasRenderingContext2D} ctx
+   * @param {Object} camera - Camera position { x, y }
+   * @param {Object} playerPosition - Player world position
+   */
+  drawPrompts(ctx, camera, playerPosition) {
+    if (!playerPosition) return;
+
+    const interactionRange = CONSTANTS.DERELICT_CONFIG?.INTERACTION_RANGE || 100;
+
+    for (const [id, derelict] of this.derelicts) {
+      const screenX = derelict.x - camera.x + ctx.canvas.width / 2;
+      const screenY = derelict.y - camera.y + ctx.canvas.height / 2;
+
+      // Check if player is close enough for interaction
       const dx = derelict.x - playerPosition.x;
       const dy = derelict.y - playerPosition.y;
       const distance = Math.sqrt(dx * dx + dy * dy);
       const effectiveDistance = distance - (derelict.size / 2);
-      const interactionRange = CONSTANTS.DERELICT_CONFIG?.INTERACTION_RANGE || 100;
 
       if (effectiveDistance <= interactionRange && !derelict.onCooldown) {
         this.drawInteractionPrompt(ctx, derelict, screenX, screenY);
@@ -242,11 +265,12 @@ const DerelictRenderer = {
     const shipType = this.SHIP_TYPES[derelict.shipType] || this.SHIP_TYPES[1];
     const time = this.animationTime;
 
-    // Outer glow (alien residue)
-    const glowSize = size * 1.1;
+    // Outer glow (alien residue) - reduced 10% for performance
+    const glowSize = size * 0.99;
     const glowGradient = ctx.createRadialGradient(0, 0, size * 0.3, 0, 0, glowSize);
     glowGradient.addColorStop(0, 'transparent');
-    glowGradient.addColorStop(0.6, this.COLORS.alienGlowDim + '20');
+    const glowRgb = this.COLORS.alienGlowDimRGB;
+    glowGradient.addColorStop(0.6, `rgba(${glowRgb.r}, ${glowRgb.g}, ${glowRgb.b}, 0.13)`);
     glowGradient.addColorStop(1, 'transparent');
     ctx.fillStyle = glowGradient;
     ctx.beginPath();
@@ -371,7 +395,8 @@ const DerelictRenderer = {
       -hullLength * 0.05, hullWidth * 0.25, 0,
       -hullLength * 0.05, hullWidth * 0.25, hullLength * 0.1
     );
-    interiorGlow.addColorStop(0, this.COLORS.interiorGlow + '60');
+    const intRgb = this.COLORS.interiorGlowRGB;
+    interiorGlow.addColorStop(0, `rgba(${intRgb.r}, ${intRgb.g}, ${intRgb.b}, 0.38)`);
     interiorGlow.addColorStop(1, 'transparent');
     ctx.fillStyle = interiorGlow;
     ctx.fill();
@@ -694,13 +719,17 @@ const DerelictRenderer = {
     for (const spark of sparkState.sparks) {
       const x = screenX + spark.x;
       const y = screenY + spark.y;
-      const alpha = spark.life / spark.maxLife;
+      const rawAlpha = spark.life / spark.maxLife;
+      // Guard against NaN/Infinity from invalid spark data
+      const alpha = (isFinite(rawAlpha) && rawAlpha > 0) ? rawAlpha : 0;
+      if (alpha <= 0) continue; // Skip invalid sparks
       const size = 15 * alpha;
 
       // Spark glow
       const gradient = ctx.createRadialGradient(x, y, 0, x, y, size);
       gradient.addColorStop(0, this.COLORS.spark);
-      gradient.addColorStop(0.3, this.COLORS.sparkCore + Math.floor(alpha * 200).toString(16).padStart(2, '0'));
+      const rgb = this.COLORS.sparkCoreRGB;
+      gradient.addColorStop(0.3, `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${(alpha * 0.8).toFixed(2)})`);
       gradient.addColorStop(1, 'transparent');
       ctx.fillStyle = gradient;
       ctx.beginPath();

@@ -1069,6 +1069,16 @@ const Renderer = {
       unknown: "#888888",
     };
 
+    // Derelict salvage colors (matches derelict ship aesthetic)
+    const DERELICT_COLORS = {
+      hull: "#4a5568",       // Dark gray hull plates
+      accent: "#718096",     // Lighter gray accent
+      rust: "#8b6914",       // Rust/corrosion spots
+      glow: "#2d3748",       // Dim glow
+      gear: "#a0aec0",       // Light gray gears
+      gearDark: "#4a5568",   // Darker gear parts
+    };
+
     // Scrap Siphon copper color
     const SIPHON_COPPER = "#B87333";
     const SIPHON_COPPER_GLOW = "#CD7F32";
@@ -1084,12 +1094,49 @@ const Renderer = {
       // Check if this wreckage is being siphoned
       const siphonState = Entities.getSiphonAnimationState(id);
       const isSiphoning = siphonState !== null;
+      const isDerelict = wreckage.source === 'derelict';
 
       // Calculate position - interpolate toward player if siphoning
       let drawX = wreckage.position.x;
       let drawY = wreckage.position.y;
       let siphonAlpha = 1.0;
       let siphonScale = 1.0;
+      let spawnScale = 1.0;
+      let spawnRotation = 0;
+
+      // Spawn animation for derelict wreckage (slide from origin with spin and scale)
+      const spawnAnim = wreckage.spawnAnimation;
+      if (spawnAnim) {
+        const elapsed = now - spawnAnim.startTime;
+        const progress = Math.min(1, elapsed / spawnAnim.duration);
+
+        if (progress < 1) {
+          // Ease-out cubic for smooth deceleration
+          const eased = 1 - Math.pow(1 - progress, 3);
+
+          // Interpolate position from origin to destination
+          drawX = spawnAnim.originX + (spawnAnim.destX - spawnAnim.originX) * eased;
+          drawY = spawnAnim.originY + (spawnAnim.destY - spawnAnim.originY) * eased;
+
+          // Scale up from tiny to full size
+          spawnScale = 0.1 + 0.9 * eased;
+
+          // Spin during animation
+          spawnRotation = spawnAnim.startRotation + spawnAnim.spinAmount * eased;
+
+          // Debug: log animation progress at key points
+          if (progress < 0.05 || (progress > 0.48 && progress < 0.52)) {
+            window.Logger?.category('loot', '[WRECKAGE] Spawn anim:', id.slice(-8),
+              'progress:', (progress * 100).toFixed(0) + '%',
+              'scale:', spawnScale.toFixed(2),
+              'pos:', drawX.toFixed(0), drawY.toFixed(0)
+            );
+          }
+        } else {
+          // Animation complete, clear it
+          wreckage.spawnAnimation = null;
+        }
+      }
 
       if (isSiphoning) {
         const progress = siphonState.progress;
@@ -1115,12 +1162,12 @@ const Renderer = {
         siphonScale = 1 - (progress * 0.5);
       }
 
-      if (!this.isOnScreen(drawX, drawY, 50))
+      if (!this.isOnScreen(drawX, drawY, 60))
         continue;
 
       const screen = this.worldToScreen(drawX, drawY);
-      const baseColor = FACTION_COLORS[wreckage.faction] || FACTION_COLORS.unknown;
-      // Use copper color when siphoning, otherwise faction color
+      const baseColor = isDerelict ? DERELICT_COLORS.hull : (FACTION_COLORS[wreckage.faction] || FACTION_COLORS.unknown);
+      // Use copper color when siphoning, otherwise faction/derelict color
       const color = isSiphoning ? SIPHON_COPPER : baseColor;
 
       // Calculate despawn fade effect (only when not siphoning)
@@ -1140,82 +1187,258 @@ const Renderer = {
       // Combine alphas
       const finalAlpha = despawnAlpha * siphonAlpha;
 
+      // Combine scales (spawn animation and siphon)
+      const totalScale = spawnScale * siphonScale;
+
+      // Use spawn rotation during animation, otherwise normal rotation
+      const drawRotation = spawnAnim ? spawnRotation : wreckage.rotation;
+
       ctx.save();
       ctx.translate(screen.x, screen.y);
-      ctx.rotate(wreckage.rotation);
-      ctx.scale(siphonScale, siphonScale);
+      ctx.rotate(drawRotation);
+      ctx.scale(totalScale, totalScale);
 
-      // Draw debris pieces (3-5 scattered pieces)
-      const pieceCount = 3 + (wreckage.contentCount % 3);
-      const baseSize = 8;
-
-      for (let i = 0; i < pieceCount; i++) {
-        const angle = (i / pieceCount) * Math.PI * 2;
-        const dist = 5 + (i % 2) * 5;
-        const px = Math.cos(angle) * dist;
-        const py = Math.sin(angle) * dist;
-        const size = baseSize - (i % 3) * 2;
-
-        // Draw piece
-        ctx.fillStyle = color;
-        ctx.globalAlpha = 0.8 * finalAlpha;
-        ctx.beginPath();
-        ctx.moveTo(px, py - size);
-        ctx.lineTo(px + size * 0.8, py + size * 0.5);
-        ctx.lineTo(px - size * 0.8, py + size * 0.5);
-        ctx.closePath();
-        ctx.fill();
-
-        // Outline - copper glow when siphoning
-        ctx.strokeStyle = isSiphoning ? SIPHON_COPPER_GLOW : "#ffffff";
-        ctx.lineWidth = isSiphoning ? 2 : 1;
-        ctx.globalAlpha = (isSiphoning ? 0.9 : 0.5) * finalAlpha;
-        ctx.stroke();
-      }
-
-      // Pulsing glow - enhanced copper glow when siphoning
-      const pulsePhase = (now / (isSiphoning ? 150 : 500)) % (Math.PI * 2);
-      const pulseIntensity = isSiphoning
-        ? 0.6 + Math.sin(pulsePhase) * 0.3  // Stronger pulse when siphoning
-        : 0.3 + Math.sin(pulsePhase) * 0.2;
-      const glowRadius = (20 + wreckage.contentCount * 2) * (isSiphoning ? 1.5 : 1);
-
-      const gradient = ctx.createRadialGradient(0, 0, 0, 0, 0, glowRadius);
-      if (isSiphoning) {
-        gradient.addColorStop(0, SIPHON_COPPER_GLOW + "aa");
-        gradient.addColorStop(0.5, SIPHON_COPPER + "66");
-        gradient.addColorStop(1, "transparent");
+      if (isDerelict) {
+        // Draw derelict-style hull plate debris
+        this._drawDerelictWreckage(ctx, wreckage, now, finalAlpha, isSiphoning);
       } else {
-        gradient.addColorStop(0, color + "66");
-        gradient.addColorStop(1, "transparent");
-      }
+        // Draw standard faction wreckage (triangular debris)
+        const pieceCount = 3 + (wreckage.contentCount % 3);
+        const baseSize = 8;
 
-      ctx.globalAlpha = pulseIntensity * finalAlpha;
-      ctx.fillStyle = gradient;
-      ctx.beginPath();
-      ctx.arc(0, 0, glowRadius, 0, Math.PI * 2);
-      ctx.fill();
+        for (let i = 0; i < pieceCount; i++) {
+          const angle = (i / pieceCount) * Math.PI * 2;
+          const dist = 5 + (i % 2) * 5;
+          const px = Math.cos(angle) * dist;
+          const py = Math.sin(angle) * dist;
+          const size = baseSize - (i % 3) * 2;
+
+          // Draw piece
+          ctx.fillStyle = color;
+          ctx.globalAlpha = 0.8 * finalAlpha;
+          ctx.beginPath();
+          ctx.moveTo(px, py - size);
+          ctx.lineTo(px + size * 0.8, py + size * 0.5);
+          ctx.lineTo(px - size * 0.8, py + size * 0.5);
+          ctx.closePath();
+          ctx.fill();
+
+          // Outline - copper glow when siphoning
+          ctx.strokeStyle = isSiphoning ? SIPHON_COPPER_GLOW : "#ffffff";
+          ctx.lineWidth = isSiphoning ? 2 : 1;
+          ctx.globalAlpha = (isSiphoning ? 0.9 : 0.5) * finalAlpha;
+          ctx.stroke();
+        }
+
+        // Pulsing glow - enhanced copper glow when siphoning
+        const pulsePhase = (now / (isSiphoning ? 150 : 500)) % (Math.PI * 2);
+        const pulseIntensity = isSiphoning
+          ? 0.6 + Math.sin(pulsePhase) * 0.3
+          : 0.3 + Math.sin(pulsePhase) * 0.2;
+        const glowRadius = (20 + wreckage.contentCount * 2) * (isSiphoning ? 1.5 : 1);
+
+        const gradient = ctx.createRadialGradient(0, 0, 0, 0, 0, glowRadius);
+        if (isSiphoning) {
+          gradient.addColorStop(0, SIPHON_COPPER_GLOW + "aa");
+          gradient.addColorStop(0.5, SIPHON_COPPER + "66");
+          gradient.addColorStop(1, "transparent");
+        } else {
+          gradient.addColorStop(0, color + "66");
+          gradient.addColorStop(1, "transparent");
+        }
+
+        ctx.globalAlpha = pulseIntensity * finalAlpha;
+        ctx.fillStyle = gradient;
+        ctx.beginPath();
+        ctx.arc(0, 0, glowRadius, 0, Math.PI * 2);
+        ctx.fill();
+      }
 
       ctx.restore();
 
-      // Draw label below wreckage (skip when siphoning far along)
-      if (!isSiphoning || siphonState.progress < 0.5) {
+      // Draw label below wreckage (skip when siphoning far along or during spawn animation)
+      const showLabel = (!isSiphoning || siphonState.progress < 0.5) && !spawnAnim;
+      if (showLabel) {
         ctx.globalAlpha = 0.8 * finalAlpha;
         ctx.fillStyle = isSiphoning ? SIPHON_COPPER : baseColor;
         ctx.font = "10px monospace";
         ctx.textAlign = "center";
-        ctx.fillText(wreckage.npcName || "Wreckage", screen.x, screen.y + 25 * siphonScale);
+        ctx.fillText(wreckage.npcName || "Wreckage", screen.x, screen.y + 30 * totalScale);
 
         // Draw loot count indicator
         if (wreckage.contentCount > 0) {
           ctx.fillStyle = isSiphoning ? SIPHON_COPPER_GLOW : "#ffffff";
           ctx.font = "bold 8px monospace";
-          ctx.fillText(`x${wreckage.contentCount}`, screen.x, screen.y + 35 * siphonScale);
+          ctx.fillText(`x${wreckage.contentCount}`, screen.x, screen.y + 40 * totalScale);
         }
       }
 
       ctx.globalAlpha = 1;
     }
+  },
+
+  // Draw derelict-style wreckage with hull plates and floating gears
+  _drawDerelictWreckage(ctx, wreckage, now, alpha, isSiphoning) {
+    const DERELICT_COLORS = {
+      hull: "#4a5568",
+      accent: "#718096",
+      rust: "#8b6914",
+      glow: "#2d3748",
+      gear: "#a0aec0",
+      gearDark: "#4a5568",
+    };
+
+    // Draw 3-4 hull plate debris pieces (irregular quadrilaterals)
+    const plateCount = 3 + (wreckage.contentCount > 2 ? 1 : 0);
+
+    for (let i = 0; i < plateCount; i++) {
+      const baseAngle = (i / plateCount) * Math.PI * 2;
+      const dist = 8 + (i % 2) * 6;
+      const px = Math.cos(baseAngle) * dist;
+      const py = Math.sin(baseAngle) * dist;
+      const plateSize = 10 + (i % 2) * 4;
+      const plateRotation = baseAngle + (i * 0.5);
+
+      ctx.save();
+      ctx.translate(px, py);
+      ctx.rotate(plateRotation);
+
+      // Draw hull plate (irregular quadrilateral)
+      ctx.fillStyle = DERELICT_COLORS.hull;
+      ctx.globalAlpha = 0.9 * alpha;
+      ctx.beginPath();
+      ctx.moveTo(-plateSize * 0.6, -plateSize * 0.4);
+      ctx.lineTo(plateSize * 0.5, -plateSize * 0.5);
+      ctx.lineTo(plateSize * 0.7, plateSize * 0.3);
+      ctx.lineTo(-plateSize * 0.4, plateSize * 0.5);
+      ctx.closePath();
+      ctx.fill();
+
+      // Accent line (panel seam)
+      ctx.strokeStyle = DERELICT_COLORS.accent;
+      ctx.lineWidth = 1;
+      ctx.globalAlpha = 0.6 * alpha;
+      ctx.beginPath();
+      ctx.moveTo(-plateSize * 0.3, -plateSize * 0.2);
+      ctx.lineTo(plateSize * 0.4, plateSize * 0.1);
+      ctx.stroke();
+
+      // Rust spot on some plates
+      if (i % 2 === 0) {
+        ctx.fillStyle = DERELICT_COLORS.rust;
+        ctx.globalAlpha = 0.4 * alpha;
+        ctx.beginPath();
+        ctx.arc(plateSize * 0.2, -plateSize * 0.1, plateSize * 0.15, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      // Outline
+      ctx.strokeStyle = isSiphoning ? "#CD7F32" : DERELICT_COLORS.accent;
+      ctx.lineWidth = isSiphoning ? 2 : 1;
+      ctx.globalAlpha = 0.7 * alpha;
+      ctx.beginPath();
+      ctx.moveTo(-plateSize * 0.6, -plateSize * 0.4);
+      ctx.lineTo(plateSize * 0.5, -plateSize * 0.5);
+      ctx.lineTo(plateSize * 0.7, plateSize * 0.3);
+      ctx.lineTo(-plateSize * 0.4, plateSize * 0.5);
+      ctx.closePath();
+      ctx.stroke();
+
+      ctx.restore();
+    }
+
+    // Draw orbiting gears
+    if (wreckage.gears) {
+      const time = now / 1000;
+      for (const gear of wreckage.gears) {
+        const orbitAngle = gear.orbitPhase + time * gear.orbitSpeed;
+        const gx = Math.cos(orbitAngle) * gear.orbitRadius;
+        const gy = Math.sin(orbitAngle) * gear.orbitRadius;
+        const spinAngle = gear.spinPhase + time * gear.spinSpeed;
+
+        ctx.save();
+        ctx.translate(gx, gy);
+        ctx.rotate(spinAngle);
+
+        // Draw gear
+        this._drawGear(ctx, gear.size, gear.teeth, DERELICT_COLORS, alpha);
+
+        ctx.restore();
+      }
+    }
+
+    // Subtle dark glow for derelict wreckage
+    const pulsePhase = (now / 800) % (Math.PI * 2);
+    const pulseIntensity = 0.2 + Math.sin(pulsePhase) * 0.1;
+    const glowRadius = 25;
+
+    const gradient = ctx.createRadialGradient(0, 0, 0, 0, 0, glowRadius);
+    gradient.addColorStop(0, DERELICT_COLORS.glow + "44");
+    gradient.addColorStop(0.6, DERELICT_COLORS.hull + "22");
+    gradient.addColorStop(1, "transparent");
+
+    ctx.globalAlpha = pulseIntensity * alpha;
+    ctx.fillStyle = gradient;
+    ctx.beginPath();
+    ctx.arc(0, 0, glowRadius, 0, Math.PI * 2);
+    ctx.fill();
+  },
+
+  // Draw a small gear shape
+  _drawGear(ctx, size, teeth, colors, alpha) {
+    const innerRadius = size * 0.4;
+    const outerRadius = size;
+    const toothDepth = size * 0.3;
+
+    ctx.beginPath();
+    for (let i = 0; i < teeth; i++) {
+      const angle1 = (i / teeth) * Math.PI * 2;
+      const angle2 = ((i + 0.3) / teeth) * Math.PI * 2;
+      const angle3 = ((i + 0.5) / teeth) * Math.PI * 2;
+      const angle4 = ((i + 0.7) / teeth) * Math.PI * 2;
+
+      if (i === 0) {
+        ctx.moveTo(
+          Math.cos(angle1) * outerRadius,
+          Math.sin(angle1) * outerRadius
+        );
+      }
+      ctx.lineTo(
+        Math.cos(angle2) * outerRadius,
+        Math.sin(angle2) * outerRadius
+      );
+      ctx.lineTo(
+        Math.cos(angle3) * (outerRadius - toothDepth),
+        Math.sin(angle3) * (outerRadius - toothDepth)
+      );
+      ctx.lineTo(
+        Math.cos(angle4) * (outerRadius - toothDepth),
+        Math.sin(angle4) * (outerRadius - toothDepth)
+      );
+      ctx.lineTo(
+        Math.cos(((i + 1) / teeth) * Math.PI * 2) * outerRadius,
+        Math.sin(((i + 1) / teeth) * Math.PI * 2) * outerRadius
+      );
+    }
+    ctx.closePath();
+
+    // Fill gear
+    ctx.fillStyle = colors.gear;
+    ctx.globalAlpha = 0.9 * alpha;
+    ctx.fill();
+
+    // Gear outline
+    ctx.strokeStyle = colors.gearDark;
+    ctx.lineWidth = 0.5;
+    ctx.globalAlpha = 0.7 * alpha;
+    ctx.stroke();
+
+    // Center hole
+    ctx.beginPath();
+    ctx.arc(0, 0, innerRadius, 0, Math.PI * 2);
+    ctx.fillStyle = colors.gearDark;
+    ctx.globalAlpha = 0.8 * alpha;
+    ctx.fill();
   },
 
   // Draw collection progress bar for wreckage
@@ -1601,6 +1824,11 @@ const Renderer = {
     // Draw floating text (damage numbers, "Invulnerable" text, etc.)
     if (typeof FloatingTextSystem !== "undefined") {
       FloatingTextSystem.draw(ctx, this.camera);
+    }
+
+    // Draw derelict interaction prompts on top of all entities
+    if (typeof DerelictRenderer !== "undefined" && typeof Player !== "undefined") {
+      DerelictRenderer.drawPrompts(ctx, this.camera, Player.position);
     }
 
     // Draw legacy effects

@@ -73,9 +73,9 @@ describe('Derelict System', () => {
         expect(d.shipType).toBeGreaterThanOrEqual(1);
         expect(d.shipType).toBeLessThanOrEqual(5);
 
-        // Check orbiting debris count (10-20)
-        expect(d.orbitingDebrisCount).toBeGreaterThanOrEqual(10);
-        expect(d.orbitingDebrisCount).toBeLessThanOrEqual(20);
+        // Check orbiting debris count (7-14, reduced for performance)
+        expect(d.orbitingDebrisCount).toBeGreaterThanOrEqual(7);
+        expect(d.orbitingDebrisCount).toBeLessThanOrEqual(14);
       }
     });
 
@@ -327,8 +327,9 @@ describe('Derelict System', () => {
           const dy = pos.y - d.y;
           const distance = Math.sqrt(dx * dx + dy * dy);
 
-          expect(distance).toBeGreaterThanOrEqual(50);
-          expect(distance).toBeLessThanOrEqual(100);
+          // Wreckage spawns outside derelict hull (350-450 units from center)
+          expect(distance).toBeGreaterThanOrEqual(350);
+          expect(distance).toBeLessThanOrEqual(450);
         }
       }
     });

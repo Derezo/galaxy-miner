@@ -320,7 +320,11 @@ const Entities = {
 
   // Wreckage management
   updateWreckage(data) {
+    window.Logger?.category('loot', '[WRECKAGE] updateWreckage called:', data.id, 'source:', data.source, 'originX:', data.originX);
     if (!this.wreckage.has(data.id)) {
+      const isDerelict = data.source === 'derelict';
+      window.Logger?.category('loot', '[WRECKAGE] Creating new wreckage, isDerelict:', isDerelict, 'hasOrigin:', data.originX !== undefined);
+      const now = Date.now();
       this.wreckage.set(data.id, {
         id: data.id,
         position: { x: data.x, y: data.y },
@@ -328,11 +332,54 @@ const Entities = {
         npcName: data.npcName || 'Unknown',
         contentCount: data.contentCount || 0,
         despawnTime: data.despawnTime,
-        spawnTime: Date.now(),
+        spawnTime: now,
         rotation: Math.random() * Math.PI * 2,
-        rotationSpeed: (Math.random() - 0.5) * 0.3
+        rotationSpeed: (Math.random() - 0.5) * (isDerelict ? 0.15 : 0.3), // Slower rotation for derelict
+        source: data.source || 'npc',
+        size: data.size || 20,
+        // Generate gear positions for derelict wreckage (4-6 small gears orbiting)
+        gears: isDerelict ? this._generateDerelictGears() : null,
+        // Spawn animation for derelict wreckage (slide from origin to destination)
+        spawnAnimation: (function() {
+          if (isDerelict && data.originX !== undefined) {
+            window.Logger?.category('loot', '[WRECKAGE] Creating spawn animation:',
+              'origin:', data.originX.toFixed(0), data.originY.toFixed(0),
+              'dest:', data.x.toFixed(0), data.y.toFixed(0),
+              'dist:', Math.sqrt((data.x - data.originX)**2 + (data.y - data.originY)**2).toFixed(0)
+            );
+            return {
+              originX: data.originX,
+              originY: data.originY,
+              destX: data.x,
+              destY: data.y,
+              startTime: now,
+              duration: 800,  // 800ms slide animation (increased for visibility)
+              startRotation: Math.random() * Math.PI * 2,
+              spinAmount: Math.PI * 2 + Math.random() * Math.PI  // 2-3 full rotations
+            };
+          }
+          return null;
+        })()
       });
     }
+  },
+
+  // Generate orbiting gear data for derelict wreckage
+  _generateDerelictGears() {
+    const gearCount = 4 + Math.floor(Math.random() * 3); // 4-6 gears
+    const gears = [];
+    for (let i = 0; i < gearCount; i++) {
+      gears.push({
+        orbitRadius: 12 + Math.random() * 18,      // 12-30 pixels from center
+        orbitSpeed: (0.3 + Math.random() * 0.4) * (Math.random() < 0.5 ? 1 : -1), // Random direction
+        orbitPhase: Math.random() * Math.PI * 2,   // Starting angle
+        size: 3 + Math.random() * 4,               // 3-7 pixel gears
+        teeth: 6 + Math.floor(Math.random() * 3),  // 6-8 teeth
+        spinSpeed: (1 + Math.random() * 2) * (Math.random() < 0.5 ? 1 : -1), // Gear spin
+        spinPhase: Math.random() * Math.PI * 2
+      });
+    }
+    return gears;
   },
 
   removeWreckage(wreckageId) {
@@ -367,6 +414,25 @@ const Entities = {
     }
 
     return closest;
+  },
+
+  /**
+   * Check if there is any non-derelict wreckage within range
+   * @param {Object} position - {x, y}
+   * @param {number} maxRange - Maximum distance
+   * @returns {boolean} True if non-derelict wreckage exists in range
+   */
+  hasNonDerelictWreckageInRange(position, maxRange) {
+    for (const [id, w] of this.wreckage) {
+      if (w.source === 'derelict') continue; // Skip derelict wreckage
+      const dx = w.position.x - position.x;
+      const dy = w.position.y - position.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      if (dist <= maxRange) {
+        return true;
+      }
+    }
+    return false;
   },
 
   updateWreckageRotation(dt) {

@@ -1777,7 +1777,12 @@ const CONSTANTS = {
     MAX_SECTOR_Y: 1,
     DERELICTS_PER_SECTOR_MIN: 4,
     DERELICTS_PER_SECTOR_MAX: 6,
-    BLOCKED_FACTIONS: ['pirate', 'void', 'swarm']  // No hostile bases here
+    BLOCKED_FACTIONS: ['pirate', 'void', 'swarm'],  // No hostile bases here
+    // Guaranteed friendly bases in Graveyard
+    GUARANTEED_BASES: {
+      mining_claim: 2,    // At least 2 rogue miner bases
+      scavenger_yard: 1   // At least 1 scavenger yard
+    }
   },
 
   // Derelict Ship Configuration - Salvageable wrecks for new players
@@ -1788,10 +1793,10 @@ const CONSTANTS = {
     SALVAGE_COOLDOWN: 30000,  // 30 seconds
     WRECKAGE_SPAWN_MIN: 1,
     WRECKAGE_SPAWN_MAX: 3,
-    WRECKAGE_SPAWN_RADIUS_MIN: 50,
-    WRECKAGE_SPAWN_RADIUS_MAX: 100,
-    ORBITING_DEBRIS_MIN: 10,
-    ORBITING_DEBRIS_MAX: 20,
+    WRECKAGE_SPAWN_RADIUS_MIN: 350,  // Must be > max derelict radius (300) to spawn outside hull
+    WRECKAGE_SPAWN_RADIUS_MAX: 450,
+    ORBITING_DEBRIS_MIN: 7,   // Reduced ~30% for performance
+    ORBITING_DEBRIS_MAX: 14,
     LOOT_TABLE: {
       COMMON_CHANCE: 0.70,
       COMMON_QTY_MIN: 2,

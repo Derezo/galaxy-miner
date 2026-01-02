@@ -61,26 +61,12 @@ window.NetworkHandlers.derelict = {
       }
     });
 
-    // Handle errors
+    // Handle errors - most errors should fail silently since the player
+    // has already interacted with the derelict (cooldown) or is too far away
     socket.on('derelict:error', (data) => {
-      Logger.warn('[DERELICT] Error:', data.message);
-
-      // Show error notification
-      if (typeof NotificationManager !== 'undefined') {
-        if (data.cooldownRemaining > 0) {
-          const secs = Math.ceil(data.cooldownRemaining / 1000);
-          NotificationManager.show(`Derelict on cooldown (${secs}s remaining)`, 'warning');
-        } else {
-          NotificationManager.show(data.message, 'error');
-        }
-      } else if (typeof MessageStack !== 'undefined') {
-        if (data.cooldownRemaining > 0) {
-          const secs = Math.ceil(data.cooldownRemaining / 1000);
-          MessageStack.show(`Derelict on cooldown (${secs}s remaining)`, 'warning');
-        } else {
-          MessageStack.show(data.message, 'error');
-        }
-      }
+      // Only log errors in debug mode, don't show notifications to player
+      // Cooldown and distance errors are expected and should be silent
+      Logger.log('[DERELICT] Error (silent):', data.message);
     });
 
     Logger.log('[NETWORK] Derelict handlers registered');

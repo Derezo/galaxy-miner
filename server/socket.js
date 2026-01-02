@@ -669,6 +669,10 @@ module.exports = function(io) {
           creditReward: 0 // Credits are in contents
         };
 
+        // Debug: log wreckage contents before spawning
+        logger.log('[DERELICT] Spawning wreckage', i, 'with', wreckageContents.length, 'items:',
+          wreckageContents.map(c => `${c.type}${c.resourceType ? ':' + c.resourceType : ''}`).join(', '));
+
         const wreckage = loot.spawnWreckage(
           wreckageEntity,
           pos,
@@ -677,10 +681,12 @@ module.exports = function(io) {
           { source: 'derelict' }
         );
 
+        logger.log('[DERELICT] Wreckage spawned:', wreckage.id, 'contents:', wreckage.contents.length);
+
         spawnedWreckage.push(wreckage);
 
-        // Broadcast wreckage spawn to nearby players
-        broadcastToNearby(socket, player, 'wreckage:spawn', {
+        // Build wreckage spawn data
+        const wreckageData = {
           id: wreckage.id,
           x: wreckage.position.x,
           y: wreckage.position.y,
@@ -690,8 +696,17 @@ module.exports = function(io) {
           npcType: 'derelict_salvage',
           npcName: 'Derelict Salvage',
           contentCount: wreckage.contents.length,
-          despawnTime: wreckage.despawnTime
-        });
+          despawnTime: wreckage.despawnTime,
+          // Origin position for spawn animation (center of derelict)
+          originX: result.derelict.x,
+          originY: result.derelict.y
+        };
+
+        // Emit to the salvaging player (broadcastToNearby skips the emitting socket)
+        socket.emit('wreckage:spawn', wreckageData);
+
+        // Broadcast wreckage spawn to nearby players
+        broadcastToNearby(socket, player, 'wreckage:spawn', wreckageData);
       }
 
       // Emit salvage success to player
@@ -1199,6 +1214,12 @@ module.exports = function(io) {
             const lootResults = processCollectedLoot(authenticatedUserId, teamResources.collectorLoot);
             lootResults.credits = teamCredits.collectorCredits;
 
+            // Debug: log collection details
+            logger.log('[LOOT] Collection complete:', wreckageId,
+              'contents:', progress.contents.length,
+              'collectorLoot:', teamResources.collectorLoot.length,
+              'results:', JSON.stringify(lootResults));
+
             socket.emit('loot:complete', {
               wreckageId,
               contents: progress.contents,
@@ -1298,7 +1319,9 @@ module.exports = function(io) {
       const collectSpeed = siphonEffects.wreckageCollectionSpeed || 0.5;
 
       // Find nearest wreckage within multi-collect range
-      const nearbyWreckage = engine.getWreckageInRange(player.position, multiRange);
+      // Exclude derelict salvage - it must be collected manually with tractor beam
+      const allNearbyWreckage = engine.getWreckageInRange(player.position, multiRange);
+      const nearbyWreckage = allNearbyWreckage.filter(w => w.source !== 'derelict');
 
       if (nearbyWreckage.length === 0) {
         socket.emit('loot:error', { message: 'No wreckage within range' });
