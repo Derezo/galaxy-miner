@@ -162,6 +162,15 @@ const RelicsPanel = {
       effectName = "Pirate's Share";
       const bonusPct = relicInfo.effects?.npcWreckageCreditBonus ? Math.round(relicInfo.effects.npcWreckageCreditBonus * 100) : 10;
       effectDesc = `All credit rewards from NPC wreckage increased by ${bonusPct}%. Applies automatically when collecting loot.`;
+    } else if (relicInfo.effect === 'warp_enhancement') {
+      effectName = 'Subspace Warp';
+      const velocityBonus = relicInfo.effects?.warpVelocityMultiplier
+        ? Math.round((relicInfo.effects.warpVelocityMultiplier - 1) * 100)
+        : 150;
+      const cooldownReduction = relicInfo.effects?.warpCooldownMultiplier
+        ? Math.round((1 - relicInfo.effects.warpCooldownMultiplier) * 100)
+        : 25;
+      effectDesc = `Void energy bends spacetime around your ship. Boost velocity increased by ${velocityBonus}% and boost cooldown reduced by ${cooldownReduction}%. Effect is always active.`;
     } else if (relicInfo.effects) {
       // Handle relics with multiple effects (like SCRAP_SIPHON)
       const effects = relicInfo.effects;

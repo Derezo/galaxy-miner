@@ -791,12 +791,26 @@ const Player = {
     const tier = this.ship.energyCoreTier || 1;
 
     // Get boost duration and cooldown from constants
-    const boostDuration = CONSTANTS.ENERGY_CORE?.BOOST?.DURATION?.[tier] || 1000;
-    const boostCooldown = CONSTANTS.ENERGY_CORE?.BOOST?.COOLDOWN?.[tier] || 15000;
+    let boostDuration = CONSTANTS.ENERGY_CORE?.BOOST?.DURATION?.[tier] || 1000;
+    let boostCooldown = CONSTANTS.ENERGY_CORE?.BOOST?.COOLDOWN?.[tier] || 15000;
+
+    // Apply Subspace Warp Drive relic effects (+150% velocity via longer duration, -25% cooldown)
+    if (this.hasRelic('SUBSPACE_WARP_DRIVE')) {
+      const relicEffects = CONSTANTS.RELICS?.SUBSPACE_WARP_DRIVE?.effects;
+      if (relicEffects) {
+        // Longer duration = more velocity gained (2.5x duration for +150% effective velocity)
+        boostDuration = Math.round(boostDuration * (relicEffects.warpVelocityMultiplier || 2.5));
+        // Reduced cooldown
+        boostCooldown = Math.round(boostCooldown * (relicEffects.warpCooldownMultiplier || 0.75));
+      }
+    }
 
     this.boostActive = true;
     this.boostEndTime = now + boostDuration;
     this.boostCooldownEnd = now + boostCooldown;
+
+    // Store modified cooldown for UI
+    this._lastBoostCooldown = boostCooldown;
 
     // Play boost activation and start sustain loop
     if (typeof AudioManager !== 'undefined') {
@@ -822,8 +836,17 @@ const Player = {
   },
 
   getBoostCooldownPercent() {
-    const tier = this.ship.energyCoreTier || 1;
-    const totalCooldown = CONSTANTS.ENERGY_CORE?.BOOST?.COOLDOWN?.[tier] || 15000;
+    // Use stored modified cooldown if available, otherwise calculate base
+    let totalCooldown = this._lastBoostCooldown;
+    if (!totalCooldown) {
+      const tier = this.ship.energyCoreTier || 1;
+      totalCooldown = CONSTANTS.ENERGY_CORE?.BOOST?.COOLDOWN?.[tier] || 15000;
+      // Apply relic effect if present
+      if (this.hasRelic('SUBSPACE_WARP_DRIVE')) {
+        const multiplier = CONSTANTS.RELICS?.SUBSPACE_WARP_DRIVE?.effects?.warpCooldownMultiplier || 0.75;
+        totalCooldown = Math.round(totalCooldown * multiplier);
+      }
+    }
     const remaining = this.getBoostCooldownRemaining();
     return remaining / totalCooldown;
   },
