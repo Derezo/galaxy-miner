@@ -46,6 +46,10 @@ function registerAllHandlers(socket) {
   if (window.NetworkHandlers.npc) {
     window.NetworkHandlers.npc.register(socket);
   }
+
+  if (window.NetworkHandlers.derelict) {
+    window.NetworkHandlers.derelict.register(socket);
+  }
 }
 
 // Export for use in Network module

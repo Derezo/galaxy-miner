@@ -299,6 +299,9 @@ const Player = {
     // Check for nearby wormholes
     this.checkWormholeProximity();
 
+    // Check for nearby derelicts (in Graveyard zone)
+    this.checkDerelictProximity();
+
     // Update mining progress if mining
     if (this.miningTarget) {
       this.updateMining(dt);
@@ -405,6 +408,56 @@ const Player = {
 
       Network.sendMine(this.miningTarget.id);
     }
+  },
+
+  /**
+   * Check for nearby derelicts (Graveyard zone)
+   * Requests derelict data from server periodically
+   */
+  checkDerelictProximity() {
+    // Check if in or near Graveyard zone (3x3 sectors around origin)
+    const sectorX = Math.floor(this.position.x / CONSTANTS.SECTOR_SIZE);
+    const sectorY = Math.floor(this.position.y / CONSTANTS.SECTOR_SIZE);
+    const graveyardZone = CONSTANTS.GRAVEYARD_ZONE;
+
+    const inOrNearGraveyard = graveyardZone &&
+      sectorX >= graveyardZone.MIN_SECTOR_X - 1 &&
+      sectorX <= graveyardZone.MAX_SECTOR_X + 1 &&
+      sectorY >= graveyardZone.MIN_SECTOR_Y - 1 &&
+      sectorY <= graveyardZone.MAX_SECTOR_Y + 1;
+
+    if (!inOrNearGraveyard) {
+      // Clear derelict state when not in Graveyard
+      this._nearestDerelict = null;
+      return;
+    }
+
+    // Request derelict updates periodically (every 500ms)
+    const now = Date.now();
+    if (!this._lastDerelictRequest || now - this._lastDerelictRequest > 500) {
+      if (typeof NetworkHandlers !== 'undefined' && NetworkHandlers.derelict) {
+        NetworkHandlers.derelict.requestNearby();
+      }
+      this._lastDerelictRequest = now;
+    }
+
+    // Check for nearest salvageable derelict
+    if (typeof DerelictRenderer !== 'undefined') {
+      this._nearestDerelict = DerelictRenderer.getNearestSalvageable(this.position);
+    }
+  },
+
+  /**
+   * Attempt to salvage the nearest derelict
+   */
+  trySalvageDerelict() {
+    if (!this._nearestDerelict) return false;
+
+    if (typeof NetworkHandlers !== 'undefined' && NetworkHandlers.derelict) {
+      NetworkHandlers.derelict.salvage(this._nearestDerelict.id);
+      return true;
+    }
+    return false;
   },
 
   updateMining(dt) {

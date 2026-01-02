@@ -70,6 +70,11 @@ const Renderer = {
       FactionBases.init();
     }
 
+    // Initialize derelict renderer if available
+    if (typeof DerelictRenderer !== "undefined") {
+      DerelictRenderer.init();
+    }
+
     // Initialize star effects if available
     if (typeof StarEffects !== "undefined") {
       StarEffects.init();
@@ -325,6 +330,11 @@ const Renderer = {
     // Update faction bases animation
     if (typeof FactionBases !== "undefined") {
       FactionBases.update(dt);
+    }
+
+    // Update derelict renderer (orbiting debris, sparks)
+    if (typeof DerelictRenderer !== "undefined") {
+      DerelictRenderer.update(dt);
     }
 
     // Update celestial textures (asteroid rotations)
@@ -596,6 +606,11 @@ const Renderer = {
           this.drawBase(base);
         }
       }
+    }
+
+    // Draw derelict ships (Graveyard zone ancient wrecks)
+    if (typeof DerelictRenderer !== "undefined" && typeof Player !== "undefined") {
+      DerelictRenderer.draw(this.ctx, this.camera, Player.position);
     }
 
     // DEBUG: Draw collision hitboxes as overlay
