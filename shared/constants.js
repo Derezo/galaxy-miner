@@ -1257,10 +1257,16 @@ const CONSTANTS = {
       name: 'Swarm Hive Core',
       rarity: 'ultrarare',
       value: 1000,
-      description: 'The neural nexus of a Swarm hive. Still pulses with bio-electric signals, as if searching for its lost collective.',
+      description: 'This pulsing core resonates with Swarm hive-minds. Upon death, your consciousness is drawn to the nearest hive, triggering a catastrophic rejection that destroys the hive from within.',
       iconType: 'relic',
       glyphVariant: 'organic',
-      glowColor: '#00ff66'
+      glowColor: '#00ff66',
+      effect: 'hive_respawn',
+      effects: {
+        respawnAtNearestHive: true,
+        destroyHiveOnRespawn: true,
+        hiveDestructionRadius: 500  // AoE kill radius in units
+      }
     },
     PIRATE_TREASURE: {
       id: 'pirate_treasure',

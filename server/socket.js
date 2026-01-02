@@ -153,6 +153,7 @@ module.exports = function(io) {
     });
 
     // Respawn: Player selects respawn location
+    // With Graveyard system: all players respawn in The Graveyard unless they have Swarm Hive Core relic
     socket.on('respawn:select', (data) => {
       logger.log(`[RESPAWN] respawn:select received, type: ${data?.type}, userId: ${authenticatedUserId}`);
 
@@ -194,8 +195,54 @@ module.exports = function(io) {
         position: respawnResult.position,
         hull: respawnResult.hull,
         shield: respawnResult.shield,
-        locationName: respawnResult.locationName
+        locationName: respawnResult.locationName,
+        // Include hive destruction info if applicable
+        hiveDestruction: respawnResult.hiveDestruction || null
       });
+
+      // If a hive was destroyed via Swarm Hive Core respawn, broadcast the destruction
+      if (respawnResult.hiveDestruction) {
+        const destruction = respawnResult.hiveDestruction;
+
+        // Broadcast hive implosion to all players (dramatic effect visible from far away)
+        io.emit('hive:coreImplosion', {
+          hiveId: destruction.hiveId,
+          position: destruction.hivePosition,
+          destructionRadius: destruction.destructionRadius,
+          killedNpcCount: destruction.killedNpcs.length,
+          playerId: authenticatedUserId,
+          playerName: player.username
+        });
+
+        // Broadcast each spawned wreckage
+        for (const wreckage of destruction.spawnedWreckage) {
+          io.emit('wreckage:spawn', {
+            id: wreckage.id,
+            x: wreckage.position.x,
+            y: wreckage.position.y,
+            size: wreckage.size,
+            source: 'npc',
+            faction: wreckage.faction,
+            npcType: wreckage.npcType,
+            npcName: wreckage.npcName,
+            contentCount: wreckage.contents?.length || 0
+          });
+        }
+
+        // Broadcast each NPC death
+        for (const killedNpc of destruction.killedNpcs) {
+          io.emit('npc:destroyed', {
+            id: killedNpc.id,
+            destroyedBy: authenticatedUserId,
+            faction: 'swarm',
+            deathEffect: 'dissolve',
+            hiveCoreKill: true,
+            position: killedNpc.position
+          });
+        }
+
+        logger.log(`[HIVE CORE] Player ${player.username} triggered hive implosion at (${destruction.hivePosition.x.toFixed(0)}, ${destruction.hivePosition.y.toFixed(0)}), killed ${destruction.killedNpcs.length} NPCs`);
+      }
 
       logger.log(`Player ${player.username} respawned at ${respawnResult.locationName} (${respawnResult.position.x.toFixed(0)}, ${respawnResult.position.y.toFixed(0)})`);
     });

@@ -4,6 +4,8 @@ const config = require('../config');
 const { statements } = require('../database');
 const world = require('../world');
 const logger = require('../../shared/logger');
+const npc = require('./npc');
+const loot = require('./loot');
 
 // Track weapon cooldowns: playerId -> lastFireTime
 const weaponCooldowns = new Map();
@@ -192,24 +194,62 @@ function applyDamage(targetUserId, damage, damageType = 'kinetic', shieldPiercin
 
 /**
  * Build respawn options for player death UI
+ * All players respawn in The Graveyard safe zone (near origin)
+ * Exception: Players with SWARM_HIVE_CORE relic respawn at nearest Swarm Hive
  * @param {number} userId - Player's user ID
  * @param {Object} deathPosition - Where the player died
  * @returns {Object} Respawn options for the client
  */
 function buildRespawnOptions(userId, deathPosition) {
-  const ship = statements.getShipByUserId.get(userId);
+  // Check if player has Swarm Hive Core relic
+  const hasHiveCore = statements.hasRelic.get(userId, 'SWARM_HIVE_CORE');
 
-  // Deep space is always available
-  const options = {
-    deepSpace: { available: true },
-    lastSafe: {
-      available: ship && ship.last_safe_x !== null && ship.last_safe_x !== undefined,
-      position: ship && ship.last_safe_x !== null ? { x: ship.last_safe_x, y: ship.last_safe_y } : null
-    },
-    factionBases: [] // Could be populated with discovered friendly bases in future
+  if (hasHiveCore) {
+    // Find nearest Swarm Hive
+    const nearestHive = findNearestSwarmHive(deathPosition);
+
+    if (nearestHive) {
+      return {
+        type: 'swarm_hive_core',
+        hiveId: nearestHive.id,
+        hivePosition: { x: nearestHive.x, y: nearestHive.y },
+        message: 'Your consciousness is drawn to the nearest Swarm Hive...'
+      };
+    }
+  }
+
+  // Default: Respawn in The Graveyard (no choices - automatic)
+  return {
+    type: 'graveyard',
+    message: 'Returning to The Graveyard...'
   };
+}
 
-  return options;
+/**
+ * Find the nearest active Swarm Hive to a given position
+ * @param {Object} position - { x, y } position to search from
+ * @returns {Object|null} Nearest hive base or null if none exist
+ */
+function findNearestSwarmHive(position) {
+  const activeBases = npc.getActiveBases();
+  let nearestHive = null;
+  let nearestDistance = Infinity;
+
+  for (const [baseId, base] of activeBases) {
+    // Check for swarm_hive type (both original and assimilated)
+    if ((base.type === 'swarm_hive' || base.faction === 'swarm') && !base.destroyed) {
+      const dx = base.x - position.x;
+      const dy = base.y - position.y;
+      const distance = Math.sqrt(dx * dx + dy * dy);
+
+      if (distance < nearestDistance) {
+        nearestDistance = distance;
+        nearestHive = { id: baseId, ...base };
+      }
+    }
+  }
+
+  return nearestHive;
 }
 
 /**
@@ -274,54 +314,157 @@ function handleDeath(userId, deathPosition = null) {
 }
 
 /**
- * Apply respawn after player selects location
+ * Apply respawn after player triggers respawn
+ * All respawns go to The Graveyard unless player has Swarm Hive Core relic
  * @param {number} userId - Player's user ID
- * @param {string} respawnType - 'deep_space' | 'last_safe' | 'faction_base'
- * @param {string|null} targetId - Optional base ID for faction_base respawn
- * @returns {Object} Respawn result with position and location name
+ * @param {string} respawnType - 'graveyard' | 'swarm_hive_core' (from buildRespawnOptions)
+ * @param {string|null} targetId - Hive ID for swarm_hive_core respawn
+ * @returns {Object} Respawn result with position, location name, and special effects
  */
-function applyRespawn(userId, respawnType = 'deep_space', targetId = null) {
+function applyRespawn(userId, respawnType = 'graveyard', targetId = null) {
   const ship = statements.getShipByUserId.get(userId);
   let respawnPosition;
-  let locationName = 'Deep Space';
+  let locationName = 'The Graveyard';
+  let hiveDestructionResult = null;
 
   switch (respawnType) {
-    case 'deep_space':
-      respawnPosition = world.findDeepSpaceSpawnLocation();
-      locationName = 'Deep Space';
-      break;
+    case 'swarm_hive_core':
+      // Respawn at Swarm Hive and destroy it
+      if (targetId) {
+        const base = npc.getActiveBase(targetId);
+        if (base && !base.destroyed && (base.type === 'swarm_hive' || base.faction === 'swarm')) {
+          // Respawn position is at the hive center
+          respawnPosition = { x: base.x, y: base.y };
+          locationName = 'Swarm Hive (Destroyed)';
 
-    case 'last_safe':
-      if (ship && ship.last_safe_x !== null && ship.last_safe_x !== undefined) {
-        respawnPosition = { x: ship.last_safe_x, y: ship.last_safe_y };
-        locationName = 'Last Safe Location';
+          // Destroy the hive and kill nearby swarm NPCs
+          hiveDestructionResult = destroyHiveWithAoE(targetId, base);
+
+          logger.log(`[HIVE CORE RESPAWN] Player ${userId} respawning at hive ${targetId}, destroying it and ${hiveDestructionResult.killedNpcs.length} nearby Swarm NPCs`);
+        } else {
+          // Hive no longer exists, fall back to Graveyard
+          respawnPosition = findGraveyardSpawnLocation();
+          locationName = 'The Graveyard';
+          logger.log(`[HIVE CORE RESPAWN] Hive ${targetId} not found, falling back to Graveyard for player ${userId}`);
+        }
       } else {
-        // Fallback to deep space if no last safe location
-        respawnPosition = world.findDeepSpaceSpawnLocation();
-        locationName = 'Deep Space';
+        // No target specified, fall back to Graveyard
+        respawnPosition = findGraveyardSpawnLocation();
+        locationName = 'The Graveyard';
       }
       break;
 
-    case 'faction_base':
-      // Future: lookup base position from targetId
-      // For now, fallback to deep space
-      respawnPosition = world.findDeepSpaceSpawnLocation();
-      locationName = 'Deep Space';
-      break;
-
+    case 'graveyard':
     default:
-      respawnPosition = world.findDeepSpaceSpawnLocation();
-      locationName = 'Deep Space';
+      // All other respawns go to The Graveyard (near origin 0,0)
+      respawnPosition = findGraveyardSpawnLocation();
+      locationName = 'The Graveyard';
+      break;
   }
 
   // Apply the respawn to database
   statements.respawnShip.run(respawnPosition.x, respawnPosition.y, userId);
 
-  return {
+  const result = {
     position: respawnPosition,
     locationName,
     hull: ship?.hull_max || config.DEFAULT_HULL_HP,
     shield: ship?.shield_max || config.DEFAULT_SHIELD_HP
+  };
+
+  // Include hive destruction info if applicable
+  if (hiveDestructionResult) {
+    result.hiveDestruction = hiveDestructionResult;
+  }
+
+  return result;
+}
+
+/**
+ * Find a spawn location in The Graveyard safe zone (near origin)
+ * @returns {Object} { x, y } spawn position in The Graveyard
+ */
+function findGraveyardSpawnLocation() {
+  // The Graveyard is centered on origin (0,0) - sectors (-1,-1) to (1,1)
+  // SECTOR_SIZE is typically 1000, so the zone is roughly -1500 to +1500
+  // We spawn near the center with some randomization to avoid stacking
+  const sectorSize = config.SECTOR_SIZE || 1000;
+  const graveyardRadius = sectorSize * 0.5; // Stay within ~500 units of origin
+
+  // Add random offset to avoid all players spawning on exact same spot
+  const angle = Math.random() * Math.PI * 2;
+  const distance = Math.random() * graveyardRadius;
+
+  return {
+    x: Math.cos(angle) * distance,
+    y: Math.sin(angle) * distance
+  };
+}
+
+/**
+ * Destroy a Swarm Hive and kill all Swarm NPCs within 500 units
+ * Called when a player with Swarm Hive Core relic respawns at the hive
+ * @param {string} hiveId - The hive base ID
+ * @param {Object} hiveBase - The hive base object
+ * @returns {Object} Destruction result with killed NPCs and wreckage spawned
+ */
+function destroyHiveWithAoE(hiveId, hiveBase) {
+  const HIVE_DESTRUCTION_RADIUS = 500; // Units
+  const hivePosition = { x: hiveBase.x, y: hiveBase.y };
+
+  // Get all Swarm NPCs within the destruction radius
+  const nearbyNpcs = npc.getNPCsInRange(hivePosition, HIVE_DESTRUCTION_RADIUS);
+  const swarmNpcs = nearbyNpcs.filter(npcData => npcData.faction === 'swarm');
+
+  const killedNpcs = [];
+  const spawnedWreckage = [];
+
+  // Kill each Swarm NPC and spawn wreckage
+  for (const swarmNpc of swarmNpcs) {
+    // Get the full NPC entity for wreckage generation
+    const npcEntity = npc.getNPC(swarmNpc.id);
+
+    if (npcEntity) {
+      // Spawn wreckage at NPC location (similar to engine.js NPC death handling)
+      const wreckage = loot.spawnWreckage(
+        npcEntity,
+        { x: swarmNpc.position.x, y: swarmNpc.position.y },
+        null, // Generate loot based on NPC type
+        null  // No damage contributors for hive core AoE kill
+      );
+
+      if (wreckage) {
+        spawnedWreckage.push({
+          id: wreckage.id,
+          position: wreckage.position,
+          size: wreckage.size,
+          faction: wreckage.faction,
+          npcType: wreckage.npcType,
+          npcName: wreckage.npcName,
+          contents: wreckage.contents
+        });
+      }
+    }
+
+    // Remove the NPC
+    npc.removeNPC(swarmNpc.id);
+
+    killedNpcs.push({
+      id: swarmNpc.id,
+      type: swarmNpc.type,
+      position: swarmNpc.position
+    });
+  }
+
+  // Destroy the hive base itself
+  npc.destroyBase(hiveId);
+
+  return {
+    hiveId,
+    hivePosition,
+    killedNpcs,
+    spawnedWreckage,
+    destructionRadius: HIVE_DESTRUCTION_RADIUS
   };
 }
 
@@ -382,5 +525,9 @@ module.exports = {
   updateShieldRecharge,
   getWeaponRange,
   getHullResistances,
-  getEffectiveCooldown
+  getEffectiveCooldown,
+  // Graveyard respawn helpers
+  findGraveyardSpawnLocation,
+  findNearestSwarmHive,
+  destroyHiveWithAoE
 };

@@ -1946,6 +1946,31 @@ function getActiveBase(baseId) {
   return activeBases.get(baseId);
 }
 
+// Get all active bases (returns the Map)
+function getActiveBases() {
+  return activeBases;
+}
+
+// Remove an NPC by ID (for AoE kills, hive destruction, etc.)
+function removeNPC(npcId) {
+  const npc = activeNPCs.get(npcId);
+  if (!npc) return null;
+
+  // Remove from any base's spawned list
+  if (npc.baseId) {
+    const base = activeBases.get(npc.baseId);
+    if (base && base.spawnedNPCs) {
+      const idx = base.spawnedNPCs.indexOf(npcId);
+      if (idx !== -1) {
+        base.spawnedNPCs.splice(idx, 1);
+      }
+    }
+  }
+
+  activeNPCs.delete(npcId);
+  return npc;
+}
+
 // Check if a position is within any base's territory
 function isInBaseTerritory(position) {
   for (const [baseId, base] of activeBases) {
@@ -3338,8 +3363,11 @@ module.exports = {
   spawnNPCFromBase,
   updateBaseSpawning,
   getActiveBase,
+  getActiveBases,
   isInBaseTerritory,
   activeBases,
+  // NPC removal helper
+  removeNPC,
   // Base health/destruction functions
   damageBase,
   destroyBase,
