@@ -10,6 +10,7 @@ const WormholeTransitUI = {
   selectedDestination: null,
   transitDuration: 5000,
   transitProgress: 0,
+  hasVoidWarp: false,  // Subspace Warp Drive active
 
   // Animation state
   animationFrame: null,
@@ -211,21 +212,30 @@ const WormholeTransitUI = {
    * Start the transit animation
    * @param {number} duration - Transit duration in ms
    * @param {Object} destination - Destination wormhole
+   * @param {boolean} hasVoidWarp - Whether player has Subspace Warp Drive
    */
-  startTransit(duration, destination) {
+  startTransit(duration, destination, hasVoidWarp = false) {
     this.phase = 'transit';
     this.transitDuration = duration;
     this.selectedDestination = destination;
     this.startTime = Date.now();
     this.transitProgress = 0;
+    this.hasVoidWarp = hasVoidWarp;
 
     // Hide destination buttons, show progress
     this.destinationsContainer.innerHTML = '';
     this.progressBar.classList.remove('hidden');
     this.cancelBtn.classList.add('hidden');
 
-    // Spawn initial transit particles
-    this.spawnTransitParticles(100);
+    // Add void warp class for styling
+    if (hasVoidWarp) {
+      this.overlay.classList.add('void-warp');
+    } else {
+      this.overlay.classList.remove('void-warp');
+    }
+
+    // Spawn initial transit particles (more for void warp)
+    this.spawnTransitParticles(hasVoidWarp ? 150 : 100);
   },
 
   /**
@@ -269,9 +279,20 @@ const WormholeTransitUI = {
 
   /**
    * Get random particle color (cyan, blue, orange, white - matching wormhole style)
+   * Uses void colors (purple, black, magenta) when Subspace Warp Drive is active
    * @returns {string}
    */
   getParticleColor() {
+    if (this.hasVoidWarp) {
+      // Void warp colors: deep purple, magenta, black, dark violet
+      const voidColors = [
+        '#660099', '#9900ff', '#330066', '#aa00ff',
+        '#cc66ff', '#000000', '#440088', '#bb44dd',
+        '#220044', '#8800cc', '#ff00ff', '#550077'
+      ];
+      return voidColors[Math.floor(Math.random() * voidColors.length)];
+    }
+
     const colors = [
       '#00ffff', '#88ddff', '#4488ff', '#0066cc',
       '#ff8844', '#ffaa44', '#ffcc66',
@@ -286,7 +307,9 @@ const WormholeTransitUI = {
   hide() {
     this.visible = false;
     this.phase = null;
+    this.hasVoidWarp = false;
     this.overlay.classList.add('hidden');
+    this.overlay.classList.remove('void-warp');
 
     // Stop animation
     if (this.animationFrame) {
@@ -437,6 +460,12 @@ const WormholeTransitUI = {
   renderWormholeCenter(ctx, cx, cy) {
     const time = Date.now() / 1000;
 
+    if (this.hasVoidWarp) {
+      // Void warp: dark void portal with purple energy
+      this.renderVoidWormholeCenter(ctx, cx, cy, time);
+      return;
+    }
+
     // Outer glow - reversed gradient (bright center, dark outer, transparent edge)
     const gradient = ctx.createRadialGradient(cx, cy, 0, cx, cy, 100);
     gradient.addColorStop(0, 'rgba(200, 230, 255, 0.9)');   // Bright center
@@ -511,6 +540,123 @@ const WormholeTransitUI = {
     ctx.beginPath();
     ctx.arc(cx, cy, 12, 0, Math.PI * 2);
     ctx.fill();
+  },
+
+  /**
+   * Render void-themed wormhole center (Subspace Warp Drive active)
+   * Dark void with purple energy, faster rotation, more ominous
+   */
+  renderVoidWormholeCenter(ctx, cx, cy, time) {
+    // Void gradient: dark center sucking in light
+    const gradient = ctx.createRadialGradient(cx, cy, 0, cx, cy, 120);
+    gradient.addColorStop(0, 'rgba(0, 0, 0, 1)');           // Pure black center
+    gradient.addColorStop(0.2, 'rgba(30, 0, 50, 0.95)');    // Dark purple
+    gradient.addColorStop(0.4, 'rgba(102, 0, 153, 0.7)');   // Deep purple
+    gradient.addColorStop(0.6, 'rgba(153, 0, 255, 0.4)');   // Bright purple
+    gradient.addColorStop(0.8, 'rgba(100, 0, 180, 0.2)');   // Fading purple
+    gradient.addColorStop(1, 'transparent');
+
+    ctx.fillStyle = gradient;
+    ctx.beginPath();
+    ctx.arc(cx, cy, 120, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Void tendrils spiraling inward (faster than normal)
+    const tendrilColors = ['#660099', '#9900ff', '#aa00ff', '#cc66ff', '#ff00ff', '#8800cc'];
+    for (let arm = 0; arm < 8; arm++) {
+      const rotationSpeed = 2.5 + (arm % 3) * 0.3;  // Faster rotation
+      const baseRotation = this.spiralAngle * rotationSpeed + (arm / 8) * Math.PI * 2;
+
+      ctx.save();
+      ctx.translate(cx, cy);
+      ctx.rotate(baseRotation);
+
+      ctx.beginPath();
+      for (let i = 0; i <= 50; i++) {
+        const t = i / 50;
+        const angle = t * Math.PI * 4;  // More spiral turns
+        const radius = 100 - 90 * Math.pow(t, 0.6);
+        const px = Math.cos(angle) * radius;
+        const py = Math.sin(angle) * radius;
+        if (i === 0) ctx.moveTo(px, py);
+        else ctx.lineTo(px, py);
+      }
+
+      ctx.strokeStyle = tendrilColors[arm % tendrilColors.length];
+      ctx.lineWidth = 3;
+      ctx.globalAlpha = 0.6 + Math.sin(time * 6 + arm * 0.5) * 0.3;
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    ctx.globalAlpha = 1;
+
+    // Multiple pulsing void rings (faster, more intense)
+    for (let ring = 0; ring < 3; ring++) {
+      const ringPhase = ((time * 3 + ring * 0.33) % 1);
+      const ringRadius = 15 + ringPhase * 80;
+      const ringAlpha = 0.7 * (1 - ringPhase);
+      ctx.strokeStyle = ring % 2 === 0 ? '#9900ff' : '#ff00ff';
+      ctx.lineWidth = 2;
+      ctx.globalAlpha = ringAlpha;
+      ctx.beginPath();
+      ctx.arc(cx, cy, ringRadius, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+
+    ctx.globalAlpha = 1;
+
+    // Void lightning arcs
+    for (let i = 0; i < 4; i++) {
+      const arcAngle = time * 3 + i * Math.PI / 2;
+      const arcRadius = 60 + Math.sin(time * 5 + i) * 20;
+      const x1 = cx + Math.cos(arcAngle) * arcRadius;
+      const y1 = cy + Math.sin(arcAngle) * arcRadius;
+      const x2 = cx + Math.cos(arcAngle + 0.3) * (arcRadius * 0.6);
+      const y2 = cy + Math.sin(arcAngle + 0.3) * (arcRadius * 0.6);
+
+      ctx.strokeStyle = '#cc66ff';
+      ctx.lineWidth = 1.5;
+      ctx.globalAlpha = 0.5 + Math.random() * 0.4;
+      ctx.beginPath();
+      ctx.moveTo(x1, y1);
+      // Jagged lightning path
+      const midX = (x1 + x2) / 2 + (Math.random() - 0.5) * 20;
+      const midY = (y1 + y2) / 2 + (Math.random() - 0.5) * 20;
+      ctx.lineTo(midX, midY);
+      ctx.lineTo(x2, y2);
+      ctx.stroke();
+    }
+
+    ctx.globalAlpha = 1;
+
+    // Dark void core with pulsing purple edge
+    const coreGlow = ctx.createRadialGradient(cx, cy, 0, cx, cy, 25);
+    coreGlow.addColorStop(0, 'rgba(0, 0, 0, 1)');
+    coreGlow.addColorStop(0.5, 'rgba(30, 0, 50, 0.9)');
+    coreGlow.addColorStop(0.8, 'rgba(153, 0, 255, 0.6)');
+    coreGlow.addColorStop(1, 'rgba(255, 0, 255, 0.3)');
+
+    ctx.fillStyle = coreGlow;
+    ctx.beginPath();
+    ctx.arc(cx, cy, 25, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Pulsing void core
+    const corePulse = 0.6 + Math.sin(time * 10) * 0.4;
+    ctx.fillStyle = `rgba(0, 0, 0, ${corePulse})`;
+    ctx.beginPath();
+    ctx.arc(cx, cy, 10, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Inner bright purple ring
+    ctx.strokeStyle = '#ff00ff';
+    ctx.lineWidth = 1;
+    ctx.globalAlpha = 0.8 + Math.sin(time * 8) * 0.2;
+    ctx.beginPath();
+    ctx.arc(cx, cy, 12, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.globalAlpha = 1;
   }
 };
 

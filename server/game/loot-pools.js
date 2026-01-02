@@ -51,7 +51,7 @@ const FACTION_LOOT = {
       rare:      ['QUANTUM_CRYSTALS', 'EXOTIC_MATTER'],
       ultrarare: ['ANTIMATTER', 'NEUTRONIUM', 'VOID_CRYSTALS']
     },
-    relics: ['VOID_CRYSTAL', 'WORMHOLE_GEM', 'ANCIENT_STAR_MAP'],
+    relics: ['VOID_CRYSTAL', 'WORMHOLE_GEM', 'ANCIENT_STAR_MAP', 'SUBSPACE_WARP_DRIVE'],
     buffs: ['DAMAGE_AMP', 'RADAR_PULSE'],
     components: ['WEAPON_MATRIX', 'SHIELD_CELL']
   },
@@ -339,6 +339,16 @@ function generateLoot(npcType) {
       type: 'relic',
       relicType: 'SKULL_AND_BONES'
     });
+  }
+
+  // 25% chance of SUBSPACE_WARP_DRIVE drop from Void Leviathan
+  if (npcType === 'void_leviathan') {
+    if (Math.random() < 0.25) {
+      contents.push({
+        type: 'relic',
+        relicType: 'SUBSPACE_WARP_DRIVE'
+      });
+    }
   }
 
   // 5% chance of PIRATE_TREASURE drop from destroyed pirate_outpost base

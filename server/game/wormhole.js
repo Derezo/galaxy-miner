@@ -9,12 +9,14 @@ const World = require('../world');
 
 // Transit state tracking
 const activeTransits = new Map(); // playerId -> { phase, wormholeId, destinationId, startTime, etc }
+const wormholeCooldowns = new Map(); // playerId -> lastWormholeTime
 
 // Constants
 const TRANSIT_DURATION = 5000; // 5 seconds for transport animation
 const WORMHOLE_RANGE = 100; // Must be within 100 units to enter
 const SELECTION_TIMEOUT = 30000; // 30 seconds to choose destination before auto-cancel
 const MAX_DESTINATIONS = 5; // Show 5 nearest wormholes
+const WORMHOLE_COOLDOWN = 60000; // 60 seconds base cooldown between wormhole uses
 
 /**
  * Check if player has the Wormhole Gem relic
@@ -24,6 +26,56 @@ const MAX_DESTINATIONS = 5; // Show 5 nearest wormholes
 function hasWormholeGem(playerId) {
   const relic = statements.hasRelic.get(playerId, 'WORMHOLE_GEM');
   return !!relic;
+}
+
+/**
+ * Check if player has the Subspace Warp Drive relic
+ * @param {number} playerId - Player's user ID
+ * @returns {boolean}
+ */
+function hasSubspaceWarpDrive(playerId) {
+  const relic = statements.hasRelic.get(playerId, 'SUBSPACE_WARP_DRIVE');
+  return !!relic;
+}
+
+/**
+ * Get transit modifiers for a player based on relics
+ * @param {number} playerId - Player's user ID
+ * @returns {{transitDuration: number, cooldown: number, hasVoidWarp: boolean}}
+ */
+function getTransitModifiers(playerId) {
+  const hasVoidWarp = hasSubspaceWarpDrive(playerId);
+
+  // Subspace Warp Drive: 2.5x velocity (divide duration), 0.75x cooldown
+  const velocityMult = hasVoidWarp ? 2.5 : 1;
+  const cooldownMult = hasVoidWarp ? 0.75 : 1;
+
+  return {
+    transitDuration: Math.round(TRANSIT_DURATION / velocityMult),
+    cooldown: Math.round(WORMHOLE_COOLDOWN * cooldownMult),
+    hasVoidWarp
+  };
+}
+
+/**
+ * Check if player is on wormhole cooldown
+ * @param {number} playerId - Player's user ID
+ * @returns {{onCooldown: boolean, remainingMs: number}}
+ */
+function checkWormholeCooldown(playerId) {
+  const lastUse = wormholeCooldowns.get(playerId);
+  if (!lastUse) {
+    return { onCooldown: false, remainingMs: 0 };
+  }
+
+  const modifiers = getTransitModifiers(playerId);
+  const elapsed = Date.now() - lastUse;
+  const remaining = modifiers.cooldown - elapsed;
+
+  return {
+    onCooldown: remaining > 0,
+    remainingMs: Math.max(0, remaining)
+  };
 }
 
 /**
@@ -115,6 +167,13 @@ function canEnterWormhole(player, wormholeId) {
   // Check if already in transit
   if (activeTransits.has(player.id)) {
     return { success: false, error: 'Already in wormhole transit.' };
+  }
+
+  // Check cooldown
+  const cooldownCheck = checkWormholeCooldown(player.id);
+  if (cooldownCheck.onCooldown) {
+    const seconds = Math.ceil(cooldownCheck.remainingMs / 1000);
+    return { success: false, error: `Wormhole cooldown: ${seconds}s remaining.` };
   }
 
   // Get wormhole
@@ -210,15 +269,21 @@ function selectDestination(playerId, destinationId) {
     clearTimeout(transit.selectionTimeout);
   }
 
+  // Get transit modifiers based on relics (Subspace Warp Drive)
+  const modifiers = getTransitModifiers(playerId);
+
   // Update transit state
   transit.phase = 'transit';
   transit.destinationId = destinationId;
   transit.destination = destination;
   transit.transitStartTime = Date.now();
+  transit.transitDuration = modifiers.transitDuration;
+  transit.hasVoidWarp = modifiers.hasVoidWarp;
 
   return {
     success: true,
-    duration: TRANSIT_DURATION,
+    duration: modifiers.transitDuration,
+    hasVoidWarp: modifiers.hasVoidWarp,
     destination: {
       id: destination.id,
       x: destination.x,
@@ -248,14 +313,16 @@ function getTransitProgress(playerId) {
   }
 
   if (transit.phase === 'transit') {
+    const duration = transit.transitDuration || TRANSIT_DURATION;
     const elapsed = Date.now() - transit.transitStartTime;
-    const progress = Math.min(1, elapsed / TRANSIT_DURATION);
+    const progress = Math.min(1, elapsed / duration);
 
     return {
       inTransit: true,
       phase: 'transit',
       progress,
       destination: transit.destination,
+      hasVoidWarp: transit.hasVoidWarp,
       complete: progress >= 1
     };
   }
@@ -275,13 +342,15 @@ function completeTransit(playerId) {
     return { success: false, error: 'Not in transit.' };
   }
 
+  const duration = transit.transitDuration || TRANSIT_DURATION;
   const elapsed = Date.now() - transit.transitStartTime;
-  if (elapsed < TRANSIT_DURATION) {
+  if (elapsed < duration) {
     return { success: false, error: 'Transit not complete.' };
   }
 
   // Get destination wormhole
   const destination = transit.destination;
+  const hasVoidWarp = transit.hasVoidWarp;
 
   // Calculate exit position (slightly offset from wormhole center)
   const exitOffset = 80; // Exit 80 units away from wormhole center
@@ -291,13 +360,17 @@ function completeTransit(playerId) {
     y: destination.y + Math.sin(exitAngle) * exitOffset
   };
 
+  // Set cooldown timer (starts after transit completes)
+  wormholeCooldowns.set(playerId, Date.now());
+
   // Clean up transit state
   activeTransits.delete(playerId);
 
   return {
     success: true,
     position: exitPosition,
-    wormholeId: destination.id
+    wormholeId: destination.id,
+    hasVoidWarp
   };
 }
 
@@ -354,6 +427,9 @@ function cleanupPlayer(playerId) {
 
 module.exports = {
   hasWormholeGem,
+  hasSubspaceWarpDrive,
+  getTransitModifiers,
+  checkWormholeCooldown,
   getNearestWormholes,
   getWormholeById,
   canEnterWormhole,
@@ -367,5 +443,6 @@ module.exports = {
   cleanupPlayer,
   TRANSIT_DURATION,
   WORMHOLE_RANGE,
+  WORMHOLE_COOLDOWN,
   MAX_DESTINATIONS
 };

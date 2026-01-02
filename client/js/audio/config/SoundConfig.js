@@ -372,6 +372,59 @@ const SoundConfig = {
   },
 
   // ============================================
+  // VOID LEVIATHAN BOSS
+  // ============================================
+  void_leviathan_spawn: {
+    file: "bosses/void_leviathan_spawn.mp3",
+    baseVolume: 1.0,
+    priority: 100,
+    category: "sfx",
+  },
+  void_leviathan_death: {
+    file: "bosses/void_leviathan_death.mp3",
+    baseVolume: 1.0,
+    priority: 100,
+    category: "sfx",
+  },
+  void_gravity_warning: {
+    file: "bosses/void_gravity_warning.mp3",
+    baseVolume: 0.9,
+    priority: 95,
+    category: "sfx",
+  },
+  void_gravity_active: {
+    file: "bosses/void_gravity_active.mp3",
+    baseVolume: 0.75,
+    priority: 85,
+    category: "ambient",
+    loop: true,
+  },
+  void_consume: {
+    file: "bosses/void_consume.mp3",
+    baseVolume: 0.9,
+    priority: 95,
+    category: "sfx",
+  },
+  void_rift_open: {
+    file: "environment/void_rift_open.mp3",
+    baseVolume: 0.8,
+    priority: 80,
+    category: "sfx",
+  },
+  void_rift_close: {
+    file: "environment/void_rift_close.mp3",
+    baseVolume: 0.75,
+    priority: 75,
+    category: "sfx",
+  },
+  void_warp_transit: {
+    file: "environment/void_warp_transit.mp3",
+    baseVolume: 0.85,
+    priority: 100,
+    category: "sfx",
+  },
+
+  // ============================================
   // MINING
   // ============================================
   mining_drill_1: {
@@ -564,6 +617,12 @@ const SoundConfig = {
     file: "rewards/relic_wormhole.mp3",
     baseVolume: 0.85,
     priority: 95,
+    category: "sfx",
+  },
+  reward_relic_subspace: {
+    file: "rewards/relic_subspace.mp3",
+    baseVolume: 0.9,
+    priority: 100,
     category: "sfx",
   },
 

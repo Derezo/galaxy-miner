@@ -1327,6 +1327,21 @@ const CONSTANTS = {
       cooldown: 15000,          // 15 second cooldown
       plunderRange: 200,        // Must be within 200 units of base edge
       aggroRange: 600           // NPCs within 600 units become hostile
+    },
+    SUBSPACE_WARP_DRIVE: {
+      id: 'subspace_warp_drive',
+      name: 'Subspace Warp Drive',
+      rarity: 'ultrarare',
+      value: 3000,
+      description: 'A crystallized fragment of void energy that bends spacetime. Dramatically increases warp velocity and reduces cooldown.',
+      iconType: 'subspace_warp_drive',
+      glyphVariant: 'void',
+      glowColor: '#9900ff',
+      effect: 'warp_enhancement',
+      effects: {
+        warpVelocityMultiplier: 2.5,    // +150% velocity
+        warpCooldownMultiplier: 0.75    // -25% cooldown
+      }
     }
   },
 
@@ -1586,6 +1601,162 @@ const CONSTANTS = {
     rogue_prospector: 'swarm_drone',
     rogue_driller: 'swarm_worker',
     rogue_excavator: 'swarm_warrior'
+  },
+
+  // ==========================================
+  // VOID LEVIATHAN BOSS CONFIGURATION
+  // ==========================================
+
+  // Void Leviathan spawn trigger
+  VOID_LEVIATHAN_SPAWN: {
+    SPAWN_CHANCE: 0.05,                 // 5% chance on any void NPC death
+    SPAWN_COOLDOWN: 300000,             // 5 minute cooldown between spawns
+    SPAWN_SEQUENCE_DURATION: 7000,      // 7 second cinematic entrance
+    MAX_LEVIATHANS: 1                   // Only one at a time
+  },
+
+  // Void Leviathan stats (3x base void_leviathan)
+  VOID_LEVIATHAN_STATS: {
+    hull: 1500,
+    shield: 900,
+    speed: 50,
+    weaponDamage: 60,
+    weaponRange: 400,
+    aggroRange: 800,
+    creditReward: 2500
+  },
+
+  // Void Leviathan abilities
+  VOID_LEVIATHAN_ABILITIES: {
+    GRAVITY_WELL: {
+      warningDuration: 1500,            // 1.5 second warning
+      activeDuration: 4000,             // 4 seconds active pull
+      cooldown: 15000,                  // 15 second cooldown
+      radius: 300,                      // Effect radius
+      pullStrength: 150,                // Pull force (units/sec)
+      damageCenter: 50,                 // Damage per second at center
+      damageEdge: 10,                   // Damage per second at edge
+      damageRadius: 80,                 // Lethal center radius
+      colors: {
+        warning: '#660099',             // Dark purple warning
+        vortex: '#9900ff',              // Purple vortex
+        lightning: '#cc66ff',           // Light purple lightning
+        core: '#000000'                 // Black core
+      }
+    },
+    CONSUME: {
+      range: 400,                       // Range to grab NPCs
+      cooldown: 5000,                   // 5 second cooldown
+      healMultiplier: 1.0,              // Heal full health of consumed NPC
+      tendrilSpeed: 300,                // Tendril extension speed
+      dragDuration: 1500,               // Time to drag NPC in
+      tendrilCount: 4,                  // Number of tendrils
+      colors: {
+        tendril: '#330066',             // Dark purple tendrils
+        energy: '#9900ff',              // Purple energy glow
+        dissolve: '#cc66ff'             // Dissolve flash
+      }
+    }
+  },
+
+  // Void Leviathan minion spawning
+  VOID_LEVIATHAN_MINIONS: {
+    // Health threshold spawns
+    thresholds: [
+      { health: 0.75, rifts: 2 },       // 2 rifts at 75%
+      { health: 0.50, rifts: 3 },       // 3 rifts at 50%
+      { health: 0.25, rifts: 4 },       // 4 rifts at 25%
+      { health: 0.10, rifts: 5 }        // 5 rifts at 10%
+    ],
+    // Continuous spawning
+    continuousInterval: 12000,          // Every 12 seconds
+    minionsPerRift: { min: 1, max: 2 }, // 1-2 minions per rift
+    minionType: 'void_whisper',         // Spawn whispers
+    maxActiveMinions: 20                // Cap on spawned minions
+  },
+
+  // Void particle effect configuration
+  VOID_PARTICLE_CONFIG: {
+    // Tier-based particle counts (base, combat multiplier, low health multiplier)
+    tiers: {
+      void_whisper:   { base: 3,  combat: 1.5, lowHealth: 2.0 },
+      void_shadow:    { base: 6,  combat: 1.8, lowHealth: 2.5 },
+      void_phantom:   { base: 10, combat: 2.0, lowHealth: 3.0 },
+      void_leviathan: { base: 20, combat: 2.5, lowHealth: 4.0 }
+    },
+    // Color palette (dark, sinister, minimal glow)
+    colors: {
+      primary: '#660099',               // Deep purple
+      secondary: '#330066',             // Darker purple
+      accent: '#aa00ff',                // Bright accent (sparingly)
+      core: '#000000',                  // Void black
+      edge: '#4400661a'                 // Faint purple edge (10% opacity)
+    },
+    // Animation settings
+    orbitRadius: { min: 15, max: 35 },  // Distance from ship center
+    orbitSpeed: { patrol: 1.0, combat: 2.5, lowHealth: 4.0 },
+    particleSize: { min: 2, max: 5 },
+    trailLength: 3
+  },
+
+  // Void rift portal visual types (tier-based)
+  VOID_RIFT_VISUALS: {
+    void_whisper: {
+      type: 'elliptical',               // Clean portal
+      segments: 32,
+      wobble: 0.05,
+      size: 40,
+      colors: { edge: '#660099', interior: '#00000080' }
+    },
+    void_shadow: {
+      type: 'organic',                  // Pulsing fissure
+      segments: 24,
+      pulseSpeed: 1.5,
+      breatheAmount: 0.1,
+      size: 50,
+      colors: { edge: '#9900ff', interior: '#33006680' }
+    },
+    void_phantom: {
+      type: 'jagged',                   // Shattered glass cracks
+      segments: 16,
+      crackDepth: 0.3,
+      shatterCount: 5,
+      size: 60,
+      colors: { edge: '#cc66ff', interior: '#66009980', cracks: '#9900ff' }
+    },
+    void_leviathan: {
+      type: 'chaotic',                  // Converging nightmare
+      segments: 48,
+      convergenceSpeed: 0.5,
+      crackCount: 8,
+      size: 120,
+      colors: {
+        edge: '#ff00ff',
+        interior: '#000000',
+        cracks: '#9900ff',
+        energy: '#cc66ff'
+      }
+    }
+  },
+
+  // Void death effects
+  VOID_DEATH_EFFECTS: {
+    void_leviathan: {
+      duration: 5000,
+      phases: [
+        { name: 'rift_collapse', start: 0, end: 0.3 },
+        { name: 'void_implosion', start: 0.3, end: 0.7 },
+        { name: 'dimensional_tear', start: 0.7, end: 1.0 }
+      ],
+      colors: {
+        void: '#660099',
+        rift: '#000000',
+        energy: '#cc66ff',
+        flash: '#9900ff'
+      },
+      screenShake: { start: 5, peak: 20, duration: 4500 },
+      particleCount: 200
+    }
   },
 
   // Wreckage

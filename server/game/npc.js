@@ -262,18 +262,22 @@ const NPC_TYPES = {
   void_leviathan: {
     name: 'Void Leviathan',
     faction: 'void',
-    hull: 500,
-    shield: 300,
+    hull: 1500,          // 3x base (was 500)
+    shield: 900,         // 3x base (was 300)
     speed: 50,
     weaponType: 'energy',
     weaponTier: 5,
-    weaponDamage: 60,  // Buffed +50% (was 40)
+    weaponDamage: 60,
     weaponRange: 400,
     aggroRange: 800,
-    creditReward: 1200,  // Tier: boss (was 1000)
-    deathEffect: 'implode',
+    creditReward: 2500,  // Increased for difficulty (was 1200)
+    deathEffect: 'void_leviathan_death',  // Special death sequence
     isBoss: true,
-    formationLeader: true
+    formationLeader: true,
+    // Leviathan boss abilities
+    hasGravityWell: true,
+    canConsume: true,
+    spawnsMinions: true
   },
 
   // === ROGUE MINERS (Mining AI, Retreat at 50%) ===
@@ -400,6 +404,10 @@ const sectorAssimilationCount = new Map();
 // Active swarm queen reference (server-wide singleton)
 let activeQueen = null;
 let lastQueenSpawnTime = 0;
+
+// Void Leviathan tracking
+let activeLeviathan = null;
+let lastLeviathanSpawnTime = 0;
 let lastQueenAuraBroadcast = 0;
 
 /**
@@ -845,6 +853,125 @@ function handleQueenDeath(queenId) {
     activeQueen = null;
     lastQueenSpawnTime = Date.now(); // Start cooldown from death
   }
+}
+
+// ==========================================
+// VOID LEVIATHAN BOSS SPAWNING
+// ==========================================
+
+/**
+ * Check if Void Leviathan should spawn after void NPC death
+ * @param {Object} deadNPC - The void NPC that just died
+ * @param {Object} position - Position where NPC died { x, y }
+ * @returns {Object|null} Spawn data if triggered, null otherwise
+ */
+function checkLeviathanSpawn(deadNPC, position) {
+  // Skip if dead NPC is already a leviathan
+  if (deadNPC.type === 'void_leviathan') return null;
+
+  // Skip if not void faction
+  if (deadNPC.faction !== 'void') return null;
+
+  const config = CONSTANTS.VOID_LEVIATHAN_SPAWN;
+  if (!config) return null;
+
+  // Check if already active
+  if (activeLeviathan) return null;
+
+  // Check cooldown
+  if (Date.now() - lastLeviathanSpawnTime < config.SPAWN_COOLDOWN) return null;
+
+  // Roll for spawn chance (5%)
+  if (Math.random() > config.SPAWN_CHANCE) return null;
+
+  logger.info(`[VOID] Leviathan spawn triggered by death of ${deadNPC.type} at (${Math.round(position.x)}, ${Math.round(position.y)})`);
+
+  return {
+    spawnPosition: position,
+    spawnSequence: true,
+    sequenceDuration: config.SPAWN_SEQUENCE_DURATION
+  };
+}
+
+/**
+ * Spawn Void Leviathan with cinematic entrance
+ * @param {Object} position - Spawn position { x, y }
+ * @returns {Object} Leviathan NPC data
+ */
+function spawnVoidLeviathan(position) {
+  const leviathanType = NPC_TYPES.void_leviathan;
+  const leviathanId = `void_leviathan_${Date.now()}`;
+
+  const leviathan = {
+    id: leviathanId,
+    type: 'void_leviathan',
+    name: leviathanType.name,
+    faction: 'void',
+    position: { x: position.x, y: position.y },
+    x: position.x,
+    y: position.y,
+    vx: 0,
+    vy: 0,
+    rotation: 0,
+    hull: leviathanType.hull,
+    hullMax: leviathanType.hull,
+    maxHull: leviathanType.hull,
+    shield: leviathanType.shield,
+    shieldMax: leviathanType.shield,
+    maxShield: leviathanType.shield,
+    speed: leviathanType.speed,
+    weaponType: leviathanType.weaponType,
+    weaponTier: leviathanType.weaponTier,
+    weaponDamage: leviathanType.weaponDamage,
+    weaponRange: leviathanType.weaponRange,
+    aggroRange: leviathanType.aggroRange,
+    creditReward: leviathanType.creditReward,
+    deathEffect: leviathanType.deathEffect,
+    lastFireTime: 0,
+    state: 'spawning',  // Start in spawning state for cinematic
+    spawnTime: Date.now(),
+    spawnDuration: CONSTANTS.VOID_LEVIATHAN_SPAWN.SPAWN_SEQUENCE_DURATION,
+    targetId: null,
+    isBoss: true,
+    isLeviathan: true,
+    formationLeader: true,
+    // Boss abilities
+    hasGravityWell: true,
+    canConsume: true,
+    spawnsMinions: true,
+    // Rift portal for retreat (massive chaotic rift)
+    riftPortal: { x: position.x, y: position.y },
+    // Damage tracking
+    damageContributors: new Map()
+  };
+
+  activeNPCs.set(leviathanId, leviathan);
+  activeLeviathan = leviathan;
+  lastLeviathanSpawnTime = Date.now();
+
+  logger.info(`[VOID] Leviathan spawning at (${Math.round(position.x)}, ${Math.round(position.y)})`);
+
+  return leviathan;
+}
+
+/**
+ * Handle Leviathan death - clear singleton and start cooldown
+ * @param {string} leviathanId - Leviathan NPC ID
+ */
+function handleLeviathanDeath(leviathanId) {
+  if (activeLeviathan && activeLeviathan.id === leviathanId) {
+    logger.info('[VOID] Leviathan destroyed. Cooldown started.');
+    activeLeviathan = null;
+    lastLeviathanSpawnTime = Date.now(); // Start cooldown from death
+  }
+}
+
+/**
+ * Get active Leviathan (if any)
+ * @returns {Object|null} Active Leviathan or null
+ */
+function getActiveLeviathan() {
+  return activeLeviathan;
 }
 
 /**
@@ -1401,6 +1528,11 @@ function spawnNPCFromBase(baseId) {
       : 0,
     state: isSwarmFaction ? 'hatching' : 'patrol'
   };
+
+  // Void NPCs spawn with a persistent rift portal they can retreat into
+  if (npcTypeData.faction === 'void') {
+    npc.riftPortal = { x: spawnX, y: spawnY };
+  }
 
   activeNPCs.set(npcId, npc);
   base.spawnedNPCs.push(npcId);
@@ -2553,6 +2685,21 @@ function damageNPC(npcId, damage, attackerId = null) {
       }
     }
 
+    // Void NPC death - chance to spawn Void Leviathan
+    if (npc.faction === 'void' && npc.type !== 'void_leviathan') {
+      const leviathanSpawn = checkLeviathanSpawn(npc, { x: npc.position.x, y: npc.position.y });
+      if (leviathanSpawn) {
+        // Return spawn trigger for engine to handle
+        leviathanSpawn.triggerLeviathanSpawn = true;
+      }
+    }
+
+    // Clean up Leviathan AI state when Leviathan dies
+    if (npc.type === 'void_leviathan') {
+      const { voidLeviathanAI } = require('./ai/void-leviathan');
+      voidLeviathanAI.cleanup(npcId);
+    }
+
     // Log if this was an attached worm being killed
     if (npc.attachedToBase) {
       logger.warn(`[WORM_KILLED] Attached worm ${npcId} killed while attached to base ${npc.attachedToBase}. Killer: ${attackerId}`);
@@ -3130,6 +3277,11 @@ module.exports = {
   handleQueenDeath,
   applyQueenAura,
   getDronesAssimilating,
+  // Void Leviathan Boss
+  checkLeviathanSpawn,
+  spawnVoidLeviathan,
+  handleLeviathanDeath,
+  getActiveLeviathan,
   clearAssimilationProgress,
   getAssimilationState,
   getActiveQueen,

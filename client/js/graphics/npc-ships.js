@@ -895,6 +895,11 @@ const NPCShipGeometry = {
       this.drawRogueMinerShipEffects(ctx, variant, variantNum, colors, time, npc);
     }
 
+    // Special Void rendering: ethereal glow, dark energy core
+    if (actualFaction === 'void') {
+      this.drawVoidShipEffects(ctx, variant, variantNum, colors, time, npc);
+    }
+
     ctx.restore();
 
     // Draw rage indicators AFTER restore (in screen space) for all scavengers
@@ -907,6 +912,11 @@ const NPCShipGeometry = {
     if (actualFaction === 'rogue_miner' && npc && npc.state === 'enraged') {
       const effectSize = this.SIZE * scale;
       this.drawRogueMinerRageEffects(ctx, screenPos, effectSize, time);
+    }
+
+    // Draw void swirling particles (in screen space, around ship)
+    if (actualFaction === 'void' && npc) {
+      this.drawVoidParticles(ctx, screenPos, scale, npc, rotation, time);
     }
   },
 
@@ -2604,5 +2614,201 @@ const NPCShipGeometry = {
     ctx.fill();
 
     ctx.restore();
+  },
+
+  /**
+   * Draw Void-specific ship effects: ethereal glow, dark energy core, energy trails
+   * Called within the rotated/scaled ship context
+   */
+  drawVoidShipEffects(ctx, variant, variantNum, colors, time, npc) {
+    const SIZE = this.SIZE;
+    const currentTime = time || Date.now();
+
+    // Determine intensity based on state
+    let intensityMult = 1.0;
+    if (npc) {
+      if (npc.state === 'combat' || npc.state === 'attacking') intensityMult = 1.5;
+      if (npc.hull && npc.hullMax && npc.hull / npc.hullMax < 0.3) intensityMult = 2.0;
+    }
+
+    // Dark energy core (pulsing void center)
+    const corePulse = 0.7 + Math.sin(currentTime * 0.004) * 0.3 * intensityMult;
+    const coreSize = SIZE * 0.2 * (variantNum * 0.5 + 0.5);
+
+    const coreGradient = ctx.createRadialGradient(0, 0, 0, 0, 0, coreSize);
+    coreGradient.addColorStop(0, '#000000');
+    coreGradient.addColorStop(0.5, `rgba(51, 0, 102, ${0.6 * corePulse})`);
+    coreGradient.addColorStop(1, 'transparent');
+
+    ctx.fillStyle = coreGradient;
+    ctx.beginPath();
+    ctx.arc(0, 0, coreSize, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Energy trails along hull edges (for larger variants)
+    if (variantNum >= 2) {
+      const trailPulse = (Math.sin(currentTime * 0.006) + 1) / 2;
+      ctx.strokeStyle = `rgba(153, 0, 255, ${0.3 + trailPulse * 0.4 * intensityMult})`;
+      ctx.lineWidth = 1 + variantNum * 0.5;
+      ctx.shadowColor = '#9900ff';
+      ctx.shadowBlur = 5 * intensityMult;
+
+      // Draw energy lines along ship
+      const trailLength = SIZE * 0.6 * variantNum;
+      ctx.beginPath();
+      ctx.moveTo(SIZE * 0.3, -SIZE * 0.15);
+      ctx.lineTo(-trailLength * 0.5, -SIZE * 0.3);
+      ctx.moveTo(SIZE * 0.3, SIZE * 0.15);
+      ctx.lineTo(-trailLength * 0.5, SIZE * 0.3);
+      ctx.stroke();
+
+      ctx.shadowBlur = 0;
+    }
+
+    // Leviathan special: multiple energy vortexes
+    if (variantNum === 4) {
+      const vortexPulse = (Math.sin(currentTime * 0.003) + 1) / 2;
+
+      // Side vortexes
+      for (const side of [-1, 1]) {
+        const vortexY = side * SIZE * 0.5;
+
+        ctx.save();
+        ctx.translate(0, vortexY);
+        ctx.rotate(currentTime * 0.002 * side);
+
+        const vortexGradient = ctx.createRadialGradient(0, 0, 0, 0, 0, SIZE * 0.25);
+        vortexGradient.addColorStop(0, '#000000');
+        vortexGradient.addColorStop(0.6, `rgba(102, 0, 153, ${0.4 + vortexPulse * 0.3})`);
+        vortexGradient.addColorStop(1, 'transparent');
+
+        ctx.fillStyle = vortexGradient;
+        ctx.beginPath();
+        ctx.arc(0, 0, SIZE * 0.25, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Swirl lines
+        ctx.strokeStyle = `rgba(204, 102, 255, ${0.3 + vortexPulse * 0.2})`;
+        ctx.lineWidth = 1;
+        for (let i = 0; i < 3; i++) {
+          const swirlAngle = (i / 3) * Math.PI * 2;
+          ctx.beginPath();
+          ctx.arc(0, 0, SIZE * 0.15, swirlAngle, swirlAngle + Math.PI * 0.7);
+          ctx.stroke();
+        }
+
+        ctx.restore();
+      }
+
+      // Central menacing glow
+      const centralGlow = ctx.createRadialGradient(0, 0, 0, 0, 0, SIZE * 0.4);
+      centralGlow.addColorStop(0, '#000000');
+      centralGlow.addColorStop(0.4, `rgba(51, 0, 102, ${0.5 + vortexPulse * 0.3})`);
+      centralGlow.addColorStop(0.7, `rgba(153, 0, 255, ${0.2 + vortexPulse * 0.2})`);
+      centralGlow.addColorStop(1, 'transparent');
+
+      ctx.fillStyle = centralGlow;
+      ctx.beginPath();
+      ctx.arc(0, 0, SIZE * 0.4, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // Phantom (variant 3): shimmering phase effect
+    if (variantNum === 3) {
+      const phasePulse = Math.sin(currentTime * 0.008);
+      ctx.globalAlpha = 0.1 + phasePulse * 0.1;
+
+      // Ghost duplicate offset
+      ctx.fillStyle = `rgba(153, 0, 255, 0.3)`;
+      ctx.translate(phasePulse * 3, phasePulse * 2);
+
+      const phantomPath = this.cachedPaths[variant];
+      if (phantomPath) {
+        ctx.fill(phantomPath);
+      }
+
+      ctx.globalAlpha = 1;
+    }
+  },
+
+  /**
+   * Draw void swirling particles around NPC (in screen space)
+   * Integrates with VoidParticles from void-effects.js if available
+   */
+  drawVoidParticles(ctx, screenPos, scale, npc, rotation, time) {
+    // Use VoidParticles system if available
+    if (typeof VoidParticles !== 'undefined' && npc.id) {
+      // Initialize particles if not already
+      if (!VoidParticles.npcParticles.has(npc.id)) {
+        const state = this.getVoidNPCState(npc);
+        VoidParticles.initNPC(npc.id, npc.type, state);
+      } else {
+        // Update state if changed
+        const currentState = this.getVoidNPCState(npc);
+        VoidParticles.updateState(npc.id, currentState);
+      }
+
+      // Draw particles
+      VoidParticles.draw(ctx, screenPos.x, screenPos.y, npc.id, rotation);
+      return;
+    }
+
+    // Fallback: simple void particles if VoidParticles not loaded
+    const SIZE = this.SIZE * scale;
+    const currentTime = time || Date.now();
+    const variantNum = this.getVariant(npc.type);
+
+    // Particle count based on variant
+    const particleCount = Math.max(2, Math.floor((variantNum + 2) * 1.5));
+
+    ctx.save();
+
+    for (let i = 0; i < particleCount; i++) {
+      const angle = (i / particleCount) * Math.PI * 2 + currentTime * 0.002;
+      const wobble = Math.sin(currentTime * 0.003 + i) * 5;
+      const radius = SIZE * 0.8 + wobble;
+
+      const px = screenPos.x + Math.cos(angle) * radius;
+      const py = screenPos.y + Math.sin(angle) * radius;
+
+      // Dark particle with subtle glow
+      const gradient = ctx.createRadialGradient(px, py, 0, px, py, 4);
+      gradient.addColorStop(0, '#660099');
+      gradient.addColorStop(0.6, 'rgba(102, 0, 153, 0.5)');
+      gradient.addColorStop(1, 'transparent');
+
+      ctx.fillStyle = gradient;
+      ctx.beginPath();
+      ctx.arc(px, py, 4, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Void black center
+      ctx.fillStyle = '#000000';
+      ctx.beginPath();
+      ctx.arc(px, py, 1.5, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    ctx.restore();
+  },
+
+  /**
+   * Get void NPC state for particle intensity
+   */
+  getVoidNPCState(npc) {
+    if (!npc) return 'patrol';
+
+    // Check for low health
+    if (npc.hull && npc.hullMax && npc.hull / npc.hullMax < 0.3) {
+      return 'low_health';
+    }
+
+    // Check for combat state
+    if (npc.state === 'combat' || npc.state === 'attacking' ||
+        npc.state === 'pursuing' || npc.targetPlayer) {
+      return 'combat';
+    }
+
+    return 'patrol';
   }
 };

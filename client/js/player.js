@@ -1107,18 +1107,24 @@ const Player = {
     this.wormholeTransitPhase = 'transit';
     this.wormholeDestination = data.destination;
     this.wormholeTransitProgress = 0;
+    this.hasVoidWarp = data.hasVoidWarp || false;
 
     // Stop ambient and play transit sound
     if (typeof AudioManager !== 'undefined') {
       AudioManager.stopLoop('wormhole_ambient');
-      AudioManager.play('wormhole_transit');
+      // Play void warp sound if player has Subspace Warp Drive
+      if (data.hasVoidWarp) {
+        AudioManager.play('void_warp_transit');
+      } else {
+        AudioManager.play('wormhole_transit');
+      }
     }
 
     if (typeof WormholeTransitUI !== 'undefined') {
-      WormholeTransitUI.startTransit(data.duration, data.destination);
+      WormholeTransitUI.startTransit(data.duration, data.destination, data.hasVoidWarp);
     }
 
-    Logger.log('[Wormhole] Transit started to', data.destination);
+    Logger.log('[Wormhole] Transit started to', data.destination, data.hasVoidWarp ? '(void warp)' : '');
   },
 
   /**

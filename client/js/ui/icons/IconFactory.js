@@ -384,6 +384,16 @@ const IconFactory = {
       } else {
         icon = this._createFallbackRelicIcon(size);
       }
+    } else if (relicInfo.iconType === 'subspace_warp_drive') {
+      // Use SubspaceWarpDriveShape for the Subspace Warp Drive relic
+      if (typeof SubspaceWarpDriveShape !== 'undefined') {
+        icon = SubspaceWarpDriveShape.create({
+          size,
+          glowIntensity: 0.9
+        });
+      } else {
+        icon = this._createFallbackRelicIcon(size);
+      }
     } else {
       // Default: use RelicShape (stone monument)
       if (typeof RelicShape !== 'undefined') {

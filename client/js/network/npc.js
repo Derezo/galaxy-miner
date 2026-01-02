@@ -987,6 +987,108 @@ function register(socket) {
       Renderer.shake(15, 500);
     }
   });
+
+  // ============================================
+  // VOID LEVIATHAN EVENTS
+  // ============================================
+
+  // Void Leviathan spawn sequence (cinematic entrance)
+  socket.on('void:leviathanSpawn', (data) => {
+    Logger.log('Void Leviathan spawning at', data.position);
+
+    // Trigger cinematic spawn sequence
+    if (typeof LeviathanSpawn !== 'undefined') {
+      LeviathanSpawn.trigger(data.position, data.sequenceDuration);
+    }
+
+    // Play ominous spawn sound
+    if (typeof AudioManager !== 'undefined' && AudioManager.isReady && AudioManager.isReady()) {
+      AudioManager.playAt('void_leviathan_spawn', data.position.x, data.position.y);
+    }
+
+    // Warning notification
+    if (typeof NotificationManager !== 'undefined') {
+      NotificationManager.show('The Void Leviathan approaches...', 'danger');
+    }
+
+    // Mild screen shake during buildup
+    if (typeof Renderer !== 'undefined' && Renderer.shake) {
+      Renderer.shake(3, data.sequenceDuration);
+    }
+  });
+
+  // Void Leviathan gravity well ability
+  socket.on('void:gravityWell', (data) => {
+    Logger.log('Gravity well:', data.phase, 'at', data.position);
+
+    if (typeof VoidEffects !== 'undefined') {
+      if (data.phase === 'warning') {
+        VoidEffects.gravityWellWarning(data.position, data.radius, data.warningDuration);
+        // Play warning sound
+        if (typeof AudioManager !== 'undefined' && AudioManager.isReady && AudioManager.isReady()) {
+          AudioManager.playAt('void_gravity_warning', data.position.x, data.position.y);
+        }
+      } else if (data.phase === 'active') {
+        VoidEffects.gravityWellActive(data.position, data.radius, data.activeDuration);
+        // Play active vortex sound
+        if (typeof AudioManager !== 'undefined' && AudioManager.isReady && AudioManager.isReady()) {
+          AudioManager.playAt('void_gravity_active', data.position.x, data.position.y);
+        }
+      } else if (data.phase === 'end') {
+        VoidEffects.gravityWellEnd();
+      }
+    }
+  });
+
+  // Void Leviathan consume ability
+  socket.on('void:consume', (data) => {
+    Logger.log('Void consume:', data.phase, 'target:', data.targetNpcId);
+
+    if (typeof VoidEffects !== 'undefined') {
+      if (data.phase === 'tendril') {
+        VoidEffects.consumeTendril(data.leviathanId, data.targetNpcId, data.targetPosition, data.tendrilSpeed);
+      } else if (data.phase === 'drag') {
+        VoidEffects.consumeDrag(data.leviathanId, data.targetNpcId, data.dragDuration);
+      } else if (data.phase === 'dissolve') {
+        VoidEffects.consumeDissolve(data.leviathanId, data.targetNpcId);
+        // Play consume sound
+        if (typeof AudioManager !== 'undefined' && AudioManager.isReady && AudioManager.isReady()) {
+          const leviathan = Entities.npcs.get(data.leviathanId);
+          if (leviathan) {
+            AudioManager.playAt('void_consume', leviathan.x, leviathan.y);
+          }
+        }
+      }
+    }
+  });
+
+  // Void Leviathan minion spawning
+  socket.on('void:spawnMinions', (data) => {
+    Logger.log('Void minion spawn:', data.riftCount, 'rifts at', data.position);
+
+    if (typeof VoidEffects !== 'undefined') {
+      VoidEffects.spawnRifts(data.position, data.riftCount, data.trigger, data.healthThreshold);
+    }
+
+    // Play rift opening sound
+    if (typeof AudioManager !== 'undefined' && AudioManager.isReady && AudioManager.isReady()) {
+      AudioManager.playAt('void_rift_open', data.position.x, data.position.y);
+    }
+  });
+
+  // Void NPC retreating into rift
+  socket.on('void:riftRetreat', (data) => {
+    Logger.log('Void NPC retreating into rift:', data.npcId);
+
+    if (typeof VoidEffects !== 'undefined') {
+      VoidEffects.riftRetreat(data.npcId, data.riftPosition, data.npcType);
+    }
+
+    // Play rift closing sound
+    if (typeof AudioManager !== 'undefined' && AudioManager.isReady && AudioManager.isReady()) {
+      AudioManager.playAt('void_rift_close', data.riftPosition.x, data.riftPosition.y);
+    }
+  });
 }
 
 // Export for use in Network module

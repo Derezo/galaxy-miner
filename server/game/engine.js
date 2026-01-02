@@ -1443,6 +1443,213 @@ function updateNPCs(deltaTime) {
         shieldMax: npcEntity.shieldMax,
         healRate: action.healRate
       });
+    } else if (action && action.action === 'void_gravity_well') {
+      // ============================================
+      // VOID LEVIATHAN: Gravity Well ability
+      // ============================================
+      broadcastNearNpc(npcEntity, 'void:gravityWell', {
+        leviathanId: action.leviathanId,
+        position: action.position,
+        phase: action.phase,
+        radius: action.radius,
+        warningDuration: action.warningDuration,
+        activeDuration: action.activeDuration
+      });
+    } else if (action && action.action === 'void_gravity_well_tick') {
+      // ============================================
+      // VOID LEVIATHAN: Gravity Well active tick - apply pull and damage
+      // ============================================
+      const gravityConfig = config.VOID_LEVIATHAN_ABILITIES?.GRAVITY_WELL;
+      if (!gravityConfig) continue;
+
+      for (const affected of action.affectedPlayers || []) {
+        const playerSocketId = [...connectedPlayers.entries()]
+          .find(([, p]) => p.id === affected.id)?.[0];
+
+        if (!playerSocketId) continue;
+        const player = connectedPlayers.get(playerSocketId);
+        if (!player || player.isDead) continue;
+
+        // Calculate damage based on distance from center
+        const distRatio = affected.distance / action.radius;
+        const damage = distRatio < 0.3
+          ? gravityConfig.damageCenter  // Center zone - high damage
+          : gravityConfig.damageEdge + (gravityConfig.damageCenter - gravityConfig.damageEdge) * (1 - distRatio);
+
+        // Apply damage scaled by deltaTime
+        const damageThisTick = (damage * deltaTime) / 1000;
+        const result = combat.applyDamage(player.id, {
+          shieldDamage: damageThisTick * 0.3,
+          hullDamage: damageThisTick * 0.7
+        });
+
+        if (result) {
+          player.hull = result.hull;
+          player.shield = result.shield;
+
+          io.to(playerSocketId).emit('player:damaged', {
+            attackerId: npcId,
+            attackerType: 'npc',
+            damage: damageThisTick,
+            hull: result.hull,
+            shield: result.shield,
+            damageType: 'void'
+          });
+
+          // Check for death
+          if (result.hull <= 0) {
+            handlePlayerDeathWithWreckage(player, npcEntity.name, playerSocketId, {
+              cause: 'void_gravity_well',
+              type: 'npc',
+              name: npcEntity.name,
+              faction: 'void',
+              npcType: 'void_leviathan'
+            });
+          }
+        }
+
+        // Apply pull force toward gravity well center
+        const pullDx = action.position.x - player.position.x;
+        const pullDy = action.position.y - player.position.y;
+        const pullDist = Math.sqrt(pullDx * pullDx + pullDy * pullDy);
+        if (pullDist > 1) {
+          const pullStrength = gravityConfig.pullStrength * (deltaTime / 1000);
+          player.position.x += (pullDx / pullDist) * pullStrength;
+          player.position.y += (pullDy / pullDist) * pullStrength;
+        }
+      }
+    } else if (action && action.action === 'void_consume') {
+      // ============================================
+      // VOID LEVIATHAN: Consume ability
+      // ============================================
+      broadcastNearNpc(npcEntity, 'void:consume', {
+        leviathanId: action.leviathanId,
+        targetNpcId: action.targetNpcId,
+        targetPosition: action.targetPosition,
+        phase: action.phase,
+        tendrilSpeed: action.tendrilSpeed,
+        dragDuration: action.dragDuration,
+        healAmount: action.healAmount
+      });
+
+      // Handle dissolve phase - heal Leviathan and remove consumed NPC
+      if (action.phase === 'dissolve' && action.removeTarget) {
+        // Heal the Leviathan
+        if (action.healAmount > 0) {
+          npcEntity.hull = Math.min(npcEntity.hullMax, npcEntity.hull + action.healAmount);
+        }
+
+        // Remove the consumed NPC
+        if (action.targetNpcId) {
+          const consumedNpc = npc.activeNPCs.get(action.targetNpcId);
+          if (consumedNpc) {
+            // Broadcast the consumed NPC's destruction
+            broadcastNearNpc(consumedNpc, 'npc:destroyed', {
+              npcId: action.targetNpcId,
+              x: consumedNpc.position.x,
+              y: consumedNpc.position.y,
+              faction: consumedNpc.faction,
+              deathEffect: 'void_consume'
+            });
+            npc.activeNPCs.delete(action.targetNpcId);
+          }
+        }
+      }
+    } else if (action && action.action === 'void_spawn_minions') {
+      // ============================================
+      // VOID LEVIATHAN: Spawn minions from rifts
+      // ============================================
+      broadcastNearNpc(npcEntity, 'void:spawnMinions', {
+        leviathanId: action.leviathanId,
+        position: action.position,
+        riftCount: action.riftCount,
+        trigger: action.trigger,
+        healthThreshold: action.healthThreshold
+      });
+
+      // Spawn void_whispers from rifts (delayed for visual effect)
+      const minionConfig = config.VOID_LEVIATHAN_MINIONS;
+      const minionsPerRift = minionConfig?.minionsPerRift || { min: 1, max: 2 };
+
+      setTimeout(() => {
+        for (let i = 0; i < action.riftCount; i++) {
+          // Spawn rifts in a circle around the Leviathan
+          const angle = (i / action.riftCount) * Math.PI * 2;
+          const distance = 150 + Math.random() * 100;
+          const riftX = action.position.x + Math.cos(angle) * distance;
+          const riftY = action.position.y + Math.sin(angle) * distance;
+
+          // Spawn 1-2 minions per rift
+          const minionCount = minionsPerRift.min + Math.floor(Math.random() * (minionsPerRift.max - minionsPerRift.min + 1));
+          for (let j = 0; j < minionCount; j++) {
+            // Create void_whisper minion
+            const minionId = `void_minion_${Date.now()}_${i}_${j}`;
+            const minionType = npc.NPC_TYPES.void_whisper;
+            const minion = {
+              id: minionId,
+              type: 'void_whisper',
+              name: minionType.name,
+              faction: 'void',
+              position: { x: riftX + (Math.random() - 0.5) * 30, y: riftY + (Math.random() - 0.5) * 30 },
+              velocity: { x: 0, y: 0 },
+              rotation: Math.random() * Math.PI * 2,
+              hull: minionType.hull,
+              hullMax: minionType.hull,
+              shield: minionType.shield,
+              shieldMax: minionType.shield,
+              speed: minionType.speed,
+              weaponType: minionType.weaponType,
+              weaponTier: minionType.weaponTier,
+              weaponDamage: minionType.weaponDamage,
+              weaponRange: minionType.weaponRange,
+              aggroRange: minionType.aggroRange,
+              creditReward: minionType.creditReward,
+              deathEffect: minionType.deathEffect,
+              lastFireTime: 0,
+              state: 'combat',
+              spawnedByLeviathan: action.leviathanId,
+              riftPortal: { x: riftX, y: riftY },
+              damageContributors: new Map()
+            };
+
+            npc.activeNPCs.set(minionId, minion);
+
+            // Register minion with Leviathan AI
+            const { voidLeviathanAI } = require('./ai/void-leviathan');
+            voidLeviathanAI.registerMinion(action.leviathanId, minionId);
+
+            // Broadcast spawn
+            broadcastNearNpc(minion, 'npc:spawn', {
+              id: minionId,
+              type: 'void_whisper',
+              name: minion.name,
+              faction: 'void',
+              x: minion.position.x,
+              y: minion.position.y,
+              hull: minion.hull,
+              hullMax: minion.hullMax,
+              shield: minion.shield,
+              shieldMax: minion.shieldMax,
+              fromRift: true,
+              riftPosition: { x: riftX, y: riftY }
+            });
+          }
+        }
+      }, 1500); // Delay spawn for rift animation
+    } else if (action && action.action === 'void_rift_retreat') {
+      // ============================================
+      // VOID NPC: Retreat into rift portal
+      // ============================================
+      broadcastNearNpc(npcEntity, 'void:riftRetreat', {
+        npcId: action.npcId,
+        riftPosition: action.riftPosition,
+        npcType: action.npcType
+      });
+
+      // Mark for removal after rift animation
+      setTimeout(() => {
+        npc.activeNPCs.delete(action.npcId);
+      }, 1000);
     }
   }
 
@@ -1871,6 +2078,48 @@ function playerAttackNPC(attackerId, npcId, weaponType, weaponTier, damageOverri
           ragingGuards: ragingGuards,
           rageDuration: rageDuration
         });
+      }
+    }
+
+    // Void Leviathan death - cleanup and start cooldown
+    if (npcEntity.type === 'void_leviathan') {
+      npc.handleLeviathanDeath(npcId);
+    }
+
+    // Void NPC death (non-Leviathan) - chance to spawn Leviathan
+    if (npcEntity.faction === 'void' && npcEntity.type !== 'void_leviathan') {
+      const leviathanSpawn = npc.checkLeviathanSpawn(npcEntity, npcEntity.position);
+      if (leviathanSpawn) {
+        // Broadcast the spawn sequence to nearby players
+        const spawnPosition = leviathanSpawn.spawnPosition;
+        broadcastInRange(spawnPosition, 2000, 'void:leviathanSpawn', {
+          position: spawnPosition,
+          sequenceDuration: leviathanSpawn.sequenceDuration
+        });
+
+        // Spawn the Leviathan after the cinematic sequence
+        setTimeout(() => {
+          const leviathan = npc.spawnVoidLeviathan(spawnPosition);
+          if (leviathan) {
+            // Broadcast the Leviathan emergence
+            broadcastInRange(leviathan.position, 2000, 'npc:spawn', {
+              id: leviathan.id,
+              type: 'void_leviathan',
+              name: leviathan.name,
+              faction: 'void',
+              x: leviathan.position.x,
+              y: leviathan.position.y,
+              hull: leviathan.hull,
+              hullMax: leviathan.hullMax,
+              shield: leviathan.shield,
+              shieldMax: leviathan.shieldMax,
+              isBoss: true,
+              isLeviathan: true,
+              fromRift: true,
+              riftPosition: leviathan.riftPortal
+            });
+          }
+        }, leviathanSpawn.sequenceDuration);
       }
     }
 

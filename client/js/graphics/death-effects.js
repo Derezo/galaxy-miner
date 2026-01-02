@@ -100,11 +100,34 @@ const DeathEffects = {
       spiderlingCount: 8,
       eyeBurstInterval: 250,  // ms between each eye bursting
       eyeCount: 12
+    },
+    // Void Leviathan - cosmic horror dimensional tear death
+    void_leviathan_death: {
+      duration: 5000,  // 5 seconds
+      phases: [
+        { name: 'rift_collapse', start: 0, end: 0.3 },        // 0-1.5s: Rifts collapse inward
+        { name: 'void_implosion', start: 0.3, end: 0.7 },     // 1.5-3.5s: Dark implosion
+        { name: 'dimensional_tear', start: 0.7, end: 1.0 }    // 3.5-5s: Reality tears
+      ],
+      colors: {
+        void: '#000000',
+        rift: '#660099',
+        energy: '#9900ff',
+        lightning: '#cc66ff',
+        tear: '#ff00ff'
+      },
+      screenShake: { start: 5, peak: 20, duration: 4500 },
+      riftCount: 8,
+      lightningCount: 12,
+      implosionRadius: 150
     }
   },
 
   // Active queen death effects (separate from regular effects)
   activeQueenDeaths: [],
+
+  // Active void leviathan death effects
+  activeLeviathanDeaths: [],
 
   init() {
     Logger.log('DeathEffects initialized');
@@ -307,6 +330,9 @@ const DeathEffects = {
     // Update queen death effects
     this.updateQueenDeaths(dt);
 
+    // Update void leviathan death effects
+    this.updateLeviathanDeaths(dt);
+
     this.activeEffects = this.activeEffects.filter(effect => {
       // Handle deconstruction warning phase
       if (effect.type === 'deconstruction' && effect.phase === 'warning') {
@@ -441,6 +467,9 @@ const DeathEffects = {
   draw(ctx, camera) {
     // Draw queen death effects (rendered behind normal effects)
     this.drawQueenDeaths(ctx, camera);
+
+    // Draw void leviathan death effects
+    this.drawLeviathanDeaths(ctx, camera);
 
     for (const effect of this.activeEffects) {
       const screenX = effect.x - camera.x;
@@ -1566,5 +1595,568 @@ const DeathEffects = {
    */
   isQueenDeathActive() {
     return this.activeQueenDeaths.length > 0;
+  },
+
+  // ============================================
+  // VOID LEVIATHAN DEATH SEQUENCE
+  // ============================================
+
+  /**
+   * Trigger the void leviathan death sequence
+   * @param {number} x - World X position
+   * @param {number} y - World Y position
+   * @param {number} rotation - Leviathan's rotation at death
+   */
+  triggerLeviathanDeath(x, y, rotation = 0) {
+    const config = this.EFFECT_CONFIGS.void_leviathan_death;
+
+    const effect = {
+      x,
+      y,
+      rotation,
+      config,
+      startTime: Date.now(),
+      currentPhase: 'rift_collapse',
+
+      // Rift particles for collapse phase
+      rifts: [],
+
+      // Lightning arcs
+      lightningArcs: [],
+
+      // Implosion particles
+      implosionParticles: [],
+
+      // Dimensional tear cracks
+      tearCracks: [],
+
+      // Effect state
+      implosionRadius: 0,
+      coreSize: 80,
+      shakeIntensity: config.screenShake.start
+    };
+
+    // Initialize collapsing rifts around the Leviathan
+    for (let i = 0; i < config.riftCount; i++) {
+      const angle = (i / config.riftCount) * Math.PI * 2 + (Math.random() - 0.5) * 0.3;
+      effect.rifts.push({
+        angle,
+        distance: 100 + Math.random() * 50,
+        size: 30 + Math.random() * 20,
+        rotation: Math.random() * Math.PI * 2,
+        collapsed: false
+      });
+    }
+
+    // Initialize lightning arcs
+    for (let i = 0; i < config.lightningCount; i++) {
+      effect.lightningArcs.push({
+        startAngle: Math.random() * Math.PI * 2,
+        endAngle: Math.random() * Math.PI * 2,
+        segments: this.generateLightningSegments(5),
+        intensity: 0.5 + Math.random() * 0.5,
+        active: false
+      });
+    }
+
+    this.activeLeviathanDeaths.push(effect);
+
+    // Trigger screen shake
+    if (typeof Renderer !== 'undefined' && Renderer.triggerScreenShake) {
+      Renderer.triggerScreenShake(config.screenShake.start, config.duration);
+    }
+
+    // Play void death sound
+    if (typeof AudioManager !== 'undefined' && AudioManager.isReady && AudioManager.isReady()) {
+      AudioManager.playAt('boss_death', x, y);
+    }
+
+    Logger.log('Void Leviathan death sequence triggered at', x, y);
+  },
+
+  /**
+   * Generate jagged lightning segment offsets
+   */
+  generateLightningSegments(count) {
+    const segments = [];
+    for (let i = 0; i < count; i++) {
+      segments.push({
+        offset: (Math.random() - 0.5) * 40,
+        phase: Math.random() * Math.PI * 2
+      });
+    }
+    return segments;
+  },
+
+  /**
+   * Update all active leviathan death effects
+   */
+  updateLeviathanDeaths(dt) {
+    const now = Date.now();
+
+    this.activeLeviathanDeaths = this.activeLeviathanDeaths.filter(effect => {
+      const elapsed = now - effect.startTime;
+      const progress = elapsed / effect.config.duration;
+
+      if (progress >= 1) {
+        return false; // Remove completed effect
+      }
+
+      // Determine current phase
+      for (const phase of effect.config.phases) {
+        if (progress >= phase.start && progress < phase.end) {
+          effect.currentPhase = phase.name;
+          break;
+        }
+      }
+
+      // Update based on current phase
+      switch (effect.currentPhase) {
+        case 'rift_collapse':
+          this.updateLeviathanRiftCollapse(effect, progress, dt);
+          break;
+        case 'void_implosion':
+          this.updateLeviathanImplosion(effect, progress, dt);
+          break;
+        case 'dimensional_tear':
+          this.updateLeviathanTear(effect, progress, dt);
+          break;
+      }
+
+      // Update screen shake
+      const shakeConfig = effect.config.screenShake;
+      if (progress < 0.3) {
+        effect.shakeIntensity = shakeConfig.start + (shakeConfig.peak - shakeConfig.start) * (progress / 0.3);
+      } else if (progress < 0.7) {
+        effect.shakeIntensity = shakeConfig.peak;
+      } else {
+        const fadeProgress = (progress - 0.7) / 0.3;
+        effect.shakeIntensity = shakeConfig.peak * (1 - fadeProgress);
+      }
+
+      if (typeof Renderer !== 'undefined' && Renderer.setScreenShake) {
+        Renderer.setScreenShake(effect.shakeIntensity);
+      }
+
+      // Update implosion particles
+      for (const p of effect.implosionParticles) {
+        // Pull toward center
+        const dx = effect.x - p.x;
+        const dy = effect.y - p.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist > 5) {
+          p.vx += (dx / dist) * 200 * dt;
+          p.vy += (dy / dist) * 200 * dt;
+        }
+        p.x += p.vx * dt;
+        p.y += p.vy * dt;
+        p.alpha -= dt * 0.5;
+      }
+      effect.implosionParticles = effect.implosionParticles.filter(p => p.alpha > 0);
+
+      return true;
+    });
+  },
+
+  /**
+   * Phase 1: Rifts collapse inward (0-30%)
+   */
+  updateLeviathanRiftCollapse(effect, progress, dt) {
+    const phaseProgress = progress / 0.3;
+
+    // Collapse rifts toward center
+    for (const rift of effect.rifts) {
+      if (!rift.collapsed) {
+        rift.distance = (100 + Math.random() * 50) * (1 - phaseProgress);
+        rift.size = (30 + Math.random() * 20) * (1 - phaseProgress * 0.5);
+        rift.rotation += dt * 2;
+
+        if (phaseProgress > 0.8) {
+          rift.collapsed = true;
+        }
+      }
+    }
+
+    // Core pulses larger
+    effect.coreSize = 80 + Math.sin(Date.now() * 0.01) * 20 * (1 + phaseProgress);
+
+    // Spawn particles being pulled in
+    if (Math.random() < 0.4) {
+      const spawnAngle = Math.random() * Math.PI * 2;
+      const spawnDist = 150 + Math.random() * 100;
+      effect.implosionParticles.push({
+        x: effect.x + Math.cos(spawnAngle) * spawnDist,
+        y: effect.y + Math.sin(spawnAngle) * spawnDist,
+        vx: 0,
+        vy: 0,
+        size: 3 + Math.random() * 4,
+        color: effect.config.colors.energy,
+        alpha: 1
+      });
+    }
+  },
+
+  /**
+   * Phase 2: Void implosion (30-70%)
+   */
+  updateLeviathanImplosion(effect, progress, dt) {
+    const phaseProgress = (progress - 0.3) / 0.4;
+
+    // Core shrinks dramatically
+    effect.coreSize = 80 * (1 - phaseProgress * 0.9);
+
+    // Implosion radius expands then contracts
+    if (phaseProgress < 0.5) {
+      effect.implosionRadius = effect.config.implosionRadius * (phaseProgress * 2);
+    } else {
+      effect.implosionRadius = effect.config.implosionRadius * (1 - (phaseProgress - 0.5) * 2);
+    }
+
+    // Activate lightning arcs
+    for (const arc of effect.lightningArcs) {
+      arc.active = Math.random() < 0.5;
+      if (arc.active) {
+        arc.startAngle = Math.random() * Math.PI * 2;
+        arc.endAngle = arc.startAngle + (Math.random() - 0.5) * Math.PI;
+        arc.segments = this.generateLightningSegments(5);
+      }
+    }
+
+    // More intense particle pull
+    if (Math.random() < 0.6) {
+      const spawnAngle = Math.random() * Math.PI * 2;
+      const spawnDist = effect.implosionRadius + 50;
+      effect.implosionParticles.push({
+        x: effect.x + Math.cos(spawnAngle) * spawnDist,
+        y: effect.y + Math.sin(spawnAngle) * spawnDist,
+        vx: 0,
+        vy: 0,
+        size: 4 + Math.random() * 5,
+        color: Math.random() > 0.5 ? effect.config.colors.energy : effect.config.colors.lightning,
+        alpha: 1
+      });
+    }
+  },
+
+  /**
+   * Phase 3: Dimensional tear (70-100%)
+   */
+  updateLeviathanTear(effect, progress, dt) {
+    const phaseProgress = (progress - 0.7) / 0.3;
+
+    // Generate tear cracks that expand outward
+    if (effect.tearCracks.length < 12 && Math.random() < 0.2) {
+      const angle = Math.random() * Math.PI * 2;
+      effect.tearCracks.push({
+        angle,
+        length: 0,
+        maxLength: 80 + Math.random() * 120,
+        width: 2 + Math.random() * 3,
+        segments: this.generateLightningSegments(4)
+      });
+    }
+
+    // Extend tear cracks
+    for (const crack of effect.tearCracks) {
+      if (crack.length < crack.maxLength) {
+        crack.length += dt * 200;
+      }
+    }
+
+    // Core explodes outward at end
+    effect.coreSize = 10 + phaseProgress * 100;
+
+    // Final burst of particles
+    if (phaseProgress > 0.5 && Math.random() < 0.8) {
+      const burstAngle = Math.random() * Math.PI * 2;
+      const burstSpeed = 200 + Math.random() * 300;
+
+      if (typeof ParticleSystem !== 'undefined') {
+        ParticleSystem.spawn({
+          x: effect.x,
+          y: effect.y,
+          vx: Math.cos(burstAngle) * burstSpeed,
+          vy: Math.sin(burstAngle) * burstSpeed,
+          color: effect.config.colors.tear,
+          size: 4 + Math.random() * 4,
+          life: 500,
+          type: 'glow',
+          decay: 1.2,
+          drag: 0.96
+        });
+      }
+    }
+  },
+
+  /**
+   * Draw all active leviathan death effects
+   */
+  drawLeviathanDeaths(ctx, camera) {
+    for (const effect of this.activeLeviathanDeaths) {
+      const screenX = effect.x - camera.x;
+      const screenY = effect.y - camera.y;
+      const progress = (Date.now() - effect.startTime) / effect.config.duration;
+
+      ctx.save();
+      ctx.translate(screenX, screenY);
+
+      switch (effect.currentPhase) {
+        case 'rift_collapse':
+          this.drawLeviathanRiftCollapse(ctx, effect, progress);
+          break;
+        case 'void_implosion':
+          this.drawLeviathanImplosion(ctx, effect, progress);
+          break;
+        case 'dimensional_tear':
+          this.drawLeviathanTear(ctx, effect, progress);
+          break;
+      }
+
+      ctx.restore();
+
+      // Draw implosion particles (world space)
+      this.drawLeviathanParticles(ctx, effect, camera);
+    }
+  },
+
+  /**
+   * Draw rift collapse phase
+   */
+  drawLeviathanRiftCollapse(ctx, effect, progress) {
+    const colors = effect.config.colors;
+
+    // Draw collapsing rifts
+    for (const rift of effect.rifts) {
+      if (rift.collapsed) continue;
+
+      ctx.save();
+      ctx.rotate(rift.angle);
+      ctx.translate(rift.distance, 0);
+      ctx.rotate(rift.rotation);
+
+      // Rift portal
+      const gradient = ctx.createRadialGradient(0, 0, 0, 0, 0, rift.size);
+      gradient.addColorStop(0, colors.void);
+      gradient.addColorStop(0.6, colors.rift + '80');
+      gradient.addColorStop(1, 'transparent');
+
+      ctx.fillStyle = gradient;
+      ctx.beginPath();
+      ctx.ellipse(0, 0, rift.size, rift.size * 0.6, 0, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Edge glow
+      ctx.strokeStyle = colors.energy;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.ellipse(0, 0, rift.size, rift.size * 0.6, 0, 0, Math.PI * 2);
+      ctx.stroke();
+
+      ctx.restore();
+    }
+
+    // Central void core
+    const coreGradient = ctx.createRadialGradient(0, 0, 0, 0, 0, effect.coreSize);
+    coreGradient.addColorStop(0, colors.void);
+    coreGradient.addColorStop(0.5, colors.rift);
+    coreGradient.addColorStop(0.8, colors.energy + '60');
+    coreGradient.addColorStop(1, 'transparent');
+
+    ctx.fillStyle = coreGradient;
+    ctx.beginPath();
+    ctx.arc(0, 0, effect.coreSize, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Pulsing edge
+    const pulse = Math.sin(Date.now() * 0.01) * 0.3 + 0.7;
+    ctx.strokeStyle = colors.energy;
+    ctx.lineWidth = 3 * pulse;
+    ctx.globalAlpha = pulse;
+    ctx.beginPath();
+    ctx.arc(0, 0, effect.coreSize * 0.9, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+  },
+
+  /**
+   * Draw void implosion phase
+   */
+  drawLeviathanImplosion(ctx, effect, progress) {
+    const colors = effect.config.colors;
+    const phaseProgress = (progress - 0.3) / 0.4;
+
+    // Implosion ring
+    if (effect.implosionRadius > 0) {
+      const ringAlpha = 0.8 - phaseProgress * 0.6;
+
+      ctx.strokeStyle = colors.energy;
+      ctx.lineWidth = 4;
+      ctx.globalAlpha = ringAlpha;
+      ctx.beginPath();
+      ctx.arc(0, 0, effect.implosionRadius, 0, Math.PI * 2);
+      ctx.stroke();
+
+      // Inner ring
+      ctx.strokeStyle = colors.rift;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(0, 0, effect.implosionRadius * 0.7, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+    }
+
+    // Lightning arcs
+    ctx.strokeStyle = colors.lightning;
+    ctx.lineWidth = 2;
+    ctx.shadowColor = colors.lightning;
+    ctx.shadowBlur = 10;
+
+    for (const arc of effect.lightningArcs) {
+      if (!arc.active) continue;
+
+      ctx.globalAlpha = arc.intensity;
+      this.drawVoidLightningArc(ctx, arc, effect.implosionRadius * 0.8);
+    }
+
+    ctx.shadowBlur = 0;
+    ctx.globalAlpha = 1;
+
+    // Shrinking core
+    const coreGradient = ctx.createRadialGradient(0, 0, 0, 0, 0, effect.coreSize);
+    coreGradient.addColorStop(0, colors.void);
+    coreGradient.addColorStop(0.4, colors.rift);
+    coreGradient.addColorStop(1, 'transparent');
+
+    ctx.fillStyle = coreGradient;
+    ctx.beginPath();
+    ctx.arc(0, 0, effect.coreSize, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Intense bright ring at core edge
+    ctx.strokeStyle = colors.lightning;
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.arc(0, 0, effect.coreSize, 0, Math.PI * 2);
+    ctx.stroke();
+  },
+
+  /**
+   * Draw dimensional tear phase
+   */
+  drawLeviathanTear(ctx, effect, progress) {
+    const colors = effect.config.colors;
+    const phaseProgress = (progress - 0.7) / 0.3;
+
+    // Draw tear cracks radiating outward
+    ctx.strokeStyle = colors.tear;
+    ctx.lineWidth = 3;
+    ctx.shadowColor = colors.tear;
+    ctx.shadowBlur = 15;
+
+    for (const crack of effect.tearCracks) {
+      ctx.beginPath();
+      ctx.moveTo(0, 0);
+
+      let px = 0, py = 0;
+      const segments = 5;
+      for (let i = 1; i <= segments; i++) {
+        const t = i / segments;
+        const segDist = crack.length * t;
+        const seg = crack.segments[Math.min(i - 1, crack.segments.length - 1)];
+        const jitter = seg ? seg.offset * 0.5 : 0;
+        const perpAngle = crack.angle + Math.PI / 2;
+
+        px = Math.cos(crack.angle) * segDist + Math.cos(perpAngle) * jitter;
+        py = Math.sin(crack.angle) * segDist + Math.sin(perpAngle) * jitter;
+        ctx.lineTo(px, py);
+      }
+
+      ctx.stroke();
+    }
+
+    ctx.shadowBlur = 0;
+
+    // Expanding explosion core
+    const fadeAlpha = 1 - phaseProgress;
+    const coreGradient = ctx.createRadialGradient(0, 0, 0, 0, 0, effect.coreSize);
+    coreGradient.addColorStop(0, colors.tear);
+    coreGradient.addColorStop(0.3, colors.lightning + '80');
+    coreGradient.addColorStop(0.6, colors.energy + '40');
+    coreGradient.addColorStop(1, 'transparent');
+
+    ctx.globalAlpha = fadeAlpha;
+    ctx.fillStyle = coreGradient;
+    ctx.beginPath();
+    ctx.arc(0, 0, effect.coreSize, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Final flash at very end
+    if (phaseProgress > 0.8) {
+      const flashIntensity = (phaseProgress - 0.8) / 0.2;
+      ctx.globalAlpha = (1 - flashIntensity) * 0.5;
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath();
+      ctx.arc(0, 0, effect.coreSize * 1.5 * flashIntensity, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    ctx.globalAlpha = 1;
+  },
+
+  /**
+   * Draw a void lightning arc
+   */
+  drawVoidLightningArc(ctx, arc, radius) {
+    ctx.beginPath();
+    ctx.moveTo(
+      Math.cos(arc.startAngle) * 10,
+      Math.sin(arc.startAngle) * 10
+    );
+
+    const segments = arc.segments.length;
+    for (let i = 1; i <= segments; i++) {
+      const t = i / segments;
+      const r = radius * t;
+      const angle = arc.startAngle + (arc.endAngle - arc.startAngle) * t;
+      const seg = arc.segments[i - 1];
+      const jitter = seg ? seg.offset : 0;
+      const perpAngle = angle + Math.PI / 2;
+
+      const x = Math.cos(angle) * r + Math.cos(perpAngle) * jitter;
+      const y = Math.sin(angle) * r + Math.sin(perpAngle) * jitter;
+      ctx.lineTo(x, y);
+    }
+
+    ctx.stroke();
+  },
+
+  /**
+   * Draw implosion particles
+   */
+  drawLeviathanParticles(ctx, effect, camera) {
+    for (const p of effect.implosionParticles) {
+      const px = p.x - camera.x;
+      const py = p.y - camera.y;
+
+      const gradient = ctx.createRadialGradient(px, py, 0, px, py, p.size * 2);
+      gradient.addColorStop(0, p.color);
+      gradient.addColorStop(0.5, p.color + '80');
+      gradient.addColorStop(1, 'transparent');
+
+      ctx.globalAlpha = p.alpha;
+      ctx.fillStyle = gradient;
+      ctx.beginPath();
+      ctx.arc(px, py, p.size * 2, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    ctx.globalAlpha = 1;
+  },
+
+  /**
+   * Check if any leviathan death is active
+   */
+  isLeviathanDeathActive() {
+    return this.activeLeviathanDeaths.length > 0;
   }
 };

@@ -75,16 +75,18 @@ function register(ctx) {
       socket.emit('wormhole:transitStarted', {
         destinationId,
         destination: result.destination,
-        duration: result.duration
+        duration: result.duration,
+        hasVoidWarp: result.hasVoidWarp  // Client uses this for void visual effect
       });
 
       // Broadcast transit start to nearby players
       state.broadcastToNearby(socket, player, 'wormhole:playerTransiting', {
         playerId: authenticatedUserId,
-        destinationId
+        destinationId,
+        hasVoidWarp: result.hasVoidWarp
       });
 
-      // Set up transit completion check
+      // Set up transit completion check (use dynamic duration from relics)
       setTimeout(() => {
         const completeResult = wormhole.completeTransit(authenticatedUserId);
 
@@ -108,17 +110,19 @@ function register(ctx) {
 
           socket.emit('wormhole:exitComplete', {
             position: completeResult.position,
-            wormholeId: completeResult.wormholeId
+            wormholeId: completeResult.wormholeId,
+            hasVoidWarp: completeResult.hasVoidWarp
           });
 
           // Broadcast exit to nearby players at new location
           state.broadcastToNearby(socket, player, 'wormhole:playerExited', {
             playerId: authenticatedUserId,
             x: completeResult.position.x,
-            y: completeResult.position.y
+            y: completeResult.position.y,
+            hasVoidWarp: completeResult.hasVoidWarp
           });
         }
-      }, wormhole.TRANSIT_DURATION);
+      }, result.duration);  // Use dynamic duration instead of fixed TRANSIT_DURATION
     } else {
       socket.emit('wormhole:error', { message: result.error });
     }

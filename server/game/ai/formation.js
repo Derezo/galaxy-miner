@@ -1,6 +1,8 @@
 // Galaxy Miner - Formation AI Strategy (Void Entities)
 // V-formation with synchronized movement and attacks
 
+const { voidLeviathanAI } = require('./void-leviathan');
+
 /**
  * FormationStrategy - Void Entities fly in formation
  * - V-formation with leader at point
@@ -64,6 +66,11 @@ class FormationStrategy {
    * Main update for formation behavior
    */
   update(npc, nearbyPlayers, nearbyAllies, deltaTime, context) {
+    // Route Void Leviathan to boss AI
+    if (npc.type === 'void_leviathan') {
+      return voidLeviathanAI.update(npc, nearbyPlayers, nearbyAllies, deltaTime, context);
+    }
+
     // Cleanup expired formation states
     this.cleanupFormationStates();
 
@@ -312,6 +319,11 @@ class FormationStrategy {
    * Disciplined retreat in formation
    */
   retreat(npc, deltaTime, context, allies) {
+    // Void NPCs with rift portals retreat INTO the rift
+    if (npc.riftPortal) {
+      return this.retreatIntoRift(npc, deltaTime, context);
+    }
+
     const homeBase = context.homeBase || npc.spawnPoint;
     if (!homeBase) return null;
 
@@ -337,6 +349,39 @@ class FormationStrategy {
       // Followers maintain formation while retreating
       this.followLeader(npc, formationInfo.leader, formationInfo.index, deltaTime);
     }
+
+    return null;
+  }
+
+  /**
+   * Retreat into rift portal - void NPCs phase back into their rifts
+   * @param {Object} npc - The retreating NPC
+   * @param {number} deltaTime - Time since last update
+   * @param {Object} context - Additional context
+   * @returns {Object|null} Rift retreat action or null
+   */
+  retreatIntoRift(npc, deltaTime, context) {
+    const riftPos = npc.riftPortal;
+    const dx = riftPos.x - npc.position.x;
+    const dy = riftPos.y - npc.position.y;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+
+    // NPC has reached the rift - phase out and despawn
+    if (dist < 30) {
+      npc.state = 'phasing_out';
+      return {
+        action: 'void_rift_retreat',
+        npcId: npc.id,
+        riftPosition: { x: riftPos.x, y: riftPos.y },
+        npcType: npc.type
+      };
+    }
+
+    // Move toward rift faster than normal retreat
+    const retreatSpeed = npc.speed * 1.3 * (deltaTime / 1000);
+    npc.rotation = Math.atan2(dy, dx);
+    npc.position.x += (dx / dist) * retreatSpeed;
+    npc.position.y += (dy / dist) * retreatSpeed;
 
     return null;
   }

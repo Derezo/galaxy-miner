@@ -108,6 +108,13 @@ const RadarEntities = {
         continue;
       }
 
+      // VOID LEVIATHAN - Dark ominous boss with void tendrils
+      if (npc.type === 'void_leviathan' || npc.isBoss && npc.faction === 'void') {
+        this.drawVoidLeviathan(ctx, pos.x, pos.y, npc.rotation || 0, npc);
+        ctx.globalAlpha = 1;
+        continue;
+      }
+
       // Determine color based on tier and faction
       let color = '#ff4444'; // Default red
       if (useFactionColors && npc.faction) {
@@ -234,6 +241,97 @@ const RadarEntities = {
     ctx.arc(eyeX, -eyeSpacing, 1, 0, Math.PI * 2);
     ctx.arc(eyeX, eyeSpacing, 1, 0, Math.PI * 2);
     ctx.fillStyle = '#ffffff';
+    ctx.fill();
+
+    ctx.restore();
+  },
+
+  // Draw Void Leviathan with ominous void portal visuals
+  drawVoidLeviathan(ctx, x, y, rotation, npc) {
+    const size = 14; // Larger than queen for boss visibility
+    const voidCore = '#000000';
+    const voidPurple = '#660099';
+    const voidMagenta = '#9900ff';
+    const time = Date.now();
+
+    // Check for active gravity well
+    const hasActiveAbility = npc.gravityWellActive || npc.isConsuming;
+
+    // Outer void rift effect - dark pulsing ring
+    const pulse = Math.sin(time / 250) * 0.3 + 0.7;
+    ctx.beginPath();
+    ctx.arc(x, y, size + 8, 0, Math.PI * 2);
+    ctx.fillStyle = `rgba(102, 0, 153, ${pulse * 0.4})`;
+    ctx.fill();
+
+    // Second pulsing void ring
+    const pulse2 = Math.sin(time / 200 + 1) * 0.35 + 0.65;
+    ctx.beginPath();
+    ctx.arc(x, y, size + 4, 0, Math.PI * 2);
+    ctx.fillStyle = `rgba(153, 0, 255, ${pulse2 * 0.5})`;
+    ctx.fill();
+
+    // Ability indicator: brighter/larger pulsing when using gravity well or consume
+    if (hasActiveAbility) {
+      const abilityPulse = Math.sin(time / 100) * 0.4 + 0.6;
+      ctx.beginPath();
+      ctx.arc(x, y, size + 12, 0, Math.PI * 2);
+      ctx.fillStyle = `rgba(255, 0, 255, ${abilityPulse * 0.5})`;
+      ctx.fill();
+
+      ctx.strokeStyle = '#ff00ff';
+      ctx.lineWidth = 2;
+      ctx.globalAlpha = abilityPulse;
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+    }
+
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(rotation);
+
+    // Draw void tendrils radiating outward
+    const tendrilCount = 6;
+    for (let i = 0; i < tendrilCount; i++) {
+      const angle = (i / tendrilCount) * Math.PI * 2;
+      const tendrilPulse = Math.sin(time / 300 + i * 0.5) * 0.2 + 0.8;
+      const tendrilLength = (size + 3) * tendrilPulse;
+
+      ctx.beginPath();
+      ctx.moveTo(0, 0);
+
+      // Curved tendril path
+      const ctrlX = Math.cos(angle + 0.2) * tendrilLength * 0.6;
+      const ctrlY = Math.sin(angle + 0.2) * tendrilLength * 0.6;
+      const endX = Math.cos(angle) * tendrilLength;
+      const endY = Math.sin(angle) * tendrilLength;
+
+      ctx.quadraticCurveTo(ctrlX, ctrlY, endX, endY);
+      ctx.strokeStyle = voidPurple;
+      ctx.lineWidth = 2;
+      ctx.stroke();
+    }
+
+    // Central void body - dark core with purple edge
+    ctx.beginPath();
+    ctx.arc(0, 0, size * 0.6, 0, Math.PI * 2);
+    ctx.fillStyle = voidCore;
+    ctx.fill();
+    ctx.strokeStyle = voidMagenta;
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    // Inner void eye - pulsing magenta
+    const eyePulse = 0.5 + Math.sin(time / 150) * 0.5;
+    ctx.beginPath();
+    ctx.arc(0, 0, size * 0.25, 0, Math.PI * 2);
+    ctx.fillStyle = `rgba(153, 0, 255, ${eyePulse})`;
+    ctx.fill();
+
+    // Bright center point
+    ctx.beginPath();
+    ctx.arc(0, 0, 2, 0, Math.PI * 2);
+    ctx.fillStyle = '#ff00ff';
     ctx.fill();
 
     ctx.restore();
