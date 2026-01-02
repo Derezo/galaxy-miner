@@ -542,7 +542,8 @@ const GravityWellEffect = {
       phase,
       radius: radius || config.radius,
       config,
-      startTime: Date.now(),
+      createdTime: Date.now(),  // For safety timeout
+      startTime: Date.now(),     // For phase animations
       rotation: 0,
       lightningArcs: this.generateLightningArcs(5)
     });
@@ -596,6 +597,8 @@ const GravityWellEffect = {
    * Update all gravity wells
    */
   update(deltaTime) {
+    const toRemove = [];
+
     for (const [wellId, well] of this.activeWells) {
       well.rotation += 0.003 * deltaTime;
 
@@ -605,6 +608,26 @@ const GravityWellEffect = {
         well.lightningArcs[arcIndex] = this.generateLightningArcs(1)[0];
         well.lightningArcs[arcIndex].baseAngle = (arcIndex / well.lightningArcs.length) * Math.PI * 2;
       }
+
+      // Auto-remove ended effects after animation completes (500ms)
+      if (well.phase === 'end') {
+        const elapsed = Date.now() - well.startTime;
+        if (elapsed >= 500) {
+          toRemove.push(wellId);
+        }
+      }
+
+      // Safety timeout: remove stuck effects after 10 seconds (warning + active + buffer)
+      // This prevents effects from persisting if server never sends 'end' phase
+      const totalElapsed = Date.now() - well.createdTime;
+      if (well.phase !== 'end' && totalElapsed > 10000) {
+        toRemove.push(wellId);
+      }
+    }
+
+    // Remove completed effects
+    for (const wellId of toRemove) {
+      this.activeWells.delete(wellId);
     }
   },
 
@@ -787,10 +810,7 @@ const GravityWellEffect = {
       ctx.fill();
     }
 
-    // Remove when complete
-    if (progress >= 1) {
-      this.activeWells.delete(well);
-    }
+    // Cleanup is handled in update() method
 
     ctx.globalAlpha = 1;
   },
