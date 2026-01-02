@@ -431,16 +431,26 @@ function getSectorKey(x, y) {
  * @param {number} y - World Y coordinate
  * @returns {boolean} True if position is in Graveyard
  */
-function isInGraveyard(x, y) {
+function isGraveyardSector(sectorX, sectorY) {
   const config = CONSTANTS.GRAVEYARD_ZONE;
   if (!config) return false;
 
+  return sectorX >= config.MIN_SECTOR_X && sectorX <= config.MAX_SECTOR_X &&
+         sectorY >= config.MIN_SECTOR_Y && sectorY <= config.MAX_SECTOR_Y;
+}
+
+/**
+ * Check if world coordinates are within The Graveyard safe zone
+ * @param {number} x - World X coordinate
+ * @param {number} y - World Y coordinate
+ * @returns {boolean} True if position is in The Graveyard
+ */
+function isInGraveyard(x, y) {
   const sectorSize = CONSTANTS.SECTOR_SIZE || 1000;
   const sectorX = Math.floor(x / sectorSize);
   const sectorY = Math.floor(y / sectorSize);
 
-  return sectorX >= config.MIN_SECTOR_X && sectorX <= config.MAX_SECTOR_X &&
-         sectorY >= config.MIN_SECTOR_Y && sectorY <= config.MAX_SECTOR_Y;
+  return isGraveyardSector(sectorX, sectorY);
 }
 
 /**
@@ -3363,6 +3373,7 @@ module.exports = {
   cleanupFormations,
   SUCCESSION_TIER_SCORES,
   // Graveyard safe zone
+  isGraveyardSector,
   isInGraveyard,
   shouldBePassive,
   // Swarm Assimilation System

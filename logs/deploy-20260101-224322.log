@@ -1,0 +1,103 @@
+[0;36mℹ  Target: root@mittonvillage.com:/var/www/galaxy-miner[0m
+[0;36mℹ  Domain: galaxyminer.mittonvillage.com[0m
+[0;32m✓ Deployment lock acquired[0m
+
+[0;34m==>[1m Checking local prerequisites[0m
+[0;32m✓ tar is installed[0m
+[0;32m✓ node is installed (v22.21.0)[0m
+[0;32m✓ SSH key found: /home/eric/.ssh/id_ed25519[0m
+[0;32m✓ .env.production found[0m
+[0;32m✓ ecosystem.config.js found[0m
+[0;32m✓ package.json found[0m
+
+[0;34m==>[1m Running pre-deployment validation[0m
+[0;36mℹ  Running test suite...[0m
+
+> galaxy-miner@1.0.0 test
+> vitest run
+
+[33mThe CJS build of Vite's Node API is deprecated. See https://vite.dev/guide/troubleshooting.html#vite-cjs-node-api-deprecated for more details.[39m
+
+ RUN  v2.1.9 /home/eric/Projects/galaxy-miner
+
+ ✓ tests/unit/server/void-loot.test.js (18 tests) 7ms
+ ✓ tests/unit/shared/utils.test.js (41 tests) 6ms
+ ✓ tests/unit/server/void-leviathan.test.js (36 tests) 8ms
+ ✓ tests/unit/network/event-contracts.test.js (32 tests) 15ms
+ ✓ tests/unit/shared/physics.test.js (34 tests) 18ms
+ ✓ tests/unit/server/auth.test.js (21 tests) 296ms
+
+ Test Files  6 passed (6)
+      Tests  182 passed (182)
+   Start at  22:43:22
+   Duration  554ms (transform 97ms, setup 0ms, collect 196ms, tests 350ms, environment 1ms, prepare 442ms)
+
+[0;32m✓ Tests passed[0m
+[0;32m✓ Pre-deployment validation passed[0m
+
+[0;34m==>[1m Checking SSH connectivity[0m
+[0;32m✓ SSH connection to mittonvillage.com verified[0m
+
+[0;34m==>[1m Checking remote prerequisites[0m
+[0;32m✓ Remote node: v20.19.6[0m
+[0;32m✓ Remote npm installed[0m
+[0;32m✓ Remote pm2 installed[0m
+[0;32m✓ Remote nginx installed[0m
+[0;32m✓ Remote certbot installed[0m
+
+[0;34m==>[1m Creating remote backup[0m
+[0;32m✓ Backup created: /var/backups/galaxy-miner/backup-20260101-224337.tar.gz[0m
+[0;36mℹ  Old backups cleaned up (keeping last 5)[0m
+
+[0;34m==>[1m Creating deployment package[0m
+[0;36mℹ  Packaging application files...[0m
+[0;32m✓ Deployment package created: 4.7M[0m
+
+[0;34m==>[1m Transferring to remote server[0m
+[0;36mℹ  Uploading deployment package...[0m
+[0;32m✓ Package uploaded[0m
+[0;36mℹ  Stopping PM2 process for deployment...[0m
+[0;36mℹ  Extracting on remote server...[0m
+[0;32m✓ Package extracted[0m
+[0;32m✓ Code deployed[0m
+
+[0;34m==>[1m Installing dependencies[0m
+[0;36mℹ  Installing production dependencies (this may take a moment)...[0m
+[0;32m✓ Dependencies installed[0m
+
+[0;34m==>[1m Deploying environment configuration[0m
+[0;36mℹ  Environment file unchanged, skipping[0m
+
+[0;34m==>[1m Checking database[0m
+[0;36mℹ  Database already exists, preserving data[0m
+
+[0;34m==>[1m Deploying with PM2[0m
+[0;36mℹ  Restarting PM2 process...[0m
+[0;32m✓ PM2 deployment complete[0m
+
+[0;34m==>[1m Deploying Nginx configuration[0m
+[0;36mℹ  Nginx config unchanged, skipping[0m
+
+[0;34m==>[1m Setting up SSL certificate[0m
+[0;32m✓ SSL certificate already exists[0m
+[0;36mℹ  Certificate expiry:     Expiry Date: 2026-03-19 02:47:39+00:00 (VALID: 75 days)[0m
+
+[0;34m==>[1m Verifying deployment[0m
+[0;36mℹ  Waiting for PM2 process to start...[0m
+[0;32m✓ PM2 process is online[0m
+[0;36mℹ  Waiting for health endpoint...[0m
+[0;32m✓ Health check passed (local)[0m
+[0;32m✓ Health check passed (https://galaxyminer.mittonvillage.com)[0m
+
+[0;34m==>[1m Deployment Summary[0m
+[0;32m✓ Galaxy Miner deployed successfully![0m
+[0;36mℹ  [0m
+[0;36mℹ  Application URL: https://galaxyminer.mittonvillage.com[0m
+[0;36mℹ  Health endpoint: https://galaxyminer.mittonvillage.com/health[0m
+[0;36mℹ  [0m
+[0;36mℹ  Useful commands:[0m
+[0;36mℹ    View logs:     ssh root@mittonvillage.com 'pm2 logs galaxy-miner'[0m
+[0;36mℹ    Restart app:   ssh root@mittonvillage.com 'pm2 restart galaxy-miner'[0m
+[0;36mℹ    Stop app:      ssh root@mittonvillage.com 'pm2 stop galaxy-miner'[0m
+[0;36mℹ    App status:    ssh root@mittonvillage.com 'pm2 status'[0m
+[0;36mℹ  Cleaned up local deployment package[0m

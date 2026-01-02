@@ -7,6 +7,7 @@ const { statements } = require('./database');
 const Physics = require('../shared/physics');
 const StarSystem = require('../shared/star-system');
 const logger = require('../shared/logger');
+const { isGraveyardSector } = require('./game/npc');
 
 // Cache generated sectors
 const sectorCache = new Map();
@@ -175,15 +176,12 @@ function generateSectorFromStarSystem(sectorX, sectorY) {
     // Add bases from this system that are in this sector
     // Include starX/starY for position computation in binary systems
     // Check if this sector is in the Graveyard safe zone
+    const inGraveyard = isGraveyardSector(sectorX, sectorY);
     const graveyardConfig = config.GRAVEYARD_ZONE;
-    const isGraveyardSector = graveyardConfig &&
-      sectorX >= graveyardConfig.MIN_SECTOR_X && sectorX <= graveyardConfig.MAX_SECTOR_X &&
-      sectorY >= graveyardConfig.MIN_SECTOR_Y && sectorY <= graveyardConfig.MAX_SECTOR_Y;
 
     for (const base of system.bases) {
       // Skip hostile faction bases in Graveyard zone
-      if (isGraveyardSector && graveyardConfig.BLOCKED_FACTIONS &&
-          graveyardConfig.BLOCKED_FACTIONS.includes(base.faction)) {
+      if (inGraveyard && graveyardConfig?.BLOCKED_FACTIONS?.includes(base.faction)) {
         continue;
       }
 
@@ -276,14 +274,12 @@ function generateDeepSpaceContent(sector, sectorX, sectorY, rng) {
   const sectorMinY = sectorY * config.SECTOR_SIZE;
 
   // Check if this sector is in the Graveyard safe zone
+  const inGraveyard = isGraveyardSector(sectorX, sectorY);
   const graveyardConfig = config.GRAVEYARD_ZONE;
-  const isGraveyardSector = graveyardConfig &&
-    sectorX >= graveyardConfig.MIN_SECTOR_X && sectorX <= graveyardConfig.MAX_SECTOR_X &&
-    sectorY >= graveyardConfig.MIN_SECTOR_Y && sectorY <= graveyardConfig.MAX_SECTOR_Y;
 
   // Void rifts prefer deep space (blocked in Graveyard)
   const voidRift = config.SPAWN_HUB_TYPES?.void_rift;
-  const voidBlocked = isGraveyardSector && graveyardConfig.BLOCKED_FACTIONS?.includes('void');
+  const voidBlocked = inGraveyard && graveyardConfig?.BLOCKED_FACTIONS?.includes('void');
   if (voidRift && !voidBlocked && rng() < voidRift.spawnChance * 3) {
     const size = voidRift.size || 120;
     const x = sectorMinX + size + rng() * (config.SECTOR_SIZE - size * 2);
@@ -532,18 +528,15 @@ function generateSectorLegacy(sectorX, sectorY) {
 
   // Generate faction bases (deterministic based on sector coordinates)
   // Check if this sector is in the Graveyard safe zone
+  const inGraveyard = isGraveyardSector(sectorX, sectorY);
   const graveyardConfig = config.GRAVEYARD_ZONE;
-  const isGraveyardSector = graveyardConfig &&
-    sectorX >= graveyardConfig.MIN_SECTOR_X && sectorX <= graveyardConfig.MAX_SECTOR_X &&
-    sectorY >= graveyardConfig.MIN_SECTOR_Y && sectorY <= graveyardConfig.MAX_SECTOR_Y;
 
   const spawnHubTypes = Object.values(config.SPAWN_HUB_TYPES || {});
   for (const hubType of spawnHubTypes) {
     if (!hubType.spawnChance) continue;
 
     // Skip hostile faction bases in Graveyard zone
-    if (isGraveyardSector && graveyardConfig.BLOCKED_FACTIONS &&
-        graveyardConfig.BLOCKED_FACTIONS.includes(hubType.faction)) {
+    if (inGraveyard && graveyardConfig?.BLOCKED_FACTIONS?.includes(hubType.faction)) {
       continue;
     }
 
