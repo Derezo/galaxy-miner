@@ -123,8 +123,8 @@ class FormationStrategy {
       // Leader moves toward target, others follow
       this.moveAsLeader(npc, target, deltaTime);
     } else {
-      // Follow leader in formation position
-      this.followLeader(npc, formationInfo.leader, formationInfo.index, deltaTime);
+      // Follow leader in combat formation (wing positions to engage target)
+      this.followLeaderCombat(npc, formationInfo.leader, formationInfo.index, target, deltaTime);
     }
 
     // Coordinated firing
@@ -229,25 +229,60 @@ class FormationStrategy {
   }
 
   /**
-   * Follow leader in V-formation
+   * Follow leader in V-formation (for patrol - uses stable patrol direction)
    */
   followLeader(npc, leader, index, deltaTime) {
     if (!leader) return;
 
-    // Calculate formation position
-    const formationPos = this.getFormationPosition(leader, index);
+    // Use leader's stable patrol direction, not current rotation
+    const patrolDirection = leader.patrolDirection ?? leader.rotation;
+
+    // Calculate formation position using stable direction
+    const formationPos = this.getFormationPosition(leader, index, patrolDirection);
 
     const dx = formationPos.x - npc.position.x;
     const dy = formationPos.y - npc.position.y;
     const dist = Math.sqrt(dx * dx + dy * dy);
 
-    // Match leader rotation
-    npc.rotation = leader.rotation;
-
-    // Move to formation position
+    // Move to formation position with smoothing
     if (dist > 15) {
+      // Smoothly interpolate rotation toward movement direction
+      const targetRotation = Math.atan2(dy, dx);
+      npc.rotation = this.lerpAngle(npc.rotation, targetRotation, 0.1);
+
       // Move faster if far from position
       const speedMult = Math.min(1.5, 1 + dist / 200);
+      const moveSpeed = npc.speed * speedMult * (deltaTime / 1000);
+      npc.position.x += (dx / dist) * moveSpeed;
+      npc.position.y += (dy / dist) * moveSpeed;
+    } else {
+      // In formation - smoothly match patrol direction
+      npc.rotation = this.lerpAngle(npc.rotation, patrolDirection, 0.1);
+    }
+  }
+
+  /**
+   * Follow leader in combat formation (wing positions beside leader to engage target)
+   */
+  followLeaderCombat(npc, leader, index, target, deltaTime) {
+    if (!leader || !target) return;
+
+    // Calculate wing position - members spread beside leader, all facing target
+    const formationPos = this.getCombatFormationPosition(leader, index, target);
+
+    const dx = formationPos.x - npc.position.x;
+    const dy = formationPos.y - npc.position.y;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+
+    // Face the target, not the movement direction
+    const targetDx = target.position.x - npc.position.x;
+    const targetDy = target.position.y - npc.position.y;
+    const targetAngle = Math.atan2(targetDy, targetDx);
+    npc.rotation = this.lerpAngle(npc.rotation, targetAngle, 0.15);
+
+    // Move to formation position
+    if (dist > 20) {
+      const speedMult = Math.min(1.5, 1 + dist / 150);
       const moveSpeed = npc.speed * speedMult * (deltaTime / 1000);
       npc.position.x += (dx / dist) * moveSpeed;
       npc.position.y += (dy / dist) * moveSpeed;
@@ -255,11 +290,11 @@ class FormationStrategy {
   }
 
   /**
-   * Calculate V-formation position
+   * Calculate V-formation position for patrol
    */
-  getFormationPosition(leader, index) {
+  getFormationPosition(leader, index, direction) {
     const spacing = 80;
-    const angle = leader.rotation + Math.PI; // Behind leader
+    const angle = direction + Math.PI; // Behind leader's movement direction
     const side = index % 2 === 0 ? 1 : -1;
     const row = Math.ceil(index / 2);
 
@@ -267,6 +302,40 @@ class FormationStrategy {
       x: leader.position.x + Math.cos(angle + side * 0.5 * row) * spacing * row,
       y: leader.position.y + Math.sin(angle + side * 0.5 * row) * spacing * row
     };
+  }
+
+  /**
+   * Calculate wing formation position for combat (beside leader, facing target)
+   */
+  getCombatFormationPosition(leader, index, target) {
+    const spacing = 60;
+    // Angle from leader to target
+    const toTargetAngle = Math.atan2(
+      target.position.y - leader.position.y,
+      target.position.x - leader.position.x
+    );
+
+    // Wing positions: spread perpendicular to attack direction, slightly behind
+    const side = index % 2 === 0 ? 1 : -1;
+    const row = Math.ceil(index / 2);
+    const spreadAngle = toTargetAngle + (Math.PI / 2) * side; // Perpendicular
+    const backOffset = toTargetAngle + Math.PI; // Slightly behind
+
+    return {
+      x: leader.position.x + Math.cos(spreadAngle) * spacing * row + Math.cos(backOffset) * 30 * row,
+      y: leader.position.y + Math.sin(spreadAngle) * spacing * row + Math.sin(backOffset) * 30 * row
+    };
+  }
+
+  /**
+   * Smoothly interpolate between angles
+   */
+  lerpAngle(from, to, t) {
+    // Normalize angles to -PI to PI
+    let diff = to - from;
+    while (diff > Math.PI) diff -= Math.PI * 2;
+    while (diff < -Math.PI) diff += Math.PI * 2;
+    return from + diff * t;
   }
 
   /**
@@ -400,7 +469,8 @@ class FormationStrategy {
 
       if (!center) return;
 
-      npc.patrolAngle = (npc.patrolAngle || 0) + 0.3 * (deltaTime / 1000);
+      // Slower patrol orbit to reduce spinning (was 0.3, now 0.15)
+      npc.patrolAngle = (npc.patrolAngle || 0) + 0.15 * (deltaTime / 1000);
       const targetX = center.x + Math.cos(npc.patrolAngle) * patrolRadius;
       const targetY = center.y + Math.sin(npc.patrolAngle) * patrolRadius;
 
@@ -409,9 +479,19 @@ class FormationStrategy {
       const dist = Math.sqrt(dx * dx + dy * dy);
 
       if (dist > 10) {
-        npc.rotation = Math.atan2(dy, dx);
+        // Calculate target rotation
+        const targetRotation = Math.atan2(dy, dx);
+        // Smoothly interpolate rotation
+        npc.rotation = this.lerpAngle(npc.rotation, targetRotation, 0.08);
+        // Store stable patrol direction for followers (tangent to patrol circle)
+        npc.patrolDirection = npc.patrolAngle + Math.PI / 2;
+
         npc.position.x += (dx / dist) * patrolSpeed;
         npc.position.y += (dy / dist) * patrolSpeed;
+      } else {
+        // At patrol point, face tangent direction
+        npc.patrolDirection = npc.patrolAngle + Math.PI / 2;
+        npc.rotation = this.lerpAngle(npc.rotation, npc.patrolDirection, 0.08);
       }
     } else {
       // Follow leader in formation

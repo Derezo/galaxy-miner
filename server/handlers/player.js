@@ -90,6 +90,9 @@ function register(ctx) {
     player.position = { x: ship.position_x, y: ship.position_y };
     player.velocity = { x: 0, y: 0 };
     player.rotation = ship.rotation;
+    player.isDead = false;
+    player.deathTime = null;
+    player.deathPosition = null;
 
     // Confirm respawn to client (using player:respawn to match client handler)
     socket.emit('player:respawn', {

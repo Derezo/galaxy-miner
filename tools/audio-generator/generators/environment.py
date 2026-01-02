@@ -328,8 +328,95 @@ def generate_space_ambient() -> np.ndarray:
     return normalize(ambient, target_db=-18)
 
 
+def generate_void_rift_open() -> np.ndarray:
+    """
+    Void rift opening: Otherworldly dimensional tear.
+    Reality cracking open with deep purple energy.
+    """
+    duration = 1.2
+
+    # Deep bass tear - the fabric of reality ripping
+    tear_start = 60
+    tear_end = 30
+    tear = square_wave(tear_start, duration, sample_rate=SAMPLE_RATE)
+    tear = pitch_sweep(tear, tear_start, tear_end, duration, sample_rate=SAMPLE_RATE)
+
+    # Ethereal high-frequency shimmer - otherworldly energy
+    shimmer = triangle_wave(800, duration, sample_rate=SAMPLE_RATE)
+    shimmer = pitch_sweep(shimmer, 800, 1200, duration, sample_rate=SAMPLE_RATE)
+    shimmer = phaser(shimmer, rate=6.0, depth=0.8, sample_rate=SAMPLE_RATE)
+
+    # Void energy crackling - noise with resonant filter
+    crackle = noise(duration, color='white', sample_rate=SAMPLE_RATE)
+    crackle = resonant_filter(crackle, 600, resonance=8.0, sample_rate=SAMPLE_RATE)
+    crackle = highpass_filter(crackle, 400, sample_rate=SAMPLE_RATE)
+
+    # Rising whoosh - building energy
+    whoosh = sawtooth_wave(200, duration, sample_rate=SAMPLE_RATE)
+    whoosh = pitch_sweep(whoosh, 200, 600, duration, sample_rate=SAMPLE_RATE)
+    whoosh = lowpass_filter(whoosh, 2000, sample_rate=SAMPLE_RATE)
+
+    # Envelope: quick attack, sustained presence
+    combined = mix_layers(tear, shimmer, crackle, whoosh,
+                         weights=[0.3, 0.25, 0.2, 0.25])
+    combined = adsr_envelope(combined, attack=0.05, decay=0.2,
+                            sustain_level=0.8, release=0.3)
+
+    # Void aesthetic: distortion + bitcrush
+    combined = distortion(combined, amount=0.4)
+    combined = bitcrush(combined, bits=5)
+
+    return normalize(combined, target_db=-4)
+
+
+def generate_void_rift_close() -> np.ndarray:
+    """
+    Void rift closing: Dimensional sealing.
+    Space healing, reverse tear effect.
+    """
+    duration = 0.8
+
+    # Descending seal - reverse of opening
+    seal_start = 30
+    seal_end = 80
+    seal = square_wave(seal_start, duration, sample_rate=SAMPLE_RATE)
+    seal = pitch_sweep(seal, seal_start, seal_end, duration, sample_rate=SAMPLE_RATE)
+
+    # Imploding shimmer - energy collapsing inward
+    shimmer = triangle_wave(1200, duration, sample_rate=SAMPLE_RATE)
+    shimmer = pitch_sweep(shimmer, 1200, 400, duration, sample_rate=SAMPLE_RATE)
+    shimmer = phaser(shimmer, rate=8.0, depth=0.6, sample_rate=SAMPLE_RATE)
+
+    # Collapsing whoosh
+    whoosh = noise(duration, color='pink', sample_rate=SAMPLE_RATE)
+    whoosh = lowpass_filter(whoosh, 3000, sample_rate=SAMPLE_RATE)
+    # Reverse volume envelope - louder at start, fading
+    t = np.linspace(0, duration, int(duration * SAMPLE_RATE))
+    collapse_env = np.exp(-3 * t / duration)
+    whoosh = whoosh * collapse_env
+
+    # Final snap - quick percussive end
+    snap = pulse_wave(100, 0.1, duty=0.3, sample_rate=SAMPLE_RATE)
+    snap = percussive_envelope(snap, attack=0.002, decay=0.1)
+    snap_full = np.zeros(int(duration * SAMPLE_RATE))
+    snap_pos = int((duration - 0.12) * SAMPLE_RATE)
+    end_pos = min(snap_pos + len(snap), len(snap_full))
+    snap_full[snap_pos:end_pos] = snap[:end_pos - snap_pos]
+
+    # Mix and envelope
+    combined = mix_layers(seal, shimmer, whoosh, snap_full,
+                         weights=[0.3, 0.25, 0.25, 0.2])
+    combined = percussive_envelope(combined, attack=0.02, decay=duration)
+
+    # Void aesthetic
+    combined = distortion(combined, amount=0.3)
+    combined = bitcrush(combined, bits=5)
+
+    return normalize(combined, target_db=-5)
+
+
 def generate_all():
-    """Generate all 20 environment sounds."""
+    """Generate all environment sounds."""
     print("Generating environment sounds...")
 
     base_path = "output/environment"
@@ -373,8 +460,16 @@ def generate_all():
     export_wav(sound, f"{base_path}/space_ambient.wav", SAMPLE_RATE)
     print(f"  Generated: space_ambient.wav")
 
-    print(f"Completed: 10 core environment sounds generated in {base_path}/")
-    print("Note: Additional variations can be added to reach 20 sounds total")
+    # Void rift sounds
+    sound = generate_void_rift_open()
+    export_wav(sound, f"{base_path}/void_rift_open.wav", SAMPLE_RATE)
+    print(f"  Generated: void_rift_open.wav")
+
+    sound = generate_void_rift_close()
+    export_wav(sound, f"{base_path}/void_rift_close.wav", SAMPLE_RATE)
+    print(f"  Generated: void_rift_close.wav")
+
+    print(f"Completed: 12 environment sounds generated in {base_path}/")
 
 
 if __name__ == "__main__":

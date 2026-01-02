@@ -20,12 +20,20 @@ function register(socket) {
       shield: data.shield,
       shieldMax: data.shieldMax
     });
+
+    // Create rift portal for void faction NPCs when they spawn
+    if (data.faction === 'void' && typeof RiftPortal !== 'undefined') {
+      RiftPortal.create(data.id, data.x, data.y, data.type, 'spawn');
+    }
   });
 
   socket.on('npc:update', (data) => {
     // Server now sends full NPC data in updates, so we can create NPCs
     // if they don't exist (happens when player enters range of existing NPC)
-    Entities.updateNPC({
+    const existingNpc = Entities.npcs.get(data.id);
+    const isNewNpc = !existingNpc;
+
+    const npcData = {
       id: data.id,
       type: data.type,
       name: data.name,
@@ -37,10 +45,22 @@ function register(socket) {
       hull: data.hull,
       hullMax: data.hullMax,
       shield: data.shield,
-      shieldMax: data.shieldMax,
-      // Mining beam target position for rogue miners
-      miningTargetPos: data.miningTargetPos
-    });
+      shieldMax: data.shieldMax
+    };
+    // Include wreckage collection position for tractor beam animation
+    if (data.collectingWreckagePos) {
+      npcData.collectingWreckagePos = data.collectingWreckagePos;
+    }
+    // Include mining target position for rogue miner beam animation
+    if (data.miningTargetPos) {
+      npcData.miningTargetPos = data.miningTargetPos;
+    }
+    Entities.updateNPC(npcData);
+
+    // Create rift portal for void faction NPCs when they're first seen
+    if (isNewNpc && data.faction === 'void' && typeof RiftPortal !== 'undefined') {
+      RiftPortal.create(data.id, data.x, data.y, data.type, 'idle');
+    }
   });
 
   // NPC action events - used for immediate state updates like mining beam
@@ -104,6 +124,11 @@ function register(socket) {
         const effectType = DeathEffects.getEffectForFaction(npc.faction);
         DeathEffects.trigger(npc.position.x, npc.position.y, effectType, npc.faction);
       }
+    }
+
+    // Close rift portal for void NPCs when destroyed
+    if (npc && npc.faction === 'void' && typeof RiftPortal !== 'undefined') {
+      RiftPortal.setState(data.id, 'close');
     }
 
     // Now remove the NPC
@@ -1021,21 +1046,22 @@ function register(socket) {
   socket.on('void:gravityWell', (data) => {
     Logger.log('Gravity well:', data.phase, 'at', data.position);
 
-    if (typeof VoidEffects !== 'undefined') {
+    if (typeof GravityWellEffect !== 'undefined') {
+      const wellId = `gravity_well_${data.npcId}`;
       if (data.phase === 'warning') {
-        VoidEffects.gravityWellWarning(data.position, data.radius, data.warningDuration);
+        GravityWellEffect.create(wellId, data.position.x, data.position.y, 'warning', data.radius);
         // Play warning sound
         if (typeof AudioManager !== 'undefined' && AudioManager.isReady && AudioManager.isReady()) {
           AudioManager.playAt('void_gravity_warning', data.position.x, data.position.y);
         }
       } else if (data.phase === 'active') {
-        VoidEffects.gravityWellActive(data.position, data.radius, data.activeDuration);
+        GravityWellEffect.setPhase(wellId, 'active');
         // Play active vortex sound
         if (typeof AudioManager !== 'undefined' && AudioManager.isReady && AudioManager.isReady()) {
           AudioManager.playAt('void_gravity_active', data.position.x, data.position.y);
         }
       } else if (data.phase === 'end') {
-        VoidEffects.gravityWellEnd();
+        GravityWellEffect.setPhase(wellId, 'end');
       }
     }
   });
@@ -1044,18 +1070,24 @@ function register(socket) {
   socket.on('void:consume', (data) => {
     Logger.log('Void consume:', data.phase, 'target:', data.targetNpcId);
 
-    if (typeof VoidEffects !== 'undefined') {
-      if (data.phase === 'tendril') {
-        VoidEffects.consumeTendril(data.leviathanId, data.targetNpcId, data.targetPosition, data.tendrilSpeed);
+    if (typeof ConsumeTendrilEffect !== 'undefined') {
+      const consumeId = `consume_${data.leviathanId}_${data.targetNpcId}`;
+      const leviathan = Entities.npcs.get(data.leviathanId);
+      const target = Entities.npcs.get(data.targetNpcId);
+
+      if (data.phase === 'tendril' && leviathan && target) {
+        ConsumeTendrilEffect.create(consumeId,
+          { x: leviathan.position.x, y: leviathan.position.y },
+          { x: target.position.x, y: target.position.y }
+        );
       } else if (data.phase === 'drag') {
-        VoidEffects.consumeDrag(data.leviathanId, data.targetNpcId, data.dragDuration);
+        ConsumeTendrilEffect.setPhase(consumeId, 'drag');
       } else if (data.phase === 'dissolve') {
-        VoidEffects.consumeDissolve(data.leviathanId, data.targetNpcId);
+        ConsumeTendrilEffect.setPhase(consumeId, 'dissolve');
         // Play consume sound
         if (typeof AudioManager !== 'undefined' && AudioManager.isReady && AudioManager.isReady()) {
-          const leviathan = Entities.npcs.get(data.leviathanId);
           if (leviathan) {
-            AudioManager.playAt('void_consume', leviathan.x, leviathan.y);
+            AudioManager.playAt('void_consume', leviathan.position.x, leviathan.position.y);
           }
         }
       }
@@ -1066,8 +1098,18 @@ function register(socket) {
   socket.on('void:spawnMinions', (data) => {
     Logger.log('Void minion spawn:', data.riftCount, 'rifts at', data.position);
 
+    // Create rift portals around the spawn position
     if (typeof VoidEffects !== 'undefined') {
-      VoidEffects.spawnRifts(data.position, data.riftCount, data.trigger, data.healthThreshold);
+      const riftPositions = [];
+      for (let i = 0; i < data.riftCount; i++) {
+        const angle = (i / data.riftCount) * Math.PI * 2;
+        const radius = 80 + Math.random() * 40;
+        riftPositions.push({
+          x: data.position.x + Math.cos(angle) * radius,
+          y: data.position.y + Math.sin(angle) * radius
+        });
+      }
+      VoidEffects.spawnMinions(riftPositions);
     }
 
     // Play rift opening sound
@@ -1080,14 +1122,20 @@ function register(socket) {
   socket.on('void:riftRetreat', (data) => {
     Logger.log('Void NPC retreating into rift:', data.npcId);
 
-    if (typeof VoidEffects !== 'undefined') {
-      VoidEffects.riftRetreat(data.npcId, data.riftPosition, data.npcType);
+    if (typeof VoidEffects !== 'undefined' && data.riftPosition) {
+      // Fix: Pass x and y separately as the function expects (riftId, x, y, npcType)
+      VoidEffects.riftRetreat(data.npcId, data.riftPosition.x, data.riftPosition.y, data.npcType);
     }
 
     // Play rift closing sound
-    if (typeof AudioManager !== 'undefined' && AudioManager.isReady && AudioManager.isReady()) {
+    if (typeof AudioManager !== 'undefined' && AudioManager.isReady && AudioManager.isReady() && data.riftPosition) {
       AudioManager.playAt('void_rift_close', data.riftPosition.x, data.riftPosition.y);
     }
+
+    // Remove NPC after rift animation completes (1 second)
+    setTimeout(() => {
+      Entities.removeNPC(data.npcId);
+    }, 1000);
   });
 }
 

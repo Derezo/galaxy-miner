@@ -25,6 +25,9 @@ const QUEEN_AURA_BROADCAST_INTERVAL = 1000; // 1 second
 // Track which bases are currently active
 const lastBaseCheck = new Map(); // baseId -> lastCheckTime
 
+// Track void NPCs scheduled for rift respawn (prevent duplicate timers)
+const scheduledRiftRespawns = new Set(); // npcId -> scheduled
+
 // ============================================
 // PLAYER DEBUFF SYSTEM
 // Tracks active debuffs (slows, DoTs) on players
@@ -1646,10 +1649,89 @@ function updateNPCs(deltaTime) {
         npcType: action.npcType
       });
 
+      // Store NPC data for respawn before deletion
+      const retreatingNpc = npc.activeNPCs.get(action.npcId);
+
+      // Skip if already scheduled for respawn (prevent duplicate timers)
+      if (scheduledRiftRespawns.has(action.npcId)) {
+        continue;
+      }
+
+      // Don't respawn Leviathans through rift retreat - they have their own spawn system
+      if (retreatingNpc && retreatingNpc.type === 'void_leviathan') {
+        // Mark for removal after rift animation
+        setTimeout(() => {
+          npc.activeNPCs.delete(action.npcId);
+        }, 1000);
+        continue;
+      }
+
+      const respawnData = retreatingNpc ? {
+        type: retreatingNpc.type,
+        faction: retreatingNpc.faction,
+        riftPosition: action.riftPosition,
+        spawnPoint: retreatingNpc.spawnPoint || action.riftPosition,
+        baseId: retreatingNpc.homeBaseId || retreatingNpc.baseId
+      } : null;
+
+      // Mark as scheduled
+      scheduledRiftRespawns.add(action.npcId);
+
       // Mark for removal after rift animation
       setTimeout(() => {
         npc.activeNPCs.delete(action.npcId);
       }, 1000);
+
+      // Schedule respawn after 10-15 seconds with full health
+      if (respawnData) {
+        const respawnDelay = 10000 + Math.random() * 5000; // 10-15 seconds
+        setTimeout(() => {
+          // Clear from scheduled set
+          scheduledRiftRespawns.delete(action.npcId);
+
+          // Only respawn if the base still exists and is valid
+          if (respawnData.baseId) {
+            const base = npc.getActiveBase(respawnData.baseId);
+            if (!base || base.destroyed) return;
+          }
+
+          // Spawn 2 NPCs from the rift (reinforcements)
+          const spawnCount = 2;
+          for (let i = 0; i < spawnCount; i++) {
+            // Slight offset for each spawn
+            const offsetAngle = Math.random() * Math.PI * 2;
+            const offsetDist = 30 + Math.random() * 20;
+            const spawnPos = {
+              x: respawnData.riftPosition.x + Math.cos(offsetAngle) * offsetDist * i,
+              y: respawnData.riftPosition.y + Math.sin(offsetAngle) * offsetDist * i
+            };
+
+            const newNpc = npc.spawnVoidNPCFromRift(respawnData.type, spawnPos, {
+              spawnPoint: respawnData.spawnPoint,
+              baseId: respawnData.baseId
+            });
+
+            if (newNpc && socketModule) {
+              // Broadcast spawn to nearby players
+              broadcastNearNpc(newNpc, 'npc:spawn', {
+                id: newNpc.id,
+                type: newNpc.type,
+                name: newNpc.name,
+                faction: newNpc.faction,
+                x: newNpc.position.x,
+                y: newNpc.position.y,
+                rotation: newNpc.rotation,
+                hull: newNpc.hull,
+                hullMax: newNpc.hullMax,
+                shield: newNpc.shield,
+                shieldMax: newNpc.shieldMax,
+                fromRift: true,
+                riftPosition: respawnData.riftPosition
+              });
+            }
+          }
+        }, respawnDelay);
+      }
     }
   }
 

@@ -290,8 +290,238 @@ def generate_queen_death() -> np.ndarray:
     return normalize(combined, target_db=-1)  # Maximum impact
 
 
+# ============================================================================
+# Void Leviathan Boss Sounds
+# ============================================================================
+
+def generate_void_leviathan_spawn() -> np.ndarray:
+    """
+    Void Leviathan spawn: 7-second cinematic emergence.
+    Multiple cracks spread, void energy pools, massive entity emerges.
+    """
+    duration = 7.0
+
+    # Phase 1: Multiple cracks spreading (0-2s)
+    cracks = np.zeros(int(duration * SAMPLE_RATE))
+    crack_times = [0.0, 0.3, 0.5, 0.8, 1.2, 1.5, 1.8]
+    for i, time_offset in enumerate(crack_times):
+        pos = int(time_offset * SAMPLE_RATE)
+        crack_freq = 300 + i * 50
+        crack = pulse_wave(crack_freq, 0.15, duty=0.3, sample_rate=SAMPLE_RATE)
+        crack = pitch_sweep(crack, crack_freq, crack_freq * 0.5, 0.15, sample_rate=SAMPLE_RATE)
+        crack = percussive_envelope(crack, attack=0.002, decay=0.15)
+        end_pos = min(pos + len(crack), len(cracks))
+        cracks[pos:end_pos] += crack[:end_pos - pos] * (0.5 + i * 0.05)
+
+    # Phase 2: Void energy pooling (1.5-4s)
+    pool_duration = 2.5
+    pool = triangle_wave(40, pool_duration, sample_rate=SAMPLE_RATE)
+    pool = phaser(pool, rate=3.0, depth=0.8, sample_rate=SAMPLE_RATE)
+    # Add tremolo
+    t = np.linspace(0, pool_duration, int(pool_duration * SAMPLE_RATE))
+    tremolo = 0.5 + 0.5 * np.sin(2 * np.pi * 4 * t)
+    pool = pool * tremolo
+    pool_full = np.zeros(int(duration * SAMPLE_RATE))
+    pool_pos = int(1.5 * SAMPLE_RATE)
+    end_pos = min(pool_pos + len(pool), len(pool_full))
+    pool_full[pool_pos:end_pos] = pool[:end_pos - pool_pos]
+    pool_full = adsr_envelope(pool_full, attack=0.5, decay=0.5, sustain_level=0.8, release=1.0)
+
+    # Phase 3: Cracks converging into massive tear (3-5s)
+    converge = sawtooth_wave(60, 2.0, sample_rate=SAMPLE_RATE)
+    converge = pitch_sweep(converge, 60, 120, 2.0, sample_rate=SAMPLE_RATE)
+    converge = resonant_filter(converge, 100, resonance=6.0, sample_rate=SAMPLE_RATE)
+    converge_full = np.zeros(int(duration * SAMPLE_RATE))
+    converge_pos = int(3.0 * SAMPLE_RATE)
+    end_pos = min(converge_pos + len(converge), len(converge_full))
+    converge_full[converge_pos:end_pos] = converge[:end_pos - converge_pos]
+    converge_full = adsr_envelope(converge_full, attack=0.3, decay=0.4, sustain_level=0.7, release=0.8)
+
+    # Phase 4: Leviathan emergence (4.5-7s) - massive entity pushing through
+    emerge_duration = 2.5
+    emerge = square_wave(25, emerge_duration, sample_rate=SAMPLE_RATE)
+    # Slow pitch rise as entity emerges
+    emerge = pitch_sweep(emerge, 25, 50, emerge_duration, sample_rate=SAMPLE_RATE)
+    emerge_full = np.zeros(int(duration * SAMPLE_RATE))
+    emerge_pos = int(4.5 * SAMPLE_RATE)
+    end_pos = min(emerge_pos + len(emerge), len(emerge_full))
+    emerge_full[emerge_pos:end_pos] = emerge[:end_pos - emerge_pos]
+    emerge_full = adsr_envelope(emerge_full, attack=0.8, decay=0.5, sustain_level=0.9, release=1.0)
+
+    # Void ambient throughout - dark otherworldly presence
+    void_ambient = noise(duration, color='brown', sample_rate=SAMPLE_RATE)
+    void_ambient = lowpass_filter(void_ambient, 300, sample_rate=SAMPLE_RATE)
+    void_ambient = phaser(void_ambient, rate=1.0, depth=0.5, sample_rate=SAMPLE_RATE)
+    void_ambient = adsr_envelope(void_ambient, attack=1.0, decay=1.0, sustain_level=0.6, release=2.0)
+
+    # Final impact when fully emerged
+    final_impact = square_wave(80, 0.5, sample_rate=SAMPLE_RATE)
+    final_impact = pitch_sweep(final_impact, 80, 30, 0.5, sample_rate=SAMPLE_RATE)
+    final_impact = percussive_envelope(final_impact, attack=0.01, decay=0.5)
+    final_full = np.zeros(int(duration * SAMPLE_RATE))
+    final_pos = int(6.5 * SAMPLE_RATE)
+    end_pos = min(final_pos + len(final_impact), len(final_full))
+    final_full[final_pos:end_pos] = final_impact[:end_pos - final_pos]
+
+    # Mix all phases
+    combined = mix_layers(cracks, pool_full, converge_full, emerge_full,
+                         void_ambient, final_full,
+                         weights=[0.2, 0.15, 0.2, 0.25, 0.1, 0.1])
+
+    # Void processing
+    combined = distortion(combined, amount=0.5)
+    combined = bitcrush(combined, bits=4)
+
+    return normalize(combined, target_db=-2)
+
+
+def generate_void_gravity_warning() -> np.ndarray:
+    """
+    Void gravity well warning: Building energy, ominous power gathering.
+    Deep bass rumble with rising intensity.
+    """
+    duration = 1.5
+
+    # Building bass rumble
+    rumble = square_wave(30, duration, sample_rate=SAMPLE_RATE)
+    # Rising pitch as energy builds
+    rumble = pitch_sweep(rumble, 30, 50, duration, sample_rate=SAMPLE_RATE)
+
+    # Tremolo for pulsing effect - accelerating
+    t = np.linspace(0, duration, int(duration * SAMPLE_RATE))
+    # Frequency increases over time (2 Hz to 8 Hz)
+    tremolo_freq = 2 + 6 * (t / duration)
+    tremolo = 0.5 + 0.5 * np.sin(2 * np.pi * np.cumsum(tremolo_freq) / SAMPLE_RATE)
+    rumble = rumble * tremolo
+
+    # Rising void energy
+    rise = triangle_wave(100, duration, sample_rate=SAMPLE_RATE)
+    rise = pitch_sweep(rise, 100, 300, duration, sample_rate=SAMPLE_RATE)
+    rise = phaser(rise, rate=5.0, depth=0.7, sample_rate=SAMPLE_RATE)
+
+    # Crackling energy
+    crackle = noise(duration, color='white', sample_rate=SAMPLE_RATE)
+    crackle = resonant_filter(crackle, 800, resonance=10.0, sample_rate=SAMPLE_RATE)
+    crackle = highpass_filter(crackle, 500, sample_rate=SAMPLE_RATE)
+    # Increasing intensity envelope
+    intensity_env = t / duration
+    crackle = crackle * intensity_env
+
+    # Envelope: gradual build
+    combined = mix_layers(rumble, rise, crackle, weights=[0.45, 0.35, 0.2])
+    combined = adsr_envelope(combined, attack=0.1, decay=0.2, sustain_level=0.9, release=0.2)
+
+    # Void aesthetic
+    combined = distortion(combined, amount=0.4)
+    combined = bitcrush(combined, bits=5)
+
+    return normalize(combined, target_db=-4)
+
+
+def generate_void_gravity_active() -> np.ndarray:
+    """
+    Void gravity well active: Sustained gravitational pull vortex.
+    Thrumming, swirling energy (loopable).
+    """
+    duration = 2.0
+
+    # Deep thrumming base
+    thrum = square_wave(35, duration, sample_rate=SAMPLE_RATE)
+    # Pulsing at gravity frequency
+    t = np.linspace(0, duration, int(duration * SAMPLE_RATE))
+    pulse = 0.6 + 0.4 * np.sin(2 * np.pi * 6 * t)  # 6 Hz throb
+    thrum = thrum * pulse
+
+    # Swirling vortex - phased sawtooth
+    vortex = sawtooth_wave(80, duration, sample_rate=SAMPLE_RATE)
+    vortex = phaser(vortex, rate=2.0, depth=1.0, sample_rate=SAMPLE_RATE)
+    vortex = lowpass_filter(vortex, 400, sample_rate=SAMPLE_RATE)
+
+    # Void energy crackling
+    void_crackle = noise(duration, color='pink', sample_rate=SAMPLE_RATE)
+    void_crackle = resonant_filter(void_crackle, 600, resonance=8.0, sample_rate=SAMPLE_RATE)
+    void_crackle = lowpass_filter(void_crackle, 2000, sample_rate=SAMPLE_RATE)
+
+    # Subtle high-frequency shimmer
+    shimmer = triangle_wave(400, duration, sample_rate=SAMPLE_RATE)
+    shimmer = phaser(shimmer, rate=8.0, depth=0.5, sample_rate=SAMPLE_RATE)
+    shimmer = highpass_filter(shimmer, 300, sample_rate=SAMPLE_RATE)
+
+    # Mix
+    combined = mix_layers(thrum, vortex, void_crackle, shimmer,
+                         weights=[0.35, 0.3, 0.2, 0.15])
+
+    # Ensure seamless looping
+    fade_samples = int(0.05 * SAMPLE_RATE)
+    fade_in = np.linspace(0, 1, fade_samples)
+    fade_out = np.linspace(1, 0, fade_samples)
+    end_section = combined[-fade_samples:].copy()
+    start_section = combined[:fade_samples].copy()
+    crossfaded = end_section * fade_out + start_section * fade_in
+    combined[:fade_samples] = crossfaded
+
+    # Void aesthetic
+    combined = distortion(combined, amount=0.35)
+    combined = bitcrush(combined, bits=5)
+
+    return normalize(combined, target_db=-6)  # Sustained ambient level
+
+
+def generate_void_consume() -> np.ndarray:
+    """
+    Void consume: Dark tendrils extending, energy drain, dissolution.
+    Sinister grabbing and draining sound.
+    """
+    duration = 1.0
+
+    # Tendril extension - whooshing sweep
+    tendril = sawtooth_wave(200, 0.4, sample_rate=SAMPLE_RATE)
+    tendril = pitch_sweep(tendril, 200, 600, 0.4, sample_rate=SAMPLE_RATE)
+    tendril = phaser(tendril, rate=10.0, depth=0.8, sample_rate=SAMPLE_RATE)
+    tendril = percussive_envelope(tendril, attack=0.02, decay=0.4)
+    tendril_full = np.zeros(int(duration * SAMPLE_RATE))
+    tendril_full[:len(tendril)] = tendril
+
+    # Grabbing impact
+    grab = square_wave(100, 0.15, sample_rate=SAMPLE_RATE)
+    grab = percussive_envelope(grab, attack=0.005, decay=0.15)
+    grab_full = np.zeros(int(duration * SAMPLE_RATE))
+    grab_pos = int(0.35 * SAMPLE_RATE)
+    end_pos = min(grab_pos + len(grab), len(grab_full))
+    grab_full[grab_pos:end_pos] = grab[:end_pos - grab_pos]
+
+    # Energy drain - descending tone
+    drain = triangle_wave(400, 0.5, sample_rate=SAMPLE_RATE)
+    drain = pitch_sweep(drain, 400, 80, 0.5, sample_rate=SAMPLE_RATE)
+    drain = resonant_filter(drain, 200, resonance=6.0, sample_rate=SAMPLE_RATE)
+    drain = percussive_envelope(drain, attack=0.05, decay=0.5)
+    drain_full = np.zeros(int(duration * SAMPLE_RATE))
+    drain_pos = int(0.4 * SAMPLE_RATE)
+    end_pos = min(drain_pos + len(drain), len(drain_full))
+    drain_full[drain_pos:end_pos] = drain[:end_pos - drain_pos]
+
+    # Dissolution hiss at end
+    dissolve = noise(0.3, color='white', sample_rate=SAMPLE_RATE)
+    dissolve = highpass_filter(dissolve, 4000, sample_rate=SAMPLE_RATE)
+    dissolve = percussive_envelope(dissolve, attack=0.02, decay=0.3)
+    dissolve_full = np.zeros(int(duration * SAMPLE_RATE))
+    dissolve_pos = int(0.7 * SAMPLE_RATE)
+    end_pos = min(dissolve_pos + len(dissolve), len(dissolve_full))
+    dissolve_full[dissolve_pos:end_pos] = dissolve[:end_pos - dissolve_pos]
+
+    # Mix
+    combined = mix_layers(tendril_full, grab_full, drain_full, dissolve_full,
+                         weights=[0.3, 0.25, 0.3, 0.15])
+
+    # Void aesthetic
+    combined = distortion(combined, amount=0.4)
+    combined = bitcrush(combined, bits=5)
+
+    return normalize(combined, target_db=-3)
+
+
 def generate_all():
-    """Generate all 15 boss sounds."""
+    """Generate all boss sounds."""
     print("Generating boss sounds...")
 
     base_path = "output/bosses"
@@ -322,7 +552,21 @@ def generate_all():
     export_wav(sound, f"{base_path}/queen_death.wav", SAMPLE_RATE)
     print(f"  Generated: queen_death.wav")
 
-    print(f"Completed: 8 boss sounds generated in {base_path}/")
+    # Void Leviathan sounds
+    void_sounds = [
+        ('void_leviathan_spawn', generate_void_leviathan_spawn),
+        ('void_gravity_warning', generate_void_gravity_warning),
+        ('void_gravity_active', generate_void_gravity_active),
+        ('void_consume', generate_void_consume)
+    ]
+
+    for sound_name, generator_func in void_sounds:
+        sound = generator_func()
+        filename = f"{base_path}/{sound_name}.wav"
+        export_wav(sound, filename, SAMPLE_RATE)
+        print(f"  Generated: {sound_name}.wav")
+
+    print(f"Completed: 12 boss sounds generated in {base_path}/")
 
 
 if __name__ == "__main__":

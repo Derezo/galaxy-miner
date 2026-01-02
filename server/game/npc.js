@@ -217,46 +217,47 @@ const NPC_TYPES = {
   },
 
   // === VOID ENTITIES (Formation AI, Retreat at 30%) ===
+  // Health increased by 150% (x2.5) to make void faction more challenging
   void_whisper: {
     name: 'Void Whisper',
     faction: 'void',
-    hull: 45,
-    shield: 35,
+    hull: 113,           // Was 45, +150%
+    shield: 88,          // Was 35, +150%
     speed: 140,
     weaponType: 'energy',
     weaponTier: 2,
     weaponDamage: 7,
     weaponRange: 250,
     aggroRange: 450,
-    creditReward: 40,  // Tier: low (was 35)
+    creditReward: 60,    // Increased reward for difficulty
     deathEffect: 'implode'
   },
   void_shadow: {
     name: 'Void Shadow',
     faction: 'void',
-    hull: 80,
-    shield: 60,
+    hull: 200,           // Was 80, +150%
+    shield: 150,         // Was 60, +150%
     speed: 120,
     weaponType: 'energy',
     weaponTier: 2,
     weaponDamage: 12,
     weaponRange: 280,
     aggroRange: 500,
-    creditReward: 100,  // Tier: mid (was 90)
+    creditReward: 150,   // Increased reward for difficulty
     deathEffect: 'implode'
   },
   void_phantom: {
     name: 'Void Phantom',
     faction: 'void',
-    hull: 150,
-    shield: 120,
+    hull: 375,           // Was 150, +150%
+    shield: 300,         // Was 120, +150%
     speed: 100,
     weaponType: 'energy',
     weaponTier: 3,
     weaponDamage: 18,
     weaponRange: 320,
     aggroRange: 550,
-    creditReward: 200,  // Tier: high (was 180)
+    creditReward: 300,   // Increased reward for difficulty
     deathEffect: 'implode'
   },
   void_leviathan: {
@@ -1349,10 +1350,10 @@ const BASE_NPC_SPAWNS = {
   void_rift: {
     npcs: ['void_whisper', 'void_shadow', 'void_phantom'],
     weights: [0.5, 0.35, 0.15],
-    maxNPCs: 4,
-    spawnCooldown: 40000,
-    respawnDelay: 300000,        // 5 minutes
-    initialSpawn: 2
+    maxNPCs: 8,                  // Doubled from 4 for more void presence
+    spawnCooldown: 20000,        // Halved from 40s for faster spawning
+    respawnDelay: 120000,        // Reduced from 5 min to 2 min
+    initialSpawn: 4              // Doubled from 2
   },
   mining_claim: {
     npcs: ['rogue_prospector', 'rogue_driller', 'rogue_excavator'],
@@ -3218,6 +3219,66 @@ function spawnRogueMinerNPC(baseId, npcType) {
   return npc;
 }
 
+/**
+ * Spawn a void NPC from a rift portal (for respawning after retreat)
+ * @param {string} npcType - NPC type to spawn
+ * @param {Object} riftPosition - Position {x, y} of the rift
+ * @param {Object} options - Optional spawn options
+ * @returns {Object|null} The spawned NPC or null
+ */
+function spawnVoidNPCFromRift(npcType, riftPosition, options = {}) {
+  const npcTypeData = NPC_TYPES[npcType];
+  if (!npcTypeData || npcTypeData.faction !== 'void') return null;
+
+  const npcId = `npc_rift_${++npcIdCounter}`;
+
+  const npc = {
+    id: npcId,
+    type: npcType,
+    name: npcTypeData.name,
+    faction: 'void',
+    position: { x: riftPosition.x, y: riftPosition.y },
+    velocity: { x: 0, y: 0 },
+    rotation: Math.random() * Math.PI * 2,
+    hull: npcTypeData.hull,
+    hullMax: npcTypeData.hull,
+    shield: npcTypeData.shield,
+    shieldMax: npcTypeData.shield,
+    speed: npcTypeData.speed,
+    weaponType: npcTypeData.weaponType,
+    weaponTier: npcTypeData.weaponTier,
+    weaponDamage: npcTypeData.weaponDamage,
+    weaponRange: npcTypeData.weaponRange,
+    aggroRange: npcTypeData.aggroRange,
+    creditReward: npcTypeData.creditReward,
+    homeBaseId: options.baseId || null,
+    homeBasePosition: options.spawnPoint || riftPosition,
+    patrolRadius: options.patrolRadius || 3 * config.SECTOR_SIZE,
+    spawnPoint: options.spawnPoint || riftPosition,
+    targetPlayer: null,
+    lastFireTime: 0,
+    lastDamageTime: 0,
+    patrolAngle: Math.random() * Math.PI * 2,
+    damageContributors: new Map(),
+    state: 'patrol',
+    // Rift portal for retreat
+    riftPortal: { x: riftPosition.x, y: riftPosition.y },
+    fromRift: true
+  };
+
+  activeNPCs.set(npcId, npc);
+
+  // Track in base if provided
+  if (options.baseId) {
+    const base = activeBases.get(options.baseId);
+    if (base && base.spawnedNPCs) {
+      base.spawnedNPCs.push(npcId);
+    }
+  }
+
+  return npc;
+}
+
 module.exports = {
   NPC_TYPES,
   TEAM_MULTIPLIERS,
@@ -3282,6 +3343,8 @@ module.exports = {
   spawnVoidLeviathan,
   handleLeviathanDeath,
   getActiveLeviathan,
+  // Void rift respawning
+  spawnVoidNPCFromRift,
   clearAssimilationProgress,
   getAssimilationState,
   getActiveQueen,

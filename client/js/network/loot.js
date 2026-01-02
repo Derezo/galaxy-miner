@@ -61,6 +61,19 @@ function register(socket) {
   });
 
   socket.on('loot:error', (data) => {
+    // Silently ignore "No wreckage within range" - not an error, just nothing to collect
+    const silentErrors = ['No wreckage within range'];
+    if (silentErrors.includes(data.message)) {
+      // Reset state silently and return - no need to notify user
+      if (typeof Player !== 'undefined') {
+        Player.multiCollecting = false;
+        Player.multiCollectWreckageIds = null;
+        Player.collectProgress = 0;
+        Player.collectTotalTime = 0;
+      }
+      return;
+    }
+
     window.Logger.error('Loot error:', data.message);
     if (typeof NotificationManager !== 'undefined') {
       NotificationManager.error(data.message);
@@ -81,11 +94,11 @@ function register(socket) {
 
     // Start siphon animation for each wreckage piece
     // Use a minimum animation duration of 600ms for visibility, even if server collection is faster
-    if (typeof Entities !== 'undefined' && typeof Player !== 'undefined') {
-      const playerPos = { x: Player.x, y: Player.y };
+    if (typeof Entities !== 'undefined') {
       const animDuration = Math.max(600, data.totalTime);
-      window.Logger.category('relics', 'Siphon animation starting at player pos:', playerPos, 'duration:', animDuration);
-      Entities.startSiphonAnimation(data.wreckageIds, playerPos, animDuration);
+      window.Logger.category('relics', 'Siphon animation starting, duration:', animDuration);
+      // Note: startSiphonAnimation only takes (wreckageIds, duration) - player position is read during render
+      Entities.startSiphonAnimation(data.wreckageIds, animDuration);
     }
   });
 

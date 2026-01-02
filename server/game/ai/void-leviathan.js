@@ -2,6 +2,7 @@
 // Otherworldly boss with gravity well, consume, and minion spawning abilities
 
 const CONSTANTS = require('../../../shared/constants');
+const logger = require('../../../shared/logger');
 
 /**
  * VoidLeviathanAI - Controls the Void Leviathan boss behavior
@@ -120,7 +121,7 @@ class VoidLeviathanAI {
       // Standard combat
       return this.combat(npc, state, nearbyPlayers, deltaTime);
     } catch (error) {
-      Logger.error(`VoidLeviathanAI.update error for NPC ${npc?.id}:`, error.message);
+      logger.error(`VoidLeviathanAI.update error for NPC ${npc?.id}:`, error.message);
       // Return null to skip this tick's action, allowing recovery
       return null;
     }
@@ -458,8 +459,12 @@ class VoidLeviathanAI {
   selectTarget(players) {
     if (players.length === 0) return null;
 
+    // Filter out dead players first
+    const alivePlayers = players.filter(p => !p.isDead);
+    if (alivePlayers.length === 0) return null;
+
     // Sort by health percentage (focus damaged targets)
-    const sorted = [...players].sort((a, b) => {
+    const sorted = [...alivePlayers].sort((a, b) => {
       const aHealth = (a.hull || 100) / (a.hullMax || 100);
       const bHealth = (b.hull || 100) / (b.hullMax || 100);
       return aHealth - bHealth;
@@ -568,6 +573,8 @@ class VoidLeviathanAI {
    */
   getPlayersInRadius(players, position, radius) {
     return players.filter(player => {
+      // Skip dead players
+      if (player.isDead) return false;
       const dist = this.distance(player.position, position);
       return dist <= radius;
     }).map(player => ({

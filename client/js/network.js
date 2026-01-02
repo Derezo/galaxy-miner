@@ -166,135 +166,11 @@ const Network = {
       }
     });
 
-    this.socket.on('world:update', (data) => {
-      World.handleUpdate(data);
-    });
-
-    this.socket.on('inventory:update', (data) => {
-      Player.updateInventory(data);
-
-      // Sync credit animation with updated balance
-      if (typeof CreditAnimation !== 'undefined') {
-        CreditAnimation.sync();
-      }
-
-      // Update UIState for new panels
-      if (typeof UIState !== 'undefined') {
-        UIState.set({
-          inventory: data.inventory ?? Player.inventory,
-          credits: (typeof data.credits === 'number' && !Number.isNaN(data.credits)) ? data.credits : Player.credits
-        });
-      }
-
-      // Refresh UI
-      if (typeof CargoPanel !== 'undefined') {
-        CargoPanel.refresh();
-      } else if (typeof InventoryUI !== 'undefined') {
-        InventoryUI.refresh();
-      }
-    });
-
-    this.socket.on('mining:started', (data) => {
-      // Start mining drill loop
-      if (typeof AudioManager !== 'undefined' && AudioManager.isReady && AudioManager.isReady()) {
-        const tier = data.miningTier || 1;
-        this._activeMiningDrillTier = tier;
-        AudioManager.startLoop('mining_drill_' + tier);
-      }
-
-      Player.onMiningStarted(data);
-    });
-
-    this.socket.on('mining:complete', (data) => {
-      // Stop mining drill loop and play completion sound
-      if (typeof AudioManager !== 'undefined' && AudioManager.isReady && AudioManager.isReady()) {
-        const tier = this._activeMiningDrillTier || 1;
-        AudioManager.stopLoop('mining_drill_' + tier);
-        this._activeMiningDrillTier = null;
-        AudioManager.play('mining_complete');
-      }
-
-      Player.onMiningComplete(data);
-    });
-
-    this.socket.on('mining:cancelled', (data) => {
-      // Stop mining drill loop
-      if (typeof AudioManager !== 'undefined' && AudioManager.isReady && AudioManager.isReady()) {
-        const tier = this._activeMiningDrillTier || 1;
-        AudioManager.stopLoop('mining_drill_' + tier);
-        this._activeMiningDrillTier = null;
-      }
-
-      Player.onMiningCancelled(data);
-    });
-
-    this.socket.on('mining:error', (data) => {
-      Player.onMiningError(data);
-    });
-
-    // Other players' mining visualization
-    this.socket.on('mining:playerStarted', (data) => {
-      Entities.updatePlayerMining(data.playerId, {
-        targetX: data.targetX,
-        targetY: data.targetY,
-        resourceType: data.resourceType,
-        miningTier: data.miningTier
-      });
-    });
-
-    this.socket.on('mining:playerStopped', (data) => {
-      Entities.clearPlayerMining(data.playerId);
-    });
-
-    // Note: 'combat:event' was a legacy placeholder removed in network audit
-    // Combat events are handled in /client/js/network/combat.js
-
-    // NPC events - spawn, update, destroyed
-    this.socket.on('npc:spawn', (data) => {
-      Entities.updateNPC({
-        id: data.id,
-        type: data.type,
-        name: data.name,
-        faction: data.faction,
-        x: data.x,
-        y: data.y,
-        rotation: data.rotation,
-        hull: data.hull,
-        hullMax: data.hullMax,
-        shield: data.shield,
-        shieldMax: data.shieldMax
-      });
-    });
-
-    this.socket.on('npc:update', (data) => {
-      // Server now sends full NPC data in updates, so we can create NPCs
-      // if they don't exist (happens when player enters range of existing NPC)
-      const npcData = {
-        id: data.id,
-        type: data.type,
-        name: data.name,
-        faction: data.faction,
-        x: data.x,
-        y: data.y,
-        rotation: data.rotation,
-        state: data.state,
-        hull: data.hull,
-        hullMax: data.hullMax,
-        shield: data.shield,
-        shieldMax: data.shieldMax
-      };
-      // Include wreckage collection position for tractor beam animation
-      if (data.collectingWreckagePos) {
-        npcData.collectingWreckagePos = data.collectingWreckagePos;
-      }
-      // Include mining target position for rogue miner beam animation
-      if (data.miningTargetPos) {
-        npcData.miningTargetPos = data.miningTargetPos;
-      }
-      Entities.updateNPC(npcData);
-    });
-
-    // npc:destroyed, npc:queenSpawn - handled in /client/js/network/npc.js
+    // world:update, inventory:update - handled in /client/js/network/mining.js
+    // Mining events (mining:started, mining:complete, mining:cancelled, mining:error,
+    //   mining:playerStarted, mining:playerStopped) - handled in /client/js/network/mining.js
+    // Combat events - handled in /client/js/network/combat.js
+    // NPC events (npc:spawn, npc:update, npc:destroyed, npc:queenSpawn) - handled in /client/js/network/npc.js
 
     // Swarm linked damage visualization
     this.socket.on('swarm:linkedDamage', (data) => {
@@ -1778,158 +1654,13 @@ const Network = {
       }
     });
 
-    // Loot collection events
-    this.socket.on('loot:started', (data) => {
-      Player.onLootCollectionStarted(data);
-    });
+    // Loot collection events - handled in /client/js/network/loot.js
+    // (loot:started, loot:progress, loot:complete, loot:cancelled,
+    //  loot:multiStarted, loot:multiComplete, loot:error,
+    //  team:creditReward, team:lootShare)
 
-    this.socket.on('loot:progress', (data) => {
-      Player.onLootCollectionProgress(data);
-    });
-
-    this.socket.on('loot:complete', (data) => {
-      // Sounds are now played by RewardDisplay when each resource is displayed
-      Player.onLootCollectionComplete(data);
-      Entities.removeWreckage(data.wreckageId);
-    });
-
-    this.socket.on('loot:cancelled', (data) => {
-      Player.onLootCollectionCancelled(data);
-    });
-
-    // Scrap Siphon multi-collect events
-    this.socket.on('loot:multiStarted', (data) => {
-      Logger.log('[SIPHON] Multi-collect started:', data.wreckageIds, 'totalTime:', data.totalTime);
-      Player.onMultiCollectStarted(data);
-
-      // Start siphon animation for each wreckage piece
-      // Use a minimum animation duration of 600ms for visibility, even if server collection is faster
-      if (typeof Entities !== 'undefined') {
-        const animDuration = Math.max(600, data.totalTime);
-        Entities.startSiphonAnimation(data.wreckageIds, animDuration);
-      }
-    });
-
-    this.socket.on('loot:multiComplete', (data) => {
-      Logger.log('[SIPHON] Multi-collect complete:', data.wreckageIds);
-      Player.onMultiCollectComplete(data);
-
-      // Delay wreckage removal to let animation complete (minimum 600ms animation)
-      // The animation was started with Math.max(600, totalTime), so wait that long
-      const animDelay = 650; // slightly longer than min animation duration
-      setTimeout(() => {
-        Logger.log('[SIPHON] Removing wreckage after animation delay');
-        if (typeof Entities !== 'undefined') {
-          Entities.clearSiphonAnimations(data.wreckageIds);
-        }
-        for (const wreckageId of data.wreckageIds) {
-          Entities.removeWreckage(wreckageId);
-        }
-      }, animDelay);
-    });
-
-    // Team credit reward - when another player collects scrap we contributed damage to
-    this.socket.on('team:creditReward', (data) => {
-      Logger.log('[TEAM] Received credit share:', data.credits, 'from team kill');
-
-      // Show reward pop-up
-      if (typeof NotificationManager !== 'undefined') {
-        NotificationManager.queueReward({ credits: data.credits });
-      }
-
-      // Animate credit counter if available
-      if (typeof CreditAnimation !== 'undefined') {
-        CreditAnimation.addCredits(data.credits);
-      }
-    });
-
-    // Team resource share - when another player collects scrap with shared resources
-    this.socket.on('team:lootShare', (data) => {
-      Logger.log('[TEAM] Received resource share from team kill');
-
-      // Show resources received
-      if (data.resources && data.resources.length > 0 && typeof NotificationManager !== 'undefined') {
-        NotificationManager.queueReward({ resources: data.resources });
-      }
-
-      // Notify about rare drops that went to collector
-      if (data.rareDropNotification && data.rareDropNotification.length > 0) {
-        for (const rareDrop of data.rareDropNotification) {
-          Logger.log('[TEAM] Teammate collected rare:', rareDrop.resourceType, '(' + rareDrop.rarity + ')');
-          if (typeof NotificationManager !== 'undefined') {
-            NotificationManager.info(
-              'Teammate collected ' + rareDrop.quantity + 'x ' + rareDrop.resourceType.replace(/_/g, ' ')
-            );
-          }
-        }
-      }
-    });
-
-    this.socket.on('loot:error', (data) => {
-      Logger.error('Loot error:', data.message);
-      // Don't show "No wreckage within range" - it's noisy when flying by
-      const silentErrors = ['No wreckage within range'];
-      if (typeof NotificationManager !== 'undefined' && !silentErrors.includes(data.message)) {
-        NotificationManager.error(data.message);
-      }
-      // Reset multi-collect state on error so player can retry
-      if (typeof Player !== 'undefined') {
-        Player.multiCollecting = false;
-        Player.multiCollectWreckageIds = null;
-        Player.collectProgress = 0;
-        Player.collectTotalTime = 0;
-      }
-    });
-
-    // Buff events
-    this.socket.on('buff:applied', (data) => {
-      Player.onBuffApplied(data);
-      if (typeof NotificationManager !== 'undefined') {
-        const buffNames = {
-          SHIELD_BOOST: 'Shield Boost',
-          SPEED_BURST: 'Speed Burst',
-          DAMAGE_AMP: 'Damage Amplifier',
-          RADAR_PULSE: 'Radar Pulse'
-        };
-        NotificationManager.queueReward({ buffs: [{ type: data.buffType, name: buffNames[data.buffType] || data.buffType }] });
-      }
-    });
-
-    // Note: buff:expired handler removed - server never emits this event.
-    // Buff expiration is handled client-side via timers in Player.onBuffApplied()
-
-    // Relic collection events
-    this.socket.on('relic:collected', (data) => {
-      Logger.log('Relic collected:', data.relicType);
-
-      // Add relic to player's collection
-      if (typeof Player !== 'undefined') {
-        if (!Player.relics) Player.relics = [];
-        Player.relics.push({
-          relic_type: data.relicType,
-          obtained_at: new Date().toISOString()
-        });
-      }
-
-      // Update UIState
-      if (typeof UIState !== 'undefined') {
-        const currentRelics = UIState.get('relics') || [];
-        UIState.set('relics', [...currentRelics, {
-          relic_type: data.relicType,
-          obtained_at: new Date().toISOString()
-        }]);
-      }
-
-      // Show reward pop-up
-      if (typeof NotificationManager !== 'undefined') {
-        NotificationManager.queueReward({ relics: [data.relicType] });
-      }
-
-      // Refresh RelicsPanel if open
-      if (typeof RelicsPanel !== 'undefined') {
-        RelicsPanel.refresh();
-      }
-    });
+    // Buff events (buff:applied) - handled in /client/js/network/loot.js
+    // Relic collection events (relic:collected) - handled in /client/js/network/loot.js
 
     // Wormhole transit events - handled in /client/js/network/wormhole.js
     // Events: wormhole:entered, wormhole:transitStarted, wormhole:progress,
@@ -1991,6 +1722,12 @@ const Network = {
         ParticleSystem.spawnPlunderEffect(data.position.x, data.position.y);
       }
     });
+
+    // Register modular network handlers (npc:destroyed, wreckage:spawn, etc.)
+    if (window.NetworkHandlers && window.NetworkHandlers.registerAll) {
+      window.NetworkHandlers.registerAll(this.socket);
+      Logger.log('[Network] Registered modular network handlers');
+    }
   },
 
   authenticate(token) {

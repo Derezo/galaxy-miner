@@ -307,6 +307,11 @@ const Renderer = {
       BaseDestructionSequence.update(dt);
     }
 
+    // Update void effects (rifts, gravity wells, consume tendrils)
+    if (typeof VoidEffects !== "undefined") {
+      VoidEffects.update(dt);
+    }
+
     // Update linked damage effect
     if (typeof LinkedDamageEffect !== "undefined") {
       LinkedDamageEffect.update(dt);
@@ -1529,6 +1534,11 @@ const Renderer = {
     // Draw formation succession effects (void)
     if (typeof FormationSuccessionEffect !== "undefined") {
       FormationSuccessionEffect.draw(ctx, this.camera);
+    }
+
+    // Draw void effects (rifts, gravity wells, consume tendrils)
+    if (typeof VoidEffects !== "undefined") {
+      VoidEffects.draw(ctx, this.camera);
     }
 
     // Draw Tesla cannon effects

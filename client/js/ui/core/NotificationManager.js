@@ -99,6 +99,19 @@ const NotificationManager = {
   },
 
   /**
+   * Alias for showMessage - for backward compatibility
+   * @param {string} message - Message to display
+   * @param {string} type - 'error', 'warning', 'success', 'info', 'danger'
+   * @param {number} [duration] - Optional duration in ms
+   * @returns {number|null} Message ID
+   */
+  show(message, type = 'info', duration) {
+    // Map 'danger' to 'error' for compatibility
+    const normalizedType = type === 'danger' ? 'error' : type;
+    return this.showMessage(message, normalizedType, duration);
+  },
+
+  /**
    * Queue rewards for display (above player ship)
    * @param {Object} rewards - Reward data
    * @param {number} [rewards.credits] - Credit amount
