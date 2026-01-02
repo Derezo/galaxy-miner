@@ -50,6 +50,14 @@ function registerAllHandlers(socket) {
   if (window.NetworkHandlers.derelict) {
     window.NetworkHandlers.derelict.register(socket);
   }
+
+  if (window.NetworkHandlers.scavenger) {
+    window.NetworkHandlers.scavenger.register(socket);
+  }
+
+  if (window.NetworkHandlers.pirate) {
+    window.NetworkHandlers.pirate.register(socket);
+  }
 }
 
 // Export for use in Network module

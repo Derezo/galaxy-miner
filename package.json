@@ -10,7 +10,10 @@
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "audit:network": "node scripts/audit-network-events.js",
-    "audit:network:verbose": "node scripts/audit-network-events.js --verbose"
+    "audit:network:verbose": "node scripts/audit-network-events.js --verbose",
+    "test:handlers": "vitest run tests/unit/network/duplicate-handlers.test.js",
+    "audit:handlers": "node scripts/audit-handler-duplicates.js",
+    "audit:handlers:verbose": "node scripts/audit-handler-duplicates.js --verbose"
   },
   "dependencies": {
     "bcrypt": "^5.1.1",

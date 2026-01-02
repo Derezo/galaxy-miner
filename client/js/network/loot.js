@@ -232,6 +232,62 @@ function register(socket) {
       RelicsPanel.refresh();
     }
   });
+
+  // Skull and Bones plunder events
+  socket.on('relic:plunderSuccess', (data) => {
+    Logger.log('[Plunder] Plunder success!', data);
+
+    // Show success notification
+    if (data.credits > 0) {
+      NotificationManager.success(`Plundered ${data.credits} credits!`);
+    }
+    if (data.loot && data.loot.length > 0) {
+      NotificationManager.success(`Plundered ${data.loot.length} items!`);
+    }
+
+    // Spawn visual effects at base position
+    if (data.position && typeof ParticleSystem !== 'undefined') {
+      ParticleSystem.spawnPlunderEffect(data.position.x, data.position.y);
+    }
+
+    // Show floating text
+    if (data.position && typeof FloatingTextSystem !== 'undefined') {
+      FloatingTextSystem.add(data.position.x, data.position.y, 'PLUNDERED!', '#ffd700');
+    }
+
+    // Update player credits
+    if (data.credits > 0) {
+      Player.credits += data.credits;
+      if (typeof UIState !== 'undefined') {
+        UIState.set({ credits: Player.credits });
+      }
+    }
+
+    // Add loot items to inventory
+    if (data.loot && data.loot.length > 0) {
+      data.loot.forEach(item => {
+        if (item.type === 'resource') {
+          Player.addResource(item.resource, item.quantity);
+        }
+      });
+    }
+  });
+
+  socket.on('relic:plunderFailed', (data) => {
+    Logger.log('[Plunder] Plunder failed:', data.reason);
+    NotificationManager.error(data.reason || 'Plunder failed');
+    // Reset cooldown on failure
+    Player.plunderCooldownEnd = 0;
+  });
+
+  // Broadcast when any player plunders (for visual effect)
+  socket.on('base:plundered', (data) => {
+    Logger.log('[Base] Base plundered at', data.position);
+    // Spawn plunder visual effect for all nearby players
+    if (data.position && typeof ParticleSystem !== 'undefined') {
+      ParticleSystem.spawnPlunderEffect(data.position.x, data.position.y);
+    }
+  });
 }
 
 // Export for use in Network module

@@ -1500,7 +1500,8 @@ module.exports = function(io) {
         socket.emit('wormhole:transitStarted', {
           destinationId,
           destination: result.destination,
-          duration: result.duration
+          duration: result.duration,
+          hasVoidWarp: result.hasVoidWarp || false
         });
 
         // Broadcast transit start to nearby players
@@ -1533,7 +1534,8 @@ module.exports = function(io) {
 
             socket.emit('wormhole:exitComplete', {
               position: completeResult.position,
-              wormholeId: completeResult.wormholeId
+              wormholeId: completeResult.wormholeId,
+              hasVoidWarp: completeResult.hasVoidWarp || false
             });
 
             // Broadcast exit to nearby players at new location
