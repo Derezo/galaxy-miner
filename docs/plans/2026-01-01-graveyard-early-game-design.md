@@ -204,9 +204,9 @@ Previously buffed +150%, now reduced to manageable levels:
 - [ ] Add Hive Core respawn visual (if applicable)
 
 ### Phase 8: Client - Graveyard Atmosphere
-- [ ] Adjust ambient lighting for Graveyard sectors
-- [ ] Add metallic particle effects
-- [ ] Optional: Unique background music/ambience
+- [x] Adjust ambient lighting for Graveyard sectors
+- [x] Add metallic particle effects
+- [ ] Optional: Unique background music/ambience (skipped - complex)
 
 ---
 

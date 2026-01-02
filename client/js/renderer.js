@@ -85,6 +85,11 @@ const Renderer = {
       BackgroundSystem.init();
     }
 
+    // Initialize graveyard atmosphere if available
+    if (typeof GraveyardAtmosphere !== "undefined") {
+      GraveyardAtmosphere.init();
+    }
+
     // Initialize new HUD visual modules
     if (typeof ShieldVisual !== "undefined") {
       ShieldVisual.init();
@@ -379,6 +384,11 @@ const Renderer = {
     if (typeof RewardDisplay !== "undefined") {
       RewardDisplay.update(dt);
     }
+
+    // Update graveyard atmosphere effects
+    if (typeof GraveyardAtmosphere !== "undefined" && typeof Player !== "undefined" && Player.position) {
+      GraveyardAtmosphere.update(dt, Player.position);
+    }
   },
 
   clear() {
@@ -401,6 +411,11 @@ const Renderer = {
       this.ctx.fillStyle = CONSTANTS.COLORS.BACKGROUND;
       this.ctx.fillRect(0, 0, this.width, this.height);
       this.drawStarfield();
+    }
+
+    // Draw graveyard atmosphere ambient overlay (dimming effect)
+    if (typeof GraveyardAtmosphere !== "undefined" && GraveyardAtmosphere.isActive()) {
+      GraveyardAtmosphere.drawAmbient(this.ctx, this.camera, this.width, this.height);
     }
   },
 
@@ -1577,6 +1592,11 @@ const Renderer = {
       this.canvas.width,
       this.canvas.height
     );
+
+    // Draw graveyard metallic glint particles
+    if (typeof GraveyardAtmosphere !== "undefined" && GraveyardAtmosphere.isActive()) {
+      GraveyardAtmosphere.drawGlints(ctx, this.camera, this.width, this.height);
+    }
 
     // Draw floating text (damage numbers, "Invulnerable" text, etc.)
     if (typeof FloatingTextSystem !== "undefined") {
