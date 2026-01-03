@@ -58,6 +58,10 @@ function registerAllHandlers(socket) {
   if (window.NetworkHandlers.pirate) {
     window.NetworkHandlers.pirate.register(socket);
   }
+
+  if (window.NetworkHandlers.fleet) {
+    window.NetworkHandlers.fleet.register(socket);
+  }
 }
 
 // Export for use in Network module

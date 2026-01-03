@@ -10,6 +10,35 @@ const RadarAdvanced = {
   // Sector map state
   sectorMapMode: false,
 
+  // Zoom scale for mobile pinch gestures
+  zoomScale: 1.0,
+  MIN_ZOOM: 0.5,
+  MAX_ZOOM: 2.0,
+
+  /**
+   * Set radar zoom scale (for mobile pinch gestures)
+   * @param {number} scale - Relative scale (1.0 = normal)
+   */
+  setZoomScale(scale) {
+    this.zoomScale = Math.max(this.MIN_ZOOM, Math.min(this.MAX_ZOOM, scale));
+    Logger.log('RadarAdvanced: Zoom scale set to', this.zoomScale.toFixed(2));
+  },
+
+  /**
+   * Get current zoom scale
+   * @returns {number} Current zoom scale
+   */
+  getZoomScale() {
+    return this.zoomScale;
+  },
+
+  /**
+   * Reset zoom to default
+   */
+  resetZoom() {
+    this.zoomScale = 1.0;
+  },
+
   init() {
     // Listen for sector map toggle (Tab key)
     document.addEventListener('keydown', (e) => {

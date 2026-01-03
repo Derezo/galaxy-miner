@@ -79,9 +79,9 @@ describe('Network Event Contracts', () => {
   let clientListeners = [];
 
   beforeAll(() => {
-    // Collect server events from key files
+    // Collect server events from key files (modular socket handlers in /server/socket/)
     const serverFiles = [
-      'server/socket.js',
+      ...getJsFiles('server/socket'),
       ...getJsFiles('server/handlers'),
       'server/game/engine.js',
       'server/game/combat.js',

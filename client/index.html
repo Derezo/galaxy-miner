@@ -202,6 +202,15 @@
           </svg>
           Relics
         </button>
+        <button class="terminal-tab" data-tab="fleet">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
+            <circle cx="9" cy="7" r="4"></circle>
+            <path d="M23 21v-2a4 4 0 0 0-3-3.87"></path>
+            <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
+          </svg>
+          Fleet
+        </button>
         <!-- Settings tab moved to Profile Modal -->
       </div>
       <div class="panel-content">
@@ -229,6 +238,11 @@
         <!-- Relics tab content -->
         <div id="relics-content" class="terminal-content">
           <!-- Content rendered by RelicsPanel -->
+        </div>
+
+        <!-- Fleet tab content -->
+        <div id="fleet-content" class="terminal-content">
+          <!-- Content rendered by FleetPanel -->
         </div>
 
         <!-- Settings moved to Profile Modal -->
@@ -271,6 +285,7 @@
   <script src="js/network/derelict.js"></script>
   <script src="js/network/scavenger.js"></script>
   <script src="js/network/pirate.js"></script>
+  <script src="js/network/fleet.js"></script>
   <script src="js/network/index.js"></script>
   <script src="js/world.js?v=12"></script>
   <script src="js/input.js"></script>
@@ -311,7 +326,15 @@
   <script src="js/graphics/shield-visual.js"></script>
   <script src="js/graphics/hull-bar.js"></script>
   <script src="js/graphics/boost-indicator.js"></script>
-  <script src="js/renderer.js?v=4"></script>
+  <!-- Renderer modular architecture -->
+  <script src="js/renderer/RenderContext.js"></script>
+  <script src="js/renderer.js?v=5"></script>
+  <script src="js/renderer/layers/WorldLayer.js"></script>
+  <script src="js/renderer/layers/EntityLayer.js"></script>
+  <script src="js/renderer/layers/EffectsLayer.js"></script>
+  <script src="js/renderer/layers/UILayer.js"></script>
+  <script src="js/renderer/layers/DebugLayer.js"></script>
+  <script src="js/renderer/RenderPipeline.js"></script>
   <!-- Core UI infrastructure -->
   <script src="js/ui/core/Component.js"></script>
   <script src="js/ui/core/Modal.js"></script>
@@ -349,8 +372,6 @@
   <script src="js/ui/radar/advanced.js"></script>
   <script src="js/ui/radar/index.js"></script>
   <script src="js/ui/hud.js"></script>
-  <script src="js/ui/inventory.js"></script>
-  <script src="js/ui/marketplace.js"></script>
   <script src="js/ui/chat.js"></script>
   <script src="js/ui/upgrades.js"></script>
   <!-- New panels -->
@@ -359,6 +380,7 @@
   <script src="js/ui/panels/ShipCustomizationPanel.js"></script>
   <script src="js/ui/panels/ShipUpgradePanel.js"></script>
   <script src="js/ui/panels/RelicsPanel.js"></script>
+  <script src="js/ui/panels/FleetPanel.js"></script>
   <script src="js/ui/panels/SettingsPanel.js"></script>
   <script src="js/ui/WormholeTransitUI.js"></script>
   <script src="js/ui/credit-animation.js"></script>
@@ -370,6 +392,8 @@
   <script src="js/mobile/virtual-joystick.js"></script>
   <script src="js/mobile/auto-fire.js"></script>
   <script src="js/mobile/mobile-hud.js"></script>
+  <script src="js/mobile/gesture-handler.js"></script>
+  <script src="js/mobile/mobile-gestures.js"></script>
   <script src="js/game.js"></script>
   <script src="js/main.js"></script>
 </body>

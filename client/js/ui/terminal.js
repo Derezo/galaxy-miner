@@ -47,6 +47,11 @@ const TerminalUI = {
       RelicsPanel.init();
     }
 
+    // Initialize FleetPanel
+    if (typeof FleetPanel !== 'undefined') {
+      FleetPanel.init();
+    }
+
     // SettingsPanel is now initialized by ProfileModal, not Terminal
 
     Logger.log('Terminal UI initialized');
@@ -148,11 +153,8 @@ const TerminalUI = {
 
     switch (this.currentTab) {
       case 'cargo':
-        // Use new CargoPanel if available, fallback to old InventoryUI
         if (typeof CargoPanel !== 'undefined') {
           CargoPanel.refresh();
-        } else if (typeof InventoryUI !== 'undefined') {
-          InventoryUI.refresh();
         }
         break;
       case 'upgrades':
@@ -168,11 +170,8 @@ const TerminalUI = {
         }
         break;
       case 'market':
-        // Use new MarketPanel if available, fallback to old MarketplaceUI
         if (typeof MarketPanel !== 'undefined') {
           MarketPanel.refresh();
-        } else if (typeof MarketplaceUI !== 'undefined') {
-          MarketplaceUI.refresh();
         }
         break;
       case 'customize':
@@ -183,6 +182,11 @@ const TerminalUI = {
       case 'relics':
         if (typeof RelicsPanel !== 'undefined') {
           RelicsPanel.refresh();
+        }
+        break;
+      case 'fleet':
+        if (typeof FleetPanel !== 'undefined') {
+          FleetPanel.refresh();
         }
         break;
       // Settings tab removed - now in Profile Modal

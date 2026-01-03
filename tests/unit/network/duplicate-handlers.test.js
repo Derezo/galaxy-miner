@@ -35,9 +35,21 @@ const CLIENT_HANDLER_FILES = [
   'client/js/network/pirate.js'
 ];
 
-// Server handler files
+// Server handler files (modular structure in /server/socket/)
 const SERVER_HANDLER_FILES = [
-  'server/socket.js'
+  'server/socket/auth.js',
+  'server/socket/player.js',
+  'server/socket/combat.js',
+  'server/socket/mining.js',
+  'server/socket/derelict.js',
+  'server/socket/chat.js',
+  'server/socket/marketplace.js',
+  'server/socket/ship.js',
+  'server/socket/loot.js',
+  'server/socket/wormhole.js',
+  'server/socket/relic.js',
+  'server/socket/emote.js',
+  'server/socket/connection.js'
 ];
 
 /**

@@ -2577,6 +2577,7 @@ function spawnNPCsForSector(sectorX, sectorY) {
       aggroRange: npcTypeData.aggroRange,
       creditReward: npcTypeData.creditReward,
       spawnPoint: { ...point },
+      sectorSpawned: true, // Flag to track sector-spawned NPCs even after base reassignment
       state: 'patrol',
       targetPlayer: null,
       lastFireTime: 0,
@@ -2776,7 +2777,9 @@ function damageNPC(npcId, damage, attackerId = null) {
     const creditsPerPlayer = Math.round(totalCredits / participantCount);
 
     // Mark spawn point as dead for respawn delay (sector-spawned NPCs only)
-    if (npc.spawnPoint && !npc.homeBaseId) {
+    // Use sectorSpawned flag instead of !homeBaseId because scouts may get reassigned
+    // to a base when fleeing but still need their original spawn point tracked
+    if (npc.spawnPoint && npc.sectorSpawned) {
       const spawnKey = `${Math.round(npc.spawnPoint.x)}_${Math.round(npc.spawnPoint.y)}`;
       deadSpawnPoints.set(spawnKey, {
         respawnAt: Date.now() + SECTOR_NPC_RESPAWN_DELAY

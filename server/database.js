@@ -255,6 +255,93 @@ const statements = {
   `),
   cleanupExpiredBuffs: db.prepare(`
     DELETE FROM active_buffs WHERE expires_at <= ?
+  `),
+
+  // Fleets (player parties)
+  createFleet: db.prepare(`
+    INSERT INTO fleets (leader_id, name) VALUES (?, ?)
+  `),
+  getFleetById: db.prepare(`
+    SELECT f.*, u.username as leader_name
+    FROM fleets f
+    JOIN users u ON f.leader_id = u.id
+    WHERE f.id = ?
+  `),
+  getFleetByLeader: db.prepare(`
+    SELECT * FROM fleets WHERE leader_id = ?
+  `),
+  getFleetByMember: db.prepare(`
+    SELECT f.*, u.username as leader_name
+    FROM fleets f
+    JOIN fleet_members fm ON f.id = fm.fleet_id
+    JOIN users u ON f.leader_id = u.id
+    WHERE fm.user_id = ?
+  `),
+  deleteFleet: db.prepare(`
+    DELETE FROM fleets WHERE id = ?
+  `),
+  updateFleetLeader: db.prepare(`
+    UPDATE fleets SET leader_id = ? WHERE id = ?
+  `),
+  updateFleetName: db.prepare(`
+    UPDATE fleets SET name = ? WHERE id = ?
+  `),
+
+  // Fleet Members
+  addFleetMember: db.prepare(`
+    INSERT INTO fleet_members (fleet_id, user_id, role) VALUES (?, ?, ?)
+  `),
+  removeFleetMember: db.prepare(`
+    DELETE FROM fleet_members WHERE fleet_id = ? AND user_id = ?
+  `),
+  getFleetMembers: db.prepare(`
+    SELECT fm.*, u.username, u.id as user_id
+    FROM fleet_members fm
+    JOIN users u ON fm.user_id = u.id
+    WHERE fm.fleet_id = ?
+    ORDER BY fm.role DESC, fm.joined_at ASC
+  `),
+  getFleetMember: db.prepare(`
+    SELECT * FROM fleet_members WHERE fleet_id = ? AND user_id = ?
+  `),
+  updateMemberRole: db.prepare(`
+    UPDATE fleet_members SET role = ? WHERE fleet_id = ? AND user_id = ?
+  `),
+  getMemberCount: db.prepare(`
+    SELECT COUNT(*) as count FROM fleet_members WHERE fleet_id = ?
+  `),
+
+  // Fleet Invites
+  createFleetInvite: db.prepare(`
+    INSERT INTO fleet_invites (fleet_id, inviter_id, invitee_id, expires_at)
+    VALUES (?, ?, ?, ?)
+  `),
+  getFleetInvite: db.prepare(`
+    SELECT fi.*, f.name as fleet_name, u.username as inviter_name
+    FROM fleet_invites fi
+    JOIN fleets f ON fi.fleet_id = f.id
+    JOIN users u ON fi.inviter_id = u.id
+    WHERE fi.id = ?
+  `),
+  getFleetInviteByFleetAndInvitee: db.prepare(`
+    SELECT * FROM fleet_invites WHERE fleet_id = ? AND invitee_id = ?
+  `),
+  getPlayerInvites: db.prepare(`
+    SELECT fi.*, f.name as fleet_name, u.username as inviter_name
+    FROM fleet_invites fi
+    JOIN fleets f ON fi.fleet_id = f.id
+    JOIN users u ON fi.inviter_id = u.id
+    WHERE fi.invitee_id = ? AND fi.expires_at > datetime('now')
+    ORDER BY fi.created_at DESC
+  `),
+  deleteFleetInvite: db.prepare(`
+    DELETE FROM fleet_invites WHERE id = ?
+  `),
+  deleteFleetInviteByFleetAndInvitee: db.prepare(`
+    DELETE FROM fleet_invites WHERE fleet_id = ? AND invitee_id = ?
+  `),
+  cleanExpiredInvites: db.prepare(`
+    DELETE FROM fleet_invites WHERE expires_at <= datetime('now')
   `)
 };
 

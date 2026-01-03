@@ -9,8 +9,6 @@ function register(socket) {
     // Refresh market data
     if (typeof MarketPanel !== 'undefined') {
       MarketPanel.refresh();
-    } else if (typeof MarketplaceUI !== 'undefined') {
-      MarketplaceUI.refresh();
     }
   });
 

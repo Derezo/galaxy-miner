@@ -1823,6 +1823,14 @@ const CONSTANTS = {
       RARE_CHANCE: 0.05,
       RARE_QTY: 1
     }
+  },
+
+  // Fleet/Party System
+  FLEET: {
+    MAX_SIZE: 4,                    // Maximum players per fleet
+    INVITE_EXPIRY_MS: 300000,       // 5 minutes for invite to expire
+    SHARED_RADAR_BONUS: 1.25,       // 25% radar range bonus when in fleet (future)
+    FORMATION_DISTANCE: 150         // Formation spacing for fleet members (future)
   }
 };
 

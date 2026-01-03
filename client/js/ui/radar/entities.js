@@ -347,6 +347,13 @@ const RadarEntities = {
 
     const useTriangles = RadarBaseRenderer.hasFeature(radarTier, 'players_triangles');
 
+    // Get current fleet for fleet member detection
+    const currentFleet = typeof UIState !== 'undefined' ? UIState.get('fleet') : null;
+    const fleetMemberIds = new Set();
+    if (currentFleet && currentFleet.members) {
+      currentFleet.members.forEach(m => fleetMemberIds.add(m.id));
+    }
+
     for (const [id, player] of Entities.players) {
       const distance = RadarBaseRenderer.getDistance(
         player.position.x, player.position.y,
@@ -368,11 +375,24 @@ const RadarEntities = {
       // Apply fade opacity
       ctx.globalAlpha = edgeOpacity;
 
+      // Check if this player is a fleet member
+      const isFleetMember = fleetMemberIds.has(id);
+      const playerColor = isFleetMember ? '#00ffff' : '#00ff00'; // Cyan for fleet, green for others
+
       if (useTriangles) {
-        // Tier 2+: Green triangles showing heading
+        // Tier 2+: Triangles showing heading (cyan for fleet, green for others)
         const rotation = player.rotation || 0;
         const size = CONSTANTS.RADAR_ICON_SIZES.triangle_small;
-        RadarBaseRenderer.drawTriangle(ctx, pos.x, pos.y, size, rotation, '#00ff00');
+        RadarBaseRenderer.drawTriangle(ctx, pos.x, pos.y, size, rotation, playerColor);
+
+        // Draw a ring around fleet members for extra visibility
+        if (isFleetMember) {
+          ctx.strokeStyle = '#00ffff';
+          ctx.lineWidth = 1;
+          ctx.beginPath();
+          ctx.arc(pos.x, pos.y, size + 3, 0, Math.PI * 2);
+          ctx.stroke();
+        }
       } else {
         // Tier 1: Red dots (can't distinguish from enemies)
         const size = CONSTANTS.RADAR_ICON_SIZES.medium_dot;

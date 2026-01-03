@@ -30,6 +30,22 @@ const MarketPanel = {
         this.render();
       }
     });
+
+    // Request initial data when market tab is shown
+    document.addEventListener('terminal:tabchange', (e) => {
+      if (e.detail && e.detail.tab === 'market') {
+        this._requestListings();
+      }
+    });
+
+    // Also request when terminal opens if market is active tab
+    document.addEventListener('terminal:open', () => {
+      if (this.currentTab === 'browse') {
+        this._requestListings();
+      } else {
+        this._requestMyListings();
+      }
+    });
   },
 
   /**

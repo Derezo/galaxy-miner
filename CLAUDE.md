@@ -17,6 +17,7 @@ npm test               # Run test suite (vitest)
 npm run test:watch     # Run tests in watch mode
 npm run test:coverage  # Generate coverage report
 npm run audit:network  # Audit socket event handler consistency
+npm run audit:handlers # Check for duplicate socket handlers
 ```
 
 Run a single test file:
@@ -61,6 +62,9 @@ Updates only broadcast to players within radar range (base 500 units, scales wit
 
 ### NPC AI System
 Modular AI in `/server/game/ai/` with faction-specific strategies. Each faction has spawn hubs (bases) that continuously spawn NPCs. The Swarm faction has unique mechanics: queen spawning, base assimilation, egg hatching.
+
+### Graveyard System
+Player death creates derelict wreckage that persists and can be looted. Features atmosphere effects, respawn UI, and siphon collection mechanics. Server tracks derelicts in `/server/game/derelict.js`.
 
 ## Key Entry Points
 

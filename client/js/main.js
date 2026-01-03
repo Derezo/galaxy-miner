@@ -22,8 +22,6 @@ const GalaxyMiner = {
     Renderer.init();
     AuthUI.init();
     HUD.init();
-    InventoryUI.init();
-    MarketplaceUI.init();
     ChatUI.init();
     UpgradesUI.init();
     TerminalUI.init();
@@ -41,6 +39,9 @@ const GalaxyMiner = {
     }
     if (typeof MobileHUD !== 'undefined') {
       MobileHUD.init();
+    }
+    if (typeof MobileGestures !== 'undefined' && typeof DeviceDetect !== 'undefined' && DeviceDetect.isMobile) {
+      MobileGestures.init();
     }
 
     Logger.log('Galaxy Miner ready');

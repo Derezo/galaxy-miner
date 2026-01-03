@@ -31,6 +31,17 @@ const Renderer = {
     window.addEventListener("resize", () => this.resize());
     this.resize();
 
+    // Sync shared state to RenderContext for modular layer access
+    if (typeof RenderContext !== 'undefined') {
+      RenderContext.canvas = this.canvas;
+      RenderContext.ctx = this.ctx;
+      RenderContext.dpr = this.dpr;
+      RenderContext.width = this.width;
+      RenderContext.height = this.height;
+      RenderContext.camera = this.camera;
+      RenderContext.screenShake = this.screenShake;
+    }
+
     // Initialize graphics systems
     ParticleSystem.init();
     ShipGeometry.init();
@@ -131,6 +142,13 @@ const Renderer = {
 
     // Track portrait mode for responsive game systems
     this.portraitMode = cssWidth < cssHeight;
+
+    // Sync to RenderContext
+    if (typeof RenderContext !== 'undefined') {
+      RenderContext.width = this.width;
+      RenderContext.height = this.height;
+      RenderContext.portraitMode = this.portraitMode;
+    }
   },
 
   /**
@@ -290,6 +308,11 @@ const Renderer = {
    */
   update(dt) {
     this.lastDt = dt;
+
+    // Sync to RenderContext
+    if (typeof RenderContext !== 'undefined') {
+      RenderContext.lastDt = dt;
+    }
 
     // Update screen shake
     this.updateScreenShake();

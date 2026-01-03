@@ -102,6 +102,33 @@ CREATE TABLE IF NOT EXISTS active_buffs (
   UNIQUE(user_id, buff_type)
 );
 
+-- Fleet system (player parties)
+CREATE TABLE IF NOT EXISTS fleets (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  leader_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  name TEXT NOT NULL DEFAULT 'Fleet',
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(leader_id)
+);
+
+CREATE TABLE IF NOT EXISTS fleet_members (
+  fleet_id INTEGER NOT NULL REFERENCES fleets(id) ON DELETE CASCADE,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  role TEXT DEFAULT 'member',
+  joined_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY(fleet_id, user_id)
+);
+
+CREATE TABLE IF NOT EXISTS fleet_invites (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  fleet_id INTEGER NOT NULL REFERENCES fleets(id) ON DELETE CASCADE,
+  inviter_id INTEGER NOT NULL REFERENCES users(id),
+  invitee_id INTEGER NOT NULL REFERENCES users(id),
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  expires_at TIMESTAMP NOT NULL,
+  UNIQUE(fleet_id, invitee_id)
+);
+
 -- Indexes for performance
 CREATE INDEX IF NOT EXISTS idx_ships_user_id ON ships(user_id);
 CREATE INDEX IF NOT EXISTS idx_inventory_user_id ON inventory(user_id);
@@ -114,6 +141,8 @@ CREATE INDEX IF NOT EXISTS idx_components_user_id ON components(user_id);
 CREATE INDEX IF NOT EXISTS idx_relics_user_id ON relics(user_id);
 CREATE INDEX IF NOT EXISTS idx_active_buffs_user_id ON active_buffs(user_id);
 CREATE INDEX IF NOT EXISTS idx_active_buffs_expires ON active_buffs(expires_at);
+CREATE INDEX IF NOT EXISTS idx_fleet_members_user ON fleet_members(user_id);
+CREATE INDEX IF NOT EXISTS idx_fleet_invites_invitee ON fleet_invites(invitee_id);
 
 -- Migrations for existing databases
 -- Add ship_color_id column if it doesn't exist (SQLite doesn't support IF NOT EXISTS for columns)

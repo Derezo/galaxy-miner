@@ -85,8 +85,6 @@ function register(socket) {
     // Refresh UI
     if (typeof CargoPanel !== 'undefined') {
       CargoPanel.refresh();
-    } else if (typeof InventoryUI !== 'undefined') {
-      InventoryUI.refresh();
     }
   });
 }
