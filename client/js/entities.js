@@ -545,9 +545,11 @@ const Entities = {
     // Clear old bases and replace with new data
     this.bases.clear();
     for (const base of basesArray) {
-      this.bases.set(base.id, {
+      const baseData = {
         id: base.id,
         position: base.position || { x: base.x, y: base.y },
+        x: base.x,
+        y: base.y,
         faction: base.faction,
         type: base.type,
         name: base.name,
@@ -556,8 +558,53 @@ const Entities = {
         size: base.size,
         scrapPile: base.scrapPile || null,
         claimCredits: base.claimCredits || 0
-      });
+      };
+
+      // Store orbital parameters for client-side position prediction
+      if (base.isOrbital) {
+        baseData.isOrbital = true;
+        baseData.orbitRadius = base.orbitRadius;
+        baseData.orbitSpeed = base.orbitSpeed;
+        baseData.orbitAngle = base.orbitAngle || 0;
+        baseData.starX = base.starX;
+        baseData.starY = base.starY;
+        baseData.starId = base.starId;
+        // Store the server's computed position timestamp for sync
+        baseData.lastServerUpdate = Date.now();
+      }
+
+      this.bases.set(base.id, baseData);
     }
+  },
+
+  /**
+   * Get the current computed position for a base (handles orbital movement)
+   * @param {string} baseId - Base ID
+   * @returns {{x: number, y: number}|null} Current position or null if not found
+   */
+  getBaseCurrentPosition(baseId) {
+    const base = this.bases.get(baseId);
+    if (!base) return null;
+
+    // For non-orbital bases, return stored position
+    if (!base.isOrbital) {
+      return { x: base.x, y: base.y };
+    }
+
+    // Compute current orbital position using Physics
+    if (typeof Physics !== 'undefined' && Physics.getOrbitTime) {
+      const orbitTime = Physics.getOrbitTime();
+      const elapsedSeconds = orbitTime / 1000;
+      const currentAngle = base.orbitAngle + (base.orbitSpeed * elapsedSeconds);
+
+      return {
+        x: base.starX + Math.cos(currentAngle) * base.orbitRadius,
+        y: base.starY + Math.sin(currentAngle) * base.orbitRadius
+      };
+    }
+
+    // Fallback to stored position if Physics not available
+    return { x: base.x, y: base.y };
   },
 
   // Add a projectile trail for radar display (Tier 4+)

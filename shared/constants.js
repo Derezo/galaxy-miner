@@ -163,6 +163,14 @@ const CONSTANTS = {
   RESOURCE_RESPAWN_TIME_MIN: 30 * 60 * 1000,
   RESOURCE_RESPAWN_TIME_MAX: 60 * 60 * 1000,
 
+  // Position synchronization tolerances (for client/server desync handling)
+  POSITION_SYNC_TOLERANCE: 30,           // Max units of position divergence allowed
+  MINING_POSITION_TOLERANCE: 1.2,        // 20% tolerance multiplier for mining range
+  ORBITAL_POSITION_TOLERANCE: 1.15,      // 15% tolerance multiplier for orbital objects
+
+  // Combat position update frequency
+  POSITION_SAVE_INTERVAL_COMBAT: 100,    // 100ms during combat (vs 500ms idle)
+
   // Cargo capacity per tier [0, tier1, tier2, tier3, tier4, tier5]
   CARGO_CAPACITY: [0, 100, 250, 500, 750, 2000],
 
@@ -1473,7 +1481,12 @@ const CONSTANTS = {
     DRONE_ASSIMILATE_SPEED: 120,        // Movement speed toward target base
     ASSIMILATION_THRESHOLD: 3,          // Drones needed to convert a base
     ASSIMILATE_RANGE: 50,               // Distance to "reach" the base for sacrifice
-    SEARCH_RANGE: 2000                  // Range drones search for enemy bases
+    SEARCH_RANGE: 1000                  // Range drones search for enemy bases (1 sector max)
+  },
+
+  // Swarm Exclusion Zone - Prevents swarm spawning near origin
+  SWARM_EXCLUSION_ZONE: {
+    MIN_SECTOR_DISTANCE: 10             // No swarm hives within 10 sectors of origin (0,0)
   },
 
   // Swarm Egg Hatching

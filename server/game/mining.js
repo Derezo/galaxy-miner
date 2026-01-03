@@ -8,12 +8,15 @@ const logger = require('../../shared/logger');
 // Track active mining sessions: playerId -> { objectId, startTime, ... }
 const activeMining = new Map();
 
-function startMining(playerId, playerPosition, objectId) {
+function startMining(playerId, playerPosition, objectId, clientObjectPosition = null) {
   // Debug logging for mining issues
   logger.log('[Mining] Start request:', {
     playerId,
     objectId,
     playerPosition: { x: Math.round(playerPosition.x), y: Math.round(playerPosition.y) },
+    clientObjectPosition: clientObjectPosition
+      ? { x: Math.round(clientObjectPosition.x), y: Math.round(clientObjectPosition.y) }
+      : null,
     playerSector: {
       x: Math.floor(playerPosition.x / config.SECTOR_SIZE),
       y: Math.floor(playerPosition.y / config.SECTOR_SIZE)
@@ -41,16 +44,42 @@ function startMining(playerId, playerPosition, objectId) {
   }
 
   // Get current computed position (for moving objects)
-  const currentPos = world.getObjectPosition(objectId);
-  const objectX = currentPos ? currentPos.x : object.x;
-  const objectY = currentPos ? currentPos.y : object.y;
+  const serverPos = world.getObjectPosition(objectId);
+  const serverX = serverPos ? serverPos.x : object.x;
+  const serverY = serverPos ? serverPos.y : object.y;
 
-  // Check proximity using computed position
+  // Use client position if provided and within tolerance, otherwise use server position
+  // This handles client/server desync for orbital objects
+  let objectX = serverX;
+  let objectY = serverY;
+
+  if (clientObjectPosition) {
+    const positionDx = clientObjectPosition.x - serverX;
+    const positionDy = clientObjectPosition.y - serverY;
+    const positionDivergence = Math.sqrt(positionDx * positionDx + positionDy * positionDy);
+
+    // If client position is within tolerance, use it (allows for minor desync)
+    if (positionDivergence <= config.POSITION_SYNC_TOLERANCE) {
+      objectX = clientObjectPosition.x;
+      objectY = clientObjectPosition.y;
+    } else {
+      // Log significant divergence for debugging
+      logger.log('[Mining] Position divergence exceeds tolerance:', {
+        divergence: Math.round(positionDivergence),
+        tolerance: config.POSITION_SYNC_TOLERANCE,
+        clientPos: { x: Math.round(clientObjectPosition.x), y: Math.round(clientObjectPosition.y) },
+        serverPos: { x: Math.round(serverX), y: Math.round(serverY) }
+      });
+    }
+  }
+
+  // Check proximity using the resolved position with tolerance multiplier
   const dx = objectX - playerPosition.x;
   const dy = objectY - playerPosition.y;
   const distance = Math.sqrt(dx * dx + dy * dy) - (object.size || 0);
+  const effectiveRange = config.MINING_RANGE * (config.MINING_POSITION_TOLERANCE || 1.0);
 
-  if (distance > config.MINING_RANGE) {
+  if (distance > effectiveRange) {
     return { success: false, error: 'Too far from resource' };
   }
 

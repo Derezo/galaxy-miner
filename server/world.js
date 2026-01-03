@@ -7,12 +7,20 @@ const { statements } = require('./database');
 const Physics = require('../shared/physics');
 const StarSystem = require('../shared/star-system');
 const logger = require('../shared/logger');
-const { isGraveyardSector: isGraveyardSectorFn } = require('../shared/graveyard');
+const {
+  isGraveyardSector: isGraveyardSectorFn,
+  isInSwarmExclusionZone: isInSwarmExclusionZoneFn
+} = require('../shared/graveyard');
 const derelictModule = require('./game/derelict');
 
 // Wrapper for consistent API
 function isGraveyardSector(sectorX, sectorY) {
   return isGraveyardSectorFn(sectorX, sectorY, config);
+}
+
+// Wrapper for swarm exclusion zone check
+function isInSwarmExclusionZone(sectorX, sectorY) {
+  return isInSwarmExclusionZoneFn(sectorX, sectorY, config);
 }
 
 // Cache generated sectors
@@ -189,6 +197,11 @@ function generateSectorFromStarSystem(sectorX, sectorY) {
     for (const base of system.bases) {
       // Skip hostile faction bases in Graveyard zone
       if (inGraveyard && graveyardConfig?.BLOCKED_FACTIONS?.includes(base.faction)) {
+        continue;
+      }
+
+      // Skip swarm hives in swarm exclusion zone (within 10 sectors of origin)
+      if (base.type === 'swarm_hive' && isInSwarmExclusionZone(sectorX, sectorY)) {
         continue;
       }
 
@@ -635,6 +648,11 @@ function generateSectorLegacy(sectorX, sectorY) {
 
     // Skip hostile faction bases in Graveyard zone
     if (inGraveyard && graveyardConfig?.BLOCKED_FACTIONS?.includes(hubType.faction)) {
+      continue;
+    }
+
+    // Skip swarm hives in swarm exclusion zone (within 10 sectors of origin)
+    if (hubType.id === 'swarm_hive' && isInSwarmExclusionZone(sectorX, sectorY)) {
       continue;
     }
 

@@ -258,6 +258,13 @@ function start() {
   lastTickTime = Date.now();
   tick();
   logger.log('Game engine started');
+
+  // Cleanup swarm hives in exclusion zone on startup
+  // (handles legacy hives that violate the new 10-sector exclusion)
+  const removedHives = npc.cleanupExcludedSwarmHives();
+  if (removedHives > 0) {
+    logger.log(`[Engine] Startup cleanup: removed ${removedHives} swarm hive(s) from exclusion zone`);
+  }
 }
 
 function stop() {
@@ -275,6 +282,7 @@ function tick() {
   // Update all game systems
   updatePlayers(deltaTime);
   updateBases(deltaTime);  // Check for bases near players and spawn NPCs
+  npc.rebuildNPCSpatialHash();  // Rebuild spatial hash before NPC queries
   updateNPCs(deltaTime);
   updateMining(deltaTime);
   updateWreckage(deltaTime);

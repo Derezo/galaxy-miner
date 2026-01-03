@@ -22,6 +22,8 @@ const userSockets = new Map();
 const playerStatus = new Map();
 // Track active intervals per socket for cleanup: socketId -> Set of intervalIds
 const activeIntervals = new Map();
+// Track current sector room for each player: socketId -> 'sector:X:Y'
+const playerSectorRooms = new Map();
 
 // Pre-computed Sets for O(1) validation (avoid Array.includes in hot paths)
 const VALID_COMPONENTS = new Set(['engine', 'weapon', 'shield', 'mining', 'cargo', 'radar', 'energy_core', 'hull']);
@@ -123,12 +125,21 @@ module.exports = function(io) {
       player.velocity = { x: data.vx, y: data.vy };
       player.rotation = data.rotation;
 
+      // Update sector rooms if player moved to a different sector
+      updatePlayerSectorRooms(socket, player);
+
       // Calculate sector
       const sectorX = Math.floor(data.x / config.SECTOR_SIZE);
       const sectorY = Math.floor(data.y / config.SECTOR_SIZE);
 
       // Save to database periodically (throttled)
-      if (!player.lastSave || Date.now() - player.lastSave > 5000) {
+      // Use faster interval during combat for better hit detection accuracy
+      const status = getPlayerStatus(authenticatedUserId);
+      const saveInterval = status === 'combat'
+        ? (config.POSITION_SAVE_INTERVAL_COMBAT || 100)
+        : (config.POSITION_SAVE_INTERVAL || 5000);
+
+      if (!player.lastSave || Date.now() - player.lastSave > saveInterval) {
         statements.updateShipPosition.run(
           data.x, data.y, data.rotation,
           data.vx, data.vy,
@@ -510,7 +521,12 @@ module.exports = function(io) {
       const player = connectedPlayers.get(socket.id);
       if (!player) return;
 
-      const result = mining.startMining(authenticatedUserId, player.position, data.objectId);
+      const result = mining.startMining(
+        authenticatedUserId,
+        player.position,
+        data.objectId,
+        data.clientObjectPosition || null
+      );
 
       if (result.success) {
         socket.emit('mining:started', {
@@ -1633,14 +1649,20 @@ module.exports = function(io) {
         return;
       }
 
-      // Calculate distance and validate range
-      const dx = base.x - player.position.x;
-      const dy = base.y - player.position.y;
+      // Get computed position for orbital bases
+      const computedPos = world.getObjectPosition(baseId);
+      const baseX = computedPos ? computedPos.x : base.x;
+      const baseY = computedPos ? computedPos.y : base.y;
+
+      // Calculate distance and validate range with tolerance
+      const dx = baseX - player.position.x;
+      const dy = baseY - player.position.y;
       const dist = Math.sqrt(dx * dx + dy * dy);
       const plunderRange = Constants.RELIC_TYPES?.SKULL_AND_BONES?.plunderRange || 200;
       const baseSize = base.size || 100;
+      const tolerance = config.ORBITAL_POSITION_TOLERANCE || 1.15;
 
-      if (dist > plunderRange + baseSize) {
+      if (dist > (plunderRange + baseSize) * tolerance) {
         socket.emit('relic:plunderFailed', { reason: 'Too far from base' });
         return;
       }
@@ -1667,9 +1689,9 @@ module.exports = function(io) {
       // Clear base resources after plundering
       clearBaseResources(base);
 
-      // Trigger aggro for same-faction NPCs within range
+      // Trigger aggro for same-faction NPCs within range (use computed position)
       const aggroRange = Constants.RELIC_TYPES?.SKULL_AND_BONES?.aggroRange || 600;
-      const nearbyNPCs = npc.getNPCsInRange({ x: base.x, y: base.y }, aggroRange);
+      const nearbyNPCs = npc.getNPCsInRange({ x: baseX, y: baseY }, aggroRange);
 
       for (const npcEntity of nearbyNPCs) {
         if (npcEntity.faction === base.faction) {
@@ -1686,12 +1708,12 @@ module.exports = function(io) {
         quantity: r.quantity
       }));
 
-      // Send success to plundering player
+      // Send success to plundering player (use computed position)
       socket.emit('relic:plunderSuccess', {
         baseId,
         credits: rewards.credits,
         loot: lootItems,
-        position: { x: base.x, y: base.y }
+        position: { x: baseX, y: baseY }
       });
 
       // Send inventory update for server sync
@@ -1702,10 +1724,10 @@ module.exports = function(io) {
         credits: getSafeCredits(updatedShip)
       });
 
-      // Broadcast visual effect to all nearby players
+      // Broadcast visual effect to all nearby players (use computed position)
       io.emit('base:plundered', {
         baseId,
-        position: { x: base.x, y: base.y }
+        position: { x: baseX, y: baseY }
       });
 
       logger.log('[Plunder] Plunder complete - credits:', rewards.credits, 'items:', lootItems.length);
@@ -1763,6 +1785,9 @@ module.exports = function(io) {
 
     connectedPlayers.set(socket.id, player);
     userSockets.set(playerData.id, socket.id);
+
+    // Join sector rooms for efficient proximity broadcasting
+    joinSectorRooms(socket, player);
 
     logger.log(`Player ${playerData.username} authenticated${wasDead ? ' (dead - needs respawn)' : ''}`);
 
@@ -1831,6 +1856,9 @@ module.exports = function(io) {
     // Cancel any active mining session
     mining.cancelMining(userId);
 
+    // Leave sector rooms
+    leaveSectorRooms(socket);
+
     connectedPlayers.delete(socket.id);
     userSockets.delete(userId);
     // Clean up player status
@@ -1888,20 +1916,90 @@ module.exports = function(io) {
     return statusData ? statusData.status : 'idle';
   }
 
-  // Helper: Broadcast to nearby players
+  // Helper: Get sector room name from position
+  function getSectorRoom(x, y) {
+    const sectorX = Math.floor(x / config.SECTOR_SIZE);
+    const sectorY = Math.floor(y / config.SECTOR_SIZE);
+    return `sector:${sectorX}:${sectorY}`;
+  }
+
+  // Helper: Get all adjacent sector rooms (3x3 grid centered on position)
+  function getAdjacentSectorRooms(x, y) {
+    const sectorX = Math.floor(x / config.SECTOR_SIZE);
+    const sectorY = Math.floor(y / config.SECTOR_SIZE);
+    const rooms = [];
+    for (let dx = -1; dx <= 1; dx++) {
+      for (let dy = -1; dy <= 1; dy++) {
+        rooms.push(`sector:${sectorX + dx}:${sectorY + dy}`);
+      }
+    }
+    return rooms;
+  }
+
+  // Helper: Update player's sector rooms when they move between sectors
+  function updatePlayerSectorRooms(socket, player) {
+    const newCenterRoom = getSectorRoom(player.position.x, player.position.y);
+    const currentRoom = playerSectorRooms.get(socket.id);
+
+    // Only update if sector changed
+    if (currentRoom === newCenterRoom) return false;
+
+    // Leave old sector rooms
+    if (currentRoom) {
+      const [, oldSectorX, oldSectorY] = currentRoom.split(':');
+      for (let dx = -1; dx <= 1; dx++) {
+        for (let dy = -1; dy <= 1; dy++) {
+          socket.leave(`sector:${parseInt(oldSectorX) + dx}:${parseInt(oldSectorY) + dy}`);
+        }
+      }
+    }
+
+    // Join new sector rooms (3x3 grid)
+    const newRooms = getAdjacentSectorRooms(player.position.x, player.position.y);
+    for (const room of newRooms) {
+      socket.join(room);
+    }
+
+    // Track current center sector
+    playerSectorRooms.set(socket.id, newCenterRoom);
+    return true;
+  }
+
+  // Helper: Join initial sector rooms for a new player
+  function joinSectorRooms(socket, player) {
+    const rooms = getAdjacentSectorRooms(player.position.x, player.position.y);
+    for (const room of rooms) {
+      socket.join(room);
+    }
+    playerSectorRooms.set(socket.id, getSectorRoom(player.position.x, player.position.y));
+  }
+
+  // Helper: Leave all sector rooms on disconnect
+  function leaveSectorRooms(socket) {
+    const currentRoom = playerSectorRooms.get(socket.id);
+    if (currentRoom) {
+      const [, sectorX, sectorY] = currentRoom.split(':');
+      for (let dx = -1; dx <= 1; dx++) {
+        for (let dy = -1; dy <= 1; dy++) {
+          socket.leave(`sector:${parseInt(sectorX) + dx}:${parseInt(sectorY) + dy}`);
+        }
+      }
+      playerSectorRooms.delete(socket.id);
+    }
+  }
+
+  // Helper: Broadcast to nearby players using sector rooms
+  // Uses Socket.io rooms for O(1) broadcast instead of iterating all players
   function broadcastToNearby(socket, player, event, data) {
-    const radarRange = config.BASE_RADAR_RANGE * Math.pow(config.TIER_MULTIPLIER, player.radarTier - 1);
-    const broadcastRange = radarRange * 2; // Broadcast slightly further than radar
+    const sectorX = Math.floor(player.position.x / config.SECTOR_SIZE);
+    const sectorY = Math.floor(player.position.y / config.SECTOR_SIZE);
 
-    for (const [socketId, otherPlayer] of connectedPlayers) {
-      if (socketId === socket.id) continue;
-
-      const dx = otherPlayer.position.x - player.position.x;
-      const dy = otherPlayer.position.y - player.position.y;
-      const dist = Math.sqrt(dx * dx + dy * dy);
-
-      if (dist <= broadcastRange) {
-        io.to(socketId).emit(event, data);
+    // Broadcast to 3x3 sector grid (current + adjacent sectors)
+    // This covers the radar range which is typically less than 2 sectors
+    for (let dx = -1; dx <= 1; dx++) {
+      for (let dy = -1; dy <= 1; dy++) {
+        const room = `sector:${sectorX + dx}:${sectorY + dy}`;
+        socket.to(room).emit(event, data);
       }
     }
   }

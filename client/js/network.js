@@ -82,9 +82,12 @@ const Network = {
     this.socket.emit('combat:fire', { direction });
   },
 
-  sendMine(objectId) {
+  sendMine(objectId, objectPosition) {
     if (!this.connected) return;
-    this.socket.emit('mining:start', { objectId });
+    this.socket.emit('mining:start', {
+      objectId,
+      clientObjectPosition: objectPosition || null
+    });
   },
 
   sendChat(message) {

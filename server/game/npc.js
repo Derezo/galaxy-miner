@@ -7,7 +7,11 @@ const ai = require('./ai');
 const logger = require('../../shared/logger');
 const LootPools = require('./loot-pools');
 const CONSTANTS = require('../../shared/constants');
-const { isGraveyardSector: isGraveyardSectorFn, isInGraveyard: isInGraveyardFn } = require('../../shared/graveyard');
+const { isGraveyardSector: isGraveyardSectorFn, isInGraveyard: isInGraveyardFn, isInSwarmExclusionWorld: isInSwarmExclusionWorldFn } = require('../../shared/graveyard');
+const SpatialHash = require('./spatial-hash');
+
+// Spatial hash for efficient NPC range queries (200 unit cells for ~weapon range)
+const npcSpatialHash = new SpatialHash(200);
 
 // NPC types with faction, weapon, and tier info
 const NPC_TYPES = {
@@ -447,6 +451,17 @@ function isInGraveyard(x, y) {
 }
 
 /**
+ * Check if world coordinates are within the Swarm exclusion zone
+ * (within 10 sectors of origin - no swarm assimilation allowed)
+ * @param {number} x - World X coordinate
+ * @param {number} y - World Y coordinate
+ * @returns {boolean} True if position is in the exclusion zone
+ */
+function isInSwarmExclusionZone(x, y) {
+  return isInSwarmExclusionWorldFn(x, y, CONSTANTS);
+}
+
+/**
  * Check if an NPC should be passive (non-aggressive until attacked) based on location
  * NPCs in Graveyard zone from non-hostile factions become passive
  * @param {Object} npc - NPC object with position and faction
@@ -481,6 +496,9 @@ function findAssimilationTarget(drone, searchRange = CONSTANTS.SWARM_ASSIMILATIO
   for (const [baseId, base] of activeBases) {
     // Skip swarm bases and already assimilated bases
     if (base.faction === 'swarm' || assimilatedBases.has(baseId)) continue;
+
+    // Skip bases in swarm exclusion zone (within 10 sectors of origin)
+    if (isInSwarmExclusionZone(base.x, base.y)) continue;
 
     const dx = base.x - droneX;
     const dy = base.y - droneY;
@@ -1490,6 +1508,32 @@ function deactivateBase(baseId) {
   logger.log(`[NPC] Deactivated base ${base.name}`);
 }
 
+/**
+ * Cleanup swarm hives that violate the exclusion zone constraint
+ * Called on server startup to remove legacy hives within 10 sectors of origin
+ * @returns {number} Number of hives removed
+ */
+function cleanupExcludedSwarmHives() {
+  let removedCount = 0;
+
+  for (const [baseId, base] of activeBases) {
+    if (base.type !== 'swarm_hive') continue;
+
+    // Check if this hive is in the exclusion zone
+    if (isInSwarmExclusionZone(base.x, base.y)) {
+      logger.log(`[NPC] Removing swarm hive ${baseId} from exclusion zone (${Math.floor(base.x)}, ${Math.floor(base.y)})`);
+      deactivateBase(baseId);
+      removedCount++;
+    }
+  }
+
+  if (removedCount > 0) {
+    logger.log(`[NPC] Cleaned up ${removedCount} swarm hive(s) from exclusion zone`);
+  }
+
+  return removedCount;
+}
+
 // Spawn a single NPC from a base
 function spawnNPCFromBase(baseId) {
   const base = activeBases.get(baseId);
@@ -2386,7 +2430,7 @@ function getBasesInRange(position, range) {
     // effectiveDistance = dist - baseSize, check if <= range
     // Equivalent: dist <= range + baseSize
     if (dist - baseSize <= range) {
-      basesInRange.push({
+      const baseData = {
         id: baseId,
         x: baseX,
         y: baseY,
@@ -2399,7 +2443,20 @@ function getBasesInRange(position, range) {
         name: base.name,
         scrapPile: base.scrapPile || null,
         claimCredits: base.claimCredits || 0
-      });
+      };
+
+      // Include orbital parameters for client-side position prediction
+      if (base.orbitRadius && base.orbitSpeed) {
+        baseData.isOrbital = true;
+        baseData.orbitRadius = base.orbitRadius;
+        baseData.orbitSpeed = base.orbitSpeed;
+        baseData.orbitAngle = base.orbitAngle || 0;
+        baseData.starX = base.starX;
+        baseData.starY = base.starY;
+        baseData.starId = base.starId;
+      }
+
+      basesInRange.push(baseData);
     }
   }
   return basesInRange;
@@ -2797,20 +2854,41 @@ function damageNPC(npcId, damage, attackerId = null) {
 
 // Note: generateLoot removed - now using LootPools.generateLoot() for centralized loot generation
 
+/**
+ * Get NPCs within range of a position using spatial hash for O(k) lookup
+ * @param {Object} position - {x, y} position to query from
+ * @param {number} range - Query radius
+ * @returns {Array} NPCs within range with distance property added
+ */
 function getNPCsInRange(position, range) {
   const result = [];
-  for (const [id, npc] of activeNPCs) {
+  const rangeSq = range * range; // Avoid sqrt in hot path
+
+  // Query spatial hash for candidate NPCs
+  const candidates = npcSpatialHash.query(position.x, position.y, range);
+
+  for (const id of candidates) {
+    const npc = activeNPCs.get(id);
     // Defensive validation: skip invalid/dead NPCs
     if (!npc || !npc.position || npc.hull <= 0) continue;
 
     const dx = npc.position.x - position.x;
     const dy = npc.position.y - position.y;
-    const dist = Math.sqrt(dx * dx + dy * dy);
-    if (dist <= range) {
-      result.push({ ...npc, distance: dist });
+    const distSq = dx * dx + dy * dy;
+
+    if (distSq <= rangeSq) {
+      result.push({ ...npc, distance: Math.sqrt(distSq) });
     }
   }
   return result;
+}
+
+/**
+ * Rebuild the NPC spatial hash from activeNPCs
+ * Should be called once per tick before any range queries
+ */
+function rebuildNPCSpatialHash() {
+  npcSpatialHash.rebuild(activeNPCs);
 }
 
 // Update NPC shield recharge
@@ -3435,5 +3513,10 @@ module.exports = {
   // Pirate faction spawning
   spawnScoutFromBase,
   spawnCaptainFromIntel,
-  spawnDreadnoughtAtBase
+  spawnDreadnoughtAtBase,
+  // Spatial hash for efficient range queries
+  rebuildNPCSpatialHash,
+  // Swarm exclusion zone cleanup
+  cleanupExcludedSwarmHives,
+  isInSwarmExclusionZone
 };

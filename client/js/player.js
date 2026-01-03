@@ -376,16 +376,28 @@ const Player = {
       }
     }
 
-    // Update UI hint - only show if no higher-priority interaction available
+    // Update UI hints - only show one at a time based on priority
     // Priority: Wormhole > Plunder > Derelict > Mining
-    const hint = document.getElementById('mining-hint');
-    const hasHigherPriority = this._nearestDerelict ||
-      (this._nearestWormhole && this.hasRelic('WORMHOLE_GEM')) ||
-      (this._nearestBase && this.hasRelic('SKULL_AND_BONES'));
-    if (nearestMineable && !this.miningTarget && !hasHigherPriority) {
-      hint.classList.remove('hidden');
+    const miningHint = document.getElementById('mining-hint');
+    const salvageHint = document.getElementById('salvage-hint');
+
+    const hasWormhole = this._nearestWormhole && this.hasRelic('WORMHOLE_GEM');
+    const hasPlunder = this._nearestBase && this.hasRelic('SKULL_AND_BONES');
+    const hasDerelict = this._nearestDerelict;
+    const hasMineable = nearestMineable && !this.miningTarget;
+
+    // Show salvage hint if derelict nearby and no higher priority
+    if (hasDerelict && !hasWormhole && !hasPlunder) {
+      salvageHint.classList.remove('hidden');
     } else {
-      hint.classList.add('hidden');
+      salvageHint.classList.add('hidden');
+    }
+
+    // Show mining hint if mineable nearby and no higher priority
+    if (hasMineable && !hasDerelict && !hasWormhole && !hasPlunder) {
+      miningHint.classList.remove('hidden');
+    } else {
+      miningHint.classList.add('hidden');
     }
 
     this._nearestMineable = nearestMineable;
@@ -410,7 +422,11 @@ const Player = {
         }
       });
 
-      Network.sendMine(this.miningTarget.id);
+      // Send mining request with client-calculated object position for sync tolerance
+      Network.sendMine(this.miningTarget.id, {
+        x: this.miningTarget.x,
+        y: this.miningTarget.y
+      });
     }
   },
 
@@ -1065,15 +1081,18 @@ const Player = {
       for (const [baseId, base] of Entities.bases) {
         if (!base || base.destroyed) continue;
 
-        const dx = base.x - this.position.x;
-        const dy = base.y - this.position.y;
+        // Use computed position for orbital bases
+        const basePos = Entities.getBaseCurrentPosition(baseId) || { x: base.x, y: base.y };
+        const dx = basePos.x - this.position.x;
+        const dy = basePos.y - this.position.y;
         const dist = Math.sqrt(dx * dx + dy * dy);
         const baseSize = base.size || 100;
 
         // Check if within plunder range (edge of base, not center)
         if (dist - baseSize < plunderRange && dist < nearestDist) {
           nearestDist = dist;
-          nearestBase = base;
+          // Return base with computed position
+          nearestBase = { ...base, x: basePos.x, y: basePos.y, position: basePos };
         }
       }
     }
