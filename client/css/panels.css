@@ -1223,3 +1223,332 @@
   opacity: 0.5;
   cursor: not-allowed;
 }
+
+/* ========================================
+   Fleet Panel
+   ======================================== */
+
+.fleet-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-lg);
+  padding: var(--spacing-md);
+}
+
+.fleet-panel.no-fleet {
+  align-items: center;
+  justify-content: center;
+  min-height: 300px;
+}
+
+/* Create Fleet Section */
+.fleet-create-section {
+  text-align: center;
+  padding: var(--spacing-xl);
+  background: var(--color-bg-input);
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-md);
+  max-width: 400px;
+  width: 100%;
+}
+
+.fleet-create-section h3 {
+  color: var(--color-primary-lighter);
+  margin: 0 0 var(--spacing-sm) 0;
+  font-size: 18px;
+}
+
+.fleet-create-section p {
+  color: var(--color-text-muted);
+  margin: 0 0 var(--spacing-lg) 0;
+  font-size: 14px;
+}
+
+.fleet-create-form {
+  display: flex;
+  gap: var(--spacing-sm);
+}
+
+.fleet-create-form input {
+  flex: 1;
+  padding: var(--spacing-sm) var(--spacing-md);
+  background: var(--color-bg-darker);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  color: var(--color-text);
+  font-size: 14px;
+}
+
+.fleet-create-form input:focus {
+  border-color: var(--color-primary);
+  outline: none;
+}
+
+/* Fleet Header */
+.fleet-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-bottom: var(--spacing-md);
+  border-bottom: 1px solid var(--color-border-light);
+}
+
+.fleet-name {
+  font-size: 18px;
+  font-weight: bold;
+  color: var(--color-primary-lighter);
+}
+
+.fleet-count {
+  font-size: 13px;
+  color: var(--color-text-muted);
+}
+
+/* Fleet Members */
+.fleet-members {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
+}
+
+.fleet-member {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-md);
+  padding: var(--spacing-sm) var(--spacing-md);
+  background: var(--color-bg-input);
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-sm);
+  transition: background var(--animation-fast);
+}
+
+.fleet-member.is-me {
+  border-color: var(--color-primary);
+  background: rgba(68, 102, 255, 0.1);
+}
+
+.fleet-member.is-leader .member-name {
+  color: var(--color-accent);
+}
+
+.member-info {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+}
+
+.member-name {
+  font-size: 14px;
+  color: var(--color-text);
+}
+
+.member-role {
+  font-size: 11px;
+  padding: 2px 6px;
+  background: var(--color-accent);
+  color: var(--color-bg-darkest);
+  border-radius: var(--radius-xs);
+  text-transform: uppercase;
+  font-weight: bold;
+}
+
+.member-health {
+  width: 80px;
+}
+
+.health-bar {
+  height: 6px;
+  background: var(--color-bg-darker);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.health-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--color-success), var(--color-success-light));
+  transition: width var(--animation-normal);
+}
+
+.kick-btn {
+  background: none;
+  border: none;
+  color: var(--color-danger);
+  font-size: 18px;
+  cursor: pointer;
+  padding: 0 var(--spacing-xs);
+  opacity: 0.6;
+  transition: opacity var(--animation-fast);
+}
+
+.kick-btn:hover {
+  opacity: 1;
+}
+
+/* Fleet Actions */
+.fleet-actions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
+  padding-top: var(--spacing-md);
+  border-top: 1px solid var(--color-border-light);
+}
+
+.fleet-invite-form {
+  display: flex;
+  gap: var(--spacing-sm);
+}
+
+.fleet-invite-form input {
+  flex: 1;
+  padding: var(--spacing-sm) var(--spacing-md);
+  background: var(--color-bg-darker);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  color: var(--color-text);
+  font-size: 14px;
+}
+
+.fleet-invite-form input:focus {
+  border-color: var(--color-primary);
+  outline: none;
+}
+
+/* Fleet Invites Section */
+.fleet-invites-section {
+  margin-top: var(--spacing-lg);
+  text-align: left;
+  width: 100%;
+  max-width: 400px;
+}
+
+.fleet-invites-section h3 {
+  color: var(--color-text-accent);
+  font-size: 14px;
+  margin: 0 0 var(--spacing-sm) 0;
+}
+
+.fleet-invites {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
+}
+
+.fleet-invite {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: var(--spacing-sm) var(--spacing-md);
+  background: var(--color-bg-input);
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-sm);
+}
+
+.invite-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.invite-fleet {
+  font-size: 14px;
+  color: var(--color-text);
+}
+
+.invite-from {
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
+
+.invite-actions {
+  display: flex;
+  gap: var(--spacing-xs);
+}
+
+.accept-btn, .decline-btn {
+  padding: var(--spacing-xs) var(--spacing-sm);
+  font-size: 12px;
+}
+
+/* Fleet Chat */
+.fleet-chat {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.fleet-chat-header {
+  padding: var(--spacing-sm) var(--spacing-md);
+  background: var(--color-bg-darker);
+  font-size: 12px;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  border-bottom: 1px solid var(--color-border-light);
+}
+
+.fleet-chat-messages {
+  height: 150px;
+  overflow-y: auto;
+  padding: var(--spacing-sm);
+  background: var(--color-bg-darkest);
+}
+
+.chat-empty {
+  text-align: center;
+  color: var(--color-text-muted);
+  font-size: 13px;
+  padding: var(--spacing-lg);
+}
+
+.chat-message {
+  font-size: 13px;
+  padding: 2px 0;
+}
+
+.chat-message.is-me .chat-user {
+  color: var(--color-primary-lighter);
+}
+
+.chat-time {
+  color: var(--color-text-muted);
+  font-size: 11px;
+  margin-right: var(--spacing-xs);
+}
+
+.chat-user {
+  color: var(--color-text-accent);
+  margin-right: var(--spacing-xs);
+}
+
+.chat-text {
+  color: var(--color-text);
+}
+
+.fleet-chat-input {
+  display: flex;
+  gap: var(--spacing-sm);
+  padding: var(--spacing-sm);
+  background: var(--color-bg-input);
+  border-top: 1px solid var(--color-border-light);
+}
+
+.fleet-chat-input input {
+  flex: 1;
+  padding: var(--spacing-sm);
+  background: var(--color-bg-darker);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  color: var(--color-text);
+  font-size: 13px;
+}
+
+.fleet-chat-input input:focus {
+  border-color: var(--color-primary);
+  outline: none;
+}
+
+.fleet-chat-input button {
+  padding: var(--spacing-sm) var(--spacing-md);
+}

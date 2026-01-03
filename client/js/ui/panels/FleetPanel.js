@@ -27,6 +27,9 @@ const FleetPanel = {
         this._requestFleetData();
       }
     });
+
+    // Initial render to show no-fleet view
+    this.render();
   },
 
   /**

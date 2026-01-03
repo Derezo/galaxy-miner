@@ -134,7 +134,9 @@ const TerminalUI = {
       case 'relics':
         document.getElementById('relics-content').classList.add('active');
         break;
-      // Settings tab removed - now in Profile Modal
+      case 'fleet':
+        document.getElementById('fleet-content').classList.add('active');
+        break;
     }
 
     this.refreshCurrentTab();
