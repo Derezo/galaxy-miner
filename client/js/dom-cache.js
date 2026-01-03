@@ -143,6 +143,7 @@ const DOMCache = {
 
   // Hints & Overlays
   get miningHint() { return this.get('mining-hint'); },
+  get salvageHint() { return this.get('salvage-hint'); },
   get lootHint() { return this.get('loot-hint'); },
   get wormholeHint() { return this.get('wormhole-hint'); },
   get uiContainer() { return this.get('ui-container'); },

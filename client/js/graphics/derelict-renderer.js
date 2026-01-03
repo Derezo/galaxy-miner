@@ -243,15 +243,8 @@ const DerelictRenderer = {
       const screenX = derelict.x - camera.x + ctx.canvas.width / 2;
       const screenY = derelict.y - camera.y + ctx.canvas.height / 2;
 
-      // Check if player is close enough for interaction
-      const dx = derelict.x - playerPosition.x;
-      const dy = derelict.y - playerPosition.y;
-      const distance = Math.sqrt(dx * dx + dy * dy);
-      const effectiveDistance = distance - (derelict.size / 2);
-
-      if (effectiveDistance <= interactionRange && !derelict.onCooldown) {
-        this.drawInteractionPrompt(ctx, derelict, screenX, screenY);
-      }
+      // Interaction prompt is now handled by DOM element (salvage-hint)
+      // See player.js updateNearestMineable() for hint display logic
     }
   },
 
@@ -785,50 +778,6 @@ const DerelictRenderer = {
       ctx.fillText(text, screenX, screenY);
       ctx.restore();
     }
-  },
-
-  /**
-   * Draw interaction prompt when player is in range
-   */
-  drawInteractionPrompt(ctx, derelict, screenX, screenY) {
-    const promptY = screenY - derelict.size * 0.5 - 40;
-
-    ctx.save();
-    ctx.font = 'bold 14px monospace';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-
-    // Background
-    const text = 'Press [M] to Salvage';
-    const metrics = ctx.measureText(text);
-    const padding = 8;
-
-    ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
-    ctx.fillRect(
-      screenX - metrics.width / 2 - padding,
-      promptY - 10 - padding / 2,
-      metrics.width + padding * 2,
-      20 + padding
-    );
-
-    // Border
-    ctx.strokeStyle = this.COLORS.alienGlow;
-    ctx.lineWidth = 1;
-    ctx.strokeRect(
-      screenX - metrics.width / 2 - padding,
-      promptY - 10 - padding / 2,
-      metrics.width + padding * 2,
-      20 + padding
-    );
-
-    // Text with pulsing glow
-    const pulse = 0.7 + Math.sin(this.animationTime * 3) * 0.3;
-    ctx.fillStyle = this.COLORS.alienGlow;
-    ctx.globalAlpha = pulse;
-    ctx.fillText(text, screenX, promptY);
-    ctx.globalAlpha = 1;
-
-    ctx.restore();
   },
 
   /**
