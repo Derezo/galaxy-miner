@@ -1340,7 +1340,28 @@ const Renderer = {
     // Update wreckage rotation
     Entities.updateWreckageRotation(dt);
 
-    for (const [id, wreckage] of Entities.wreckage) {
+    // Mobile draw budget: limit wreckage drawn per frame to maintain performance
+    const isMobileWreckage = typeof DeviceDetect !== 'undefined' && DeviceDetect.isMobile;
+    let wreckageEntries = Array.from(Entities.wreckage.entries());
+    if (isMobileWreckage && typeof Player !== 'undefined' && Player.position) {
+      const px = Player.position.x;
+      const py = Player.position.y;
+      const viewportDiag = Math.sqrt(this.width * this.width + this.height * this.height);
+      const maxDrawDist = viewportDiag * 0.8;
+      const maxDrawDistSq = maxDrawDist * maxDrawDist;
+      wreckageEntries = wreckageEntries
+        .map(([id, w]) => {
+          const dx = w.position.x - px;
+          const dy = w.position.y - py;
+          return [id, w, dx * dx + dy * dy];
+        })
+        .filter(([, , distSq]) => distSq <= maxDrawDistSq)
+        .sort((a, b) => a[2] - b[2])
+        .slice(0, 10)
+        .map(([id, w]) => [id, w]);
+    }
+
+    for (const [id, wreckage] of wreckageEntries) {
       // Check if this wreckage is being siphoned
       const siphonState = Entities.getSiphonAnimationState(id);
       const isSiphoning = siphonState !== null;
@@ -1800,7 +1821,28 @@ const Renderer = {
     }
 
     // Draw NPCs with faction-specific graphics
-    for (const [id, npc] of Entities.npcs) {
+    // Mobile draw budget: limit NPCs drawn per frame to maintain performance
+    const isMobileNpc = typeof DeviceDetect !== 'undefined' && DeviceDetect.isMobile;
+    let npcEntries = Array.from(Entities.npcs.entries());
+    if (isMobileNpc && typeof Player !== 'undefined' && Player.position) {
+      const px = Player.position.x;
+      const py = Player.position.y;
+      const viewportDiag = Math.sqrt(this.width * this.width + this.height * this.height);
+      const maxDrawDist = viewportDiag * 0.8;
+      const maxDrawDistSq = maxDrawDist * maxDrawDist;
+      npcEntries = npcEntries
+        .map(([id, npc]) => {
+          const dx = npc.position.x - px;
+          const dy = npc.position.y - py;
+          return [id, npc, dx * dx + dy * dy];
+        })
+        .filter(([, , distSq]) => distSq <= maxDrawDistSq)
+        .sort((a, b) => a[2] - b[2])
+        .slice(0, 15)
+        .map(([id, npc]) => [id, npc]);
+    }
+
+    for (const [id, npc] of npcEntries) {
       if (!this.isOnScreen(npc.position.x, npc.position.y)) continue;
 
       // Use faction-specific ship renderer if available
