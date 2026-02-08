@@ -17,6 +17,7 @@ const GraphicsSettings = {
   _quality: 80,           // 0-100 continuous quality value
   _advancedMode: false,   // Whether user is using slider vs presets
   _renderScale: 1.0,      // Canvas resolution scale (0.5-1.0), lower = better perf
+  _autoQuality: false,    // Whether FrameBudgetMonitor auto-adjusts quality
 
   // Preset definitions
   _presets: {
@@ -142,6 +143,30 @@ const GraphicsSettings = {
   setAdvancedMode(enabled) {
     this._advancedMode = enabled;
     this.save();
+  },
+
+  // ============================================
+  // Auto-Quality (FrameBudgetMonitor integration)
+  // ============================================
+
+  /**
+   * Check if auto-quality adjustment is enabled
+   * @returns {boolean}
+   */
+  isAutoQuality() {
+    return this._autoQuality;
+  },
+
+  /**
+   * Set auto-quality preference (persisted to localStorage)
+   * This only stores the preference; actual monitoring is managed by FrameBudgetMonitor
+   *
+   * @param {boolean} enabled
+   */
+  setAutoQuality(enabled) {
+    this._autoQuality = !!enabled;
+    this.save();
+    console.log('[GraphicsSettings] Auto-quality set to:', this._autoQuality);
   },
 
   // ============================================
@@ -437,6 +462,7 @@ const GraphicsSettings = {
         quality: this._quality,
         advancedMode: this._advancedMode,
         renderScale: this._renderScale,
+        autoQuality: this._autoQuality,
         version: 2  // Version for migration detection
       }));
     } catch (e) {
@@ -477,6 +503,7 @@ const GraphicsSettings = {
           this._renderScale = typeof parsed.renderScale === 'number'
             ? Math.max(0.5, Math.min(1.0, parsed.renderScale))
             : defaultRenderScale;
+          this._autoQuality = parsed.autoQuality || false;
         }
       } else {
         // First launch (no saved settings) - default to Medium on mobile devices
@@ -492,6 +519,7 @@ const GraphicsSettings = {
       this._quality = 80;
       this._advancedMode = false;
       this._renderScale = 1.0;
+      this._autoQuality = false;
     }
   },
 
@@ -502,9 +530,10 @@ const GraphicsSettings = {
     this._quality = 80;
     this._advancedMode = false;
     this._renderScale = 1.0;
+    this._autoQuality = false;
     this.save();
     this._notifyListeners();
-    console.log('[GraphicsSettings] Reset to defaults (quality: 80, renderScale: 1.0)');
+    console.log('[GraphicsSettings] Reset to defaults (quality: 80, renderScale: 1.0, autoQuality: false)');
   },
 
   /**
@@ -516,6 +545,7 @@ const GraphicsSettings = {
     console.log('Preset:', this.getPresetLabel());
     console.log('Advanced Mode:', this._advancedMode);
     console.log('Render Scale:', this._renderScale);
+    console.log('Auto-Quality:', this._autoQuality);
     console.log('LOD:', this.getLOD());
     console.log('Particle Multiplier:', this.getParticleMultiplier().toFixed(2));
     console.log('Pool Size:', this.getPoolSize());

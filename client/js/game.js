@@ -21,6 +21,11 @@ const Game = {
         this._tabVisible = true;
         this.lastTime = performance.now(); // Prevent huge deltaTime spike
         Logger.log('Tab visible - resuming render');
+
+        // Pause frame budget monitor briefly to let frame times stabilize
+        if (typeof FrameBudgetMonitor !== 'undefined') {
+          FrameBudgetMonitor.pause(1000);
+        }
       }
     };
     document.addEventListener('visibilitychange', this._visibilityHandler);
@@ -42,8 +47,14 @@ const Game = {
     if (!this.running) return;
 
     const currentTime = performance.now();
-    this.deltaTime = (currentTime - this.lastTime) / 1000; // Convert to seconds
+    const frameTimeMs = currentTime - this.lastTime;
+    this.deltaTime = frameTimeMs / 1000; // Convert to seconds
     this.lastTime = currentTime;
+
+    // Feed frame time to the adaptive quality monitor
+    if (typeof FrameBudgetMonitor !== 'undefined') {
+      FrameBudgetMonitor.recordFrameTime(frameTimeMs);
+    }
 
     this.update(this.deltaTime);
 
