@@ -2014,10 +2014,46 @@ function broadcastWreckageNear(wreckage, event, data) {
 }
 
 /**
+ * Determine whether an NPC update should be sent to a player based on distance.
+ * Closer NPCs get higher update rates; far-away NPCs (radar dots) get throttled.
+ * Always sends on full refresh ticks or when NPC state has meaningfully changed.
+ *
+ * Distance tiers:
+ *   0-500u:   every tick (20Hz)
+ *   500-1000u: every 2 ticks (10Hz)
+ *   1000-2000u: every 4 ticks (5Hz)
+ *   2000u+:   every 10 ticks (2Hz)
+ */
+function shouldSendNpcUpdate(dist, data, socketId) {
+  // Always send on full refresh ticks
+  if (currentTick % FULL_REFRESH_INTERVAL === 0) return true;
+
+  // Always send if NPC state changed (hull, shield, or AI state transition)
+  const lastSeenMap = playerLastSeen.get(socketId);
+  if (lastSeenMap) {
+    const prev = lastSeenMap.get(data.id);
+    if (prev) {
+      if (data.hull !== prev.hull) return true;
+      if (data.shield !== prev.shield) return true;
+      if (data.state !== prev.state) return true;
+    }
+  }
+  // No previous state means first encounter - always send
+  if (!lastSeenMap || !lastSeenMap.get(data.id)) return true;
+
+  // Distance-based throttling
+  if (dist <= 500) return true;
+  if (dist <= 1000) return currentTick % 2 === 0;
+  if (dist <= 2000) return currentTick % 4 === 0;
+  return currentTick % 10 === 0;
+}
+
+/**
  * Queue an NPC update for batched delivery with delta compression.
  * Instead of emitting individual npc:update events, this accumulates
  * updates per-player and flushes them as a single npc:batch message.
  * Delta compression sends only changed fields after the first full state.
+ * Updates are throttled by distance - far NPCs update less frequently.
  */
 function queueNpcUpdate(npcEntity, data) {
   if (!connectedPlayers) return;
@@ -2037,6 +2073,9 @@ function queueNpcUpdate(npcEntity, data) {
 
     const broadcastRange = getPlayerBroadcastRange(player);
     if (dist <= broadcastRange) {
+      // Distance-based throttling: skip update for far-away NPCs on non-scheduled ticks
+      if (!shouldSendNpcUpdate(dist, data, socketId)) continue;
+
       if (!npcBatches.has(socketId)) {
         npcBatches.set(socketId, []);
       }
