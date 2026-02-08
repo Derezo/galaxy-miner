@@ -361,12 +361,42 @@ const ParticleSystem = {
 
   /**
    * Draw all active particles
+   * Batched by type to reduce canvas state changes. The outer save/restore
+   * per particle is eliminated - globalAlpha is set directly per particle
+   * and inner draw methods handle their own save/restore for transforms.
    */
+  // Pre-allocated type buckets to avoid per-frame allocation
+  _typeBuckets: {
+    glow: [], spark: [], trail: [], smoke: [],
+    energy: [], debris: [], ring: [], flame: [], default: []
+  },
+  // Screen coordinate pairs stored alongside bucket entries
+  _typeScreenX: {
+    glow: [], spark: [], trail: [], smoke: [],
+    energy: [], debris: [], ring: [], flame: [], default: []
+  },
+  _typeScreenY: {
+    glow: [], spark: [], trail: [], smoke: [],
+    energy: [], debris: [], ring: [], flame: [], default: []
+  },
+
   draw(ctx, camera, viewportWidth, viewportHeight) {
     const margin = 50;
     const lod = this.getLOD();
+    const buckets = this._typeBuckets;
+    const bucketsX = this._typeScreenX;
+    const bucketsY = this._typeScreenY;
 
-    for (const particle of this.active) {
+    // Clear all buckets (reset length to avoid allocation)
+    for (const key in buckets) {
+      buckets[key].length = 0;
+      bucketsX[key].length = 0;
+      bucketsY[key].length = 0;
+    }
+
+    // Single pass: cull and sort particles into type buckets
+    for (let i = 0; i < this.active.length; i++) {
+      const particle = this.active[i];
       const screenX = particle.x - camera.x;
       const screenY = particle.y - camera.y;
 
@@ -375,39 +405,143 @@ const ParticleSystem = {
         continue;
       }
 
-      ctx.save();
+      const bucket = buckets[particle.type] || buckets.default;
+      const bucketX = bucketsX[particle.type] || bucketsX.default;
+      const bucketY = bucketsY[particle.type] || bucketsY.default;
+      bucket.push(particle);
+      bucketX.push(screenX);
+      bucketY.push(screenY);
+    }
+
+    // Save globalAlpha once before all particle drawing
+    const savedAlpha = ctx.globalAlpha;
+
+    // Draw each type group - common state is set once per group
+    // Default particles: simple filled circles, sub-grouped by color
+    this._drawDefaultBatch(ctx, buckets.default, bucketsX.default, bucketsY.default);
+
+    // Glow particles
+    this._drawTypeBatch(ctx, buckets.glow, bucketsX.glow, bucketsY.glow, 'glow', lod);
+
+    // Spark particles: set shared lineCap once for the batch
+    if (buckets.spark.length > 0) {
+      ctx.lineCap = 'round';
+      this._drawTypeBatch(ctx, buckets.spark, bucketsX.spark, bucketsY.spark, 'spark', lod);
+    }
+
+    // Trail particles
+    this._drawTypeBatch(ctx, buckets.trail, bucketsX.trail, bucketsY.trail, 'trail', lod);
+
+    // Smoke particles
+    this._drawTypeBatch(ctx, buckets.smoke, bucketsX.smoke, bucketsY.smoke, 'smoke', lod);
+
+    // Energy particles
+    this._drawTypeBatch(ctx, buckets.energy, bucketsX.energy, bucketsY.energy, 'energy', lod);
+
+    // Debris particles
+    this._drawTypeBatch(ctx, buckets.debris, bucketsX.debris, bucketsY.debris, 'debris', lod);
+
+    // Ring particles
+    this._drawTypeBatch(ctx, buckets.ring, bucketsX.ring, bucketsY.ring, 'ring', lod);
+
+    // Flame particles
+    this._drawTypeBatch(ctx, buckets.flame, bucketsX.flame, bucketsY.flame, 'flame', lod);
+
+    // Restore globalAlpha once after all particle drawing
+    ctx.globalAlpha = savedAlpha;
+  },
+
+  /**
+   * Draw a batch of default particles, sub-grouped by color
+   * to minimize fillStyle changes
+   * @private
+   */
+  _drawDefaultBatch(ctx, particles, screenXs, screenYs) {
+    if (particles.length === 0) return;
+
+    // Sort by color to minimize fillStyle switches
+    // Build index array to sort without reordering the parallel arrays
+    const len = particles.length;
+    if (len === 1) {
+      ctx.globalAlpha = particles[0].alpha;
+      this.drawDefaultParticle(ctx, screenXs[0], screenYs[0], particles[0]);
+      return;
+    }
+
+    let currentColor = null;
+    // Sort particles by color using a simple approach for small batches
+    // Build indices sorted by color
+    const indices = this._getSortIndices(len);
+    for (let i = 0; i < len; i++) indices[i] = i;
+    indices.sort((a, b) => {
+      if (particles[a].color < particles[b].color) return -1;
+      if (particles[a].color > particles[b].color) return 1;
+      return 0;
+    });
+
+    for (let i = 0; i < len; i++) {
+      const idx = indices[i];
+      const particle = particles[idx];
+      ctx.globalAlpha = particle.alpha;
+      if (particle.color !== currentColor) {
+        currentColor = particle.color;
+        ctx.fillStyle = currentColor;
+      }
+      ctx.beginPath();
+      ctx.arc(screenXs[idx], screenYs[idx], particle.size, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  },
+
+  /**
+   * Reusable index array for default batch sorting
+   * @private
+   */
+  _sortIndices: [],
+  _getSortIndices(len) {
+    while (this._sortIndices.length < len) {
+      this._sortIndices.push(0);
+    }
+    return this._sortIndices;
+  },
+
+  /**
+   * Draw a batch of particles of a single type
+   * @private
+   */
+  _drawTypeBatch(ctx, particles, screenXs, screenYs, type, lod) {
+    if (particles.length === 0) return;
+
+    for (let i = 0; i < particles.length; i++) {
+      const particle = particles[i];
       ctx.globalAlpha = particle.alpha;
 
-      switch (particle.type) {
+      switch (type) {
         case 'glow':
-          this.drawGlowParticle(ctx, screenX, screenY, particle, lod);
+          this.drawGlowParticle(ctx, screenXs[i], screenYs[i], particle, lod);
           break;
         case 'spark':
-          this.drawSparkParticle(ctx, screenX, screenY, particle);
+          this.drawSparkParticle(ctx, screenXs[i], screenYs[i], particle);
           break;
         case 'trail':
-          this.drawTrailParticle(ctx, screenX, screenY, particle, lod);
+          this.drawTrailParticle(ctx, screenXs[i], screenYs[i], particle, lod);
           break;
         case 'smoke':
-          this.drawSmokeParticle(ctx, screenX, screenY, particle, lod);
+          this.drawSmokeParticle(ctx, screenXs[i], screenYs[i], particle, lod);
           break;
         case 'energy':
-          this.drawEnergyParticle(ctx, screenX, screenY, particle, lod);
+          this.drawEnergyParticle(ctx, screenXs[i], screenYs[i], particle, lod);
           break;
         case 'debris':
-          this.drawDebrisParticle(ctx, screenX, screenY, particle);
+          this.drawDebrisParticle(ctx, screenXs[i], screenYs[i], particle);
           break;
         case 'ring':
-          this.drawRingParticle(ctx, screenX, screenY, particle);
+          this.drawRingParticle(ctx, screenXs[i], screenYs[i], particle);
           break;
         case 'flame':
-          this.drawFlameParticle(ctx, screenX, screenY, particle, lod);
+          this.drawFlameParticle(ctx, screenXs[i], screenYs[i], particle, lod);
           break;
-        default:
-          this.drawDefaultParticle(ctx, screenX, screenY, particle);
       }
-
-      ctx.restore();
     }
   },
 
@@ -475,7 +609,7 @@ const ParticleSystem = {
 
     ctx.strokeStyle = particle.color;
     ctx.lineWidth = particle.size * 0.5;
-    ctx.lineCap = 'round';
+    // lineCap is set once at batch level for spark particles
     ctx.beginPath();
     ctx.moveTo(x - Math.cos(angle) * length, y - Math.sin(angle) * length);
     ctx.lineTo(x + Math.cos(angle) * length * 0.3, y + Math.sin(angle) * length * 0.3);
