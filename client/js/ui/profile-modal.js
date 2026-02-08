@@ -266,6 +266,8 @@ const ProfileModal = {
         const preset = presetSelect.value;
         if (typeof GraphicsSettings !== 'undefined' && preset !== 'custom') {
           GraphicsSettings.setPreset(preset);
+          // Mark as manually set so auto-quality won't override on next launch
+          if (typeof AutoQuality !== 'undefined') AutoQuality.markManualQuality();
           const quality = GraphicsSettings.getQuality();
           if (slider) slider.value = quality;
           if (sliderValue) sliderValue.textContent = quality;
@@ -335,6 +337,8 @@ const ProfileModal = {
         const quality = parseInt(slider.value, 10);
         if (typeof GraphicsSettings !== 'undefined') {
           GraphicsSettings.setQuality(quality);
+          // Mark as manually set so auto-quality won't override on next launch
+          if (typeof AutoQuality !== 'undefined') AutoQuality.markManualQuality();
         }
       });
     }

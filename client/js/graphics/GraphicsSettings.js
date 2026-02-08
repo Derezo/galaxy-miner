@@ -549,9 +549,27 @@ const GraphicsSettings = {
         // First launch (no saved settings) - default to Medium on mobile devices
         const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
         if (isMobile) {
+          // Set Medium as initial default before benchmark completes
           this._quality = 40;
           this._renderScale = 0.75;
           console.log('[GraphicsSettings] Mobile device detected on first launch, defaulting to Medium (quality: 40), renderScale: 0.75');
+
+          // Run auto-quality benchmark to replace the fixed default with a measured value
+          if (typeof AutoQuality !== 'undefined') {
+            AutoQuality.detect((quality) => {
+              if (quality !== null) {
+                GraphicsSettings.setQuality(quality);
+                GraphicsSettings.save();
+                console.log('[GraphicsSettings] Auto-quality benchmark set quality to:', quality);
+
+                // Show toast notification if Toast system is available
+                if (typeof Toast !== 'undefined' && Toast.show) {
+                  const presetLabel = GraphicsSettings.getPresetLabel();
+                  Toast.info('Quality set to ' + presetLabel + ' for your device');
+                }
+              }
+            });
+          }
         }
       }
     } catch (e) {
