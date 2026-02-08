@@ -44,13 +44,18 @@ const Entities = {
       this.interpolateEntity(npc, dt);
     }
 
-    // Update projectiles
-    this.projectiles = this.projectiles.filter(p => {
+    // Update projectiles (in-place compaction to avoid allocating a new array)
+    let writeIdx = 0;
+    for (let i = 0; i < this.projectiles.length; i++) {
+      const p = this.projectiles[i];
       p.x += p.vx * dt;
       p.y += p.vy * dt;
       p.lifetime -= dt * 1000;
-      return p.lifetime > 0;
-    });
+      if (p.lifetime > 0) {
+        this.projectiles[writeIdx++] = p;
+      }
+    }
+    this.projectiles.length = writeIdx;
 
     // Update wreckage (rotation animation)
     this.updateWreckageRotation(dt);
@@ -153,7 +158,8 @@ const Entities = {
         }
       }
 
-      player.targetPosition = { x: data.x, y: data.y };
+      player.targetPosition.x = data.x;
+      player.targetPosition.y = data.y;
       player.targetRotation = data.rotation;
       player.hull = data.hull;
       player.shield = data.shield;
@@ -255,11 +261,13 @@ const Entities = {
         }
       }
 
-      npc.targetPosition = { x: data.x, y: data.y };
+      npc.targetPosition.x = data.x;
+      npc.targetPosition.y = data.y;
       npc.targetRotation = data.rotation || npc.targetRotation;
-      npc.hull = data.hull;
-      npc.shield = data.shield;
-      npc.state = data.state || npc.state;
+      // Delta compression: only update hull/shield/state if present in update
+      if (data.hull !== undefined) npc.hull = data.hull;
+      if (data.shield !== undefined) npc.shield = data.shield;
+      if (data.state !== undefined) npc.state = data.state;
       npc.lastUpdateTime = now;
       // Update max values if provided
       if (data.hullMax !== undefined) npc.hullMax = data.hullMax;
@@ -267,7 +275,10 @@ const Entities = {
       if (data.type) npc.type = data.type;
       if (data.name) npc.name = data.name;
       // Update wreckage collection position for tractor beam animation
-      npc.collectingWreckagePos = data.collectingWreckagePos || null;
+      // Only update if explicitly provided - delta updates may omit this field
+      if (data.collectingWreckagePos !== undefined) {
+        npc.collectingWreckagePos = data.collectingWreckagePos || null;
+      }
       // Update mining target position for mining beam animation (rogue miners)
       // Only update if explicitly provided - don't overwrite existing value from npc:action
       if (data.miningTargetPos !== undefined) {
@@ -619,9 +630,15 @@ const Entities = {
       timestamp: Date.now()
     });
 
-    // Trim old trails (keep last 500ms)
+    // Trim old trails in-place (keep last 500ms)
     const cutoff = Date.now() - 500;
-    this.projectileTrails = this.projectileTrails.filter(t => t.timestamp > cutoff);
+    let trailWriteIdx = 0;
+    for (let i = 0; i < this.projectileTrails.length; i++) {
+      if (this.projectileTrails[i].timestamp > cutoff) {
+        this.projectileTrails[trailWriteIdx++] = this.projectileTrails[i];
+      }
+    }
+    this.projectileTrails.length = trailWriteIdx;
   },
 
   // Get bases in range for radar

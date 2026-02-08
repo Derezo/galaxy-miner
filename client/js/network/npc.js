@@ -64,32 +64,52 @@ function register(socket) {
   });
 
   // Batched NPC updates - server sends all nearby NPC updates in a single message per tick
+  // Supports delta compression: full state (f=1 flag) and delta updates (id + position + changed fields)
   socket.on('npc:batch', (batch) => {
     for (const data of batch) {
       const existingNpc = Entities.npcs.get(data.id);
       const isNewNpc = !existingNpc;
 
-      const npcData = {
-        id: data.id,
-        type: data.type,
-        name: data.name,
-        faction: data.faction,
-        x: data.x,
-        y: data.y,
-        rotation: data.rotation,
-        state: data.state,
-        hull: data.hull,
-        hullMax: data.hullMax,
-        shield: data.shield,
-        shieldMax: data.shieldMax
-      };
-      if (data.collectingWreckagePos) {
-        npcData.collectingWreckagePos = data.collectingWreckagePos;
+      if (data.f || isNewNpc) {
+        // Full state update (f=1 flag from server, or NPC not yet known to client)
+        const npcData = {
+          id: data.id,
+          type: data.type,
+          name: data.name,
+          faction: data.faction,
+          x: data.x,
+          y: data.y,
+          rotation: data.rotation,
+          state: data.state,
+          hull: data.hull,
+          hullMax: data.hullMax,
+          shield: data.shield,
+          shieldMax: data.shieldMax
+        };
+        if (data.collectingWreckagePos) {
+          npcData.collectingWreckagePos = data.collectingWreckagePos;
+        }
+        if (data.miningTargetPos) {
+          npcData.miningTargetPos = data.miningTargetPos;
+        }
+        Entities.updateNPC(npcData);
+      } else if (existingNpc) {
+        // Delta update - only position/rotation + changed fields
+        const npcData = {
+          id: data.id,
+          x: data.x,
+          y: data.y,
+          rotation: data.rotation
+        };
+        // Apply only fields that are present in the delta
+        if (data.state !== undefined) npcData.state = data.state;
+        if (data.hull !== undefined) npcData.hull = data.hull;
+        if (data.shield !== undefined) npcData.shield = data.shield;
+        // Use !== undefined to handle explicit null (signals "stopped collecting/mining")
+        if (data.collectingWreckagePos !== undefined) npcData.collectingWreckagePos = data.collectingWreckagePos;
+        if (data.miningTargetPos !== undefined) npcData.miningTargetPos = data.miningTargetPos;
+        Entities.updateNPC(npcData);
       }
-      if (data.miningTargetPos) {
-        npcData.miningTargetPos = data.miningTargetPos;
-      }
-      Entities.updateNPC(npcData);
 
       // Create rift portal for void NPCs first seen
       if (isNewNpc && data.faction === 'void' && typeof RiftPortal !== 'undefined') {
