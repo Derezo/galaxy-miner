@@ -1916,31 +1916,38 @@ function updateBaseSpawning(nearbyPlayers) {
     if (now - base.lastSpawnTime < spawnConfig.spawnCooldown) continue;
 
     // Check if any player is in range (patrol radius)
+    // Use computed position for orbital/binary bases that move over time
+    const currentBasePos = world.getObjectPosition(baseId);
+    const baseX = currentBasePos ? currentBasePos.x : base.x;
+    const baseY = currentBasePos ? currentBasePos.y : base.y;
     const patrolRadius = (base.patrolRadius || 3) * config.SECTOR_SIZE;
     const hasNearbyPlayer = nearbyPlayers.some(player => {
-      const dx = player.position.x - base.x;
-      const dy = player.position.y - base.y;
+      const dx = player.position.x - baseX;
+      const dy = player.position.y - baseY;
       return Math.sqrt(dx * dx + dy * dy) < patrolRadius;
     });
 
     // Continuous spawn bases (like swarm hive) can spawn freely when players nearby
     if (spawnConfig.continuousSpawn && hasNearbyPlayer) {
-      // Check if any pending respawns are ready
+      // Priority 1: Process pending respawns (dead NPCs coming back)
       const readyIndex = base.pendingRespawns.findIndex(pr => pr.respawnAt <= now);
       if (readyIndex !== -1) {
-        // Remove the pending respawn and spawn a new NPC
         base.pendingRespawns.splice(readyIndex, 1);
         const newNPC = spawnNPCFromBase(baseId);
         if (newNPC) {
           logger.log(`[NPC] ${base.name} respawned ${newNPC.name}`);
         }
+      } else if (base.spawnedNPCs.length < spawnConfig.maxNPCs) {
+        // Priority 2: Grow toward maxNPCs even without pending respawns
+        const newNPC = spawnNPCFromBase(baseId);
+        if (newNPC) {
+          logger.log(`[NPC] ${base.name} spawned ${newNPC.name} (${base.spawnedNPCs.length}/${spawnConfig.maxNPCs})`);
+        }
       }
     } else if (!spawnConfig.continuousSpawn) {
-      // Regular bases: only respawn when respawn delay has passed
-      // Check if there are any pending respawns that are ready
+      // Regular bases: respawn when delay has passed, up to maxNPCs
       const readyIndex = base.pendingRespawns.findIndex(pr => pr.respawnAt <= now);
-      if (readyIndex !== -1 && base.spawnedNPCs.length < spawnConfig.initialSpawn) {
-        // Remove the pending respawn and spawn a new NPC
+      if (readyIndex !== -1 && base.spawnedNPCs.length < spawnConfig.maxNPCs) {
         base.pendingRespawns.splice(readyIndex, 1);
         const newNPC = spawnNPCFromBase(baseId);
         if (newNPC) {
