@@ -102,17 +102,34 @@ const Entities = {
   },
 
   interpolateEntity(entity, dt) {
-    // Simple interpolation towards target position
+    // Velocity-based dead reckoning with smooth error correction
+    // Predict position using last known velocity from server
+    entity.position.x += (entity.vx || 0) * dt;
+    entity.position.y += (entity.vy || 0) * dt;
+
+    // Smooth correction toward server-authoritative target position
     if (entity.targetPosition) {
-      const lerp = Math.min(1, dt * 10);
-      entity.position.x += (entity.targetPosition.x - entity.position.x) * lerp;
-      entity.position.y += (entity.targetPosition.y - entity.position.y) * lerp;
+      const errorX = entity.targetPosition.x - entity.position.x;
+      const errorY = entity.targetPosition.y - entity.position.y;
+      const errorDist = Math.sqrt(errorX * errorX + errorY * errorY);
+
+      if (errorDist > 100) {
+        // Snap if error too large (teleport/desync)
+        entity.position.x = entity.targetPosition.x;
+        entity.position.y = entity.targetPosition.y;
+      } else {
+        // Smooth correction blend
+        const correctionRate = Math.min(1, dt * 5);
+        entity.position.x += errorX * correctionRate;
+        entity.position.y += errorY * correctionRate;
+      }
 
       // Interpolate rotation
       let rotDiff = entity.targetRotation - entity.rotation;
       while (rotDiff > Math.PI) rotDiff -= Math.PI * 2;
       while (rotDiff < -Math.PI) rotDiff += Math.PI * 2;
-      entity.rotation += rotDiff * lerp;
+      const rotLerp = Math.min(1, dt * 10);
+      entity.rotation += rotDiff * rotLerp;
     }
   },
 
@@ -230,6 +247,9 @@ const Entities = {
         shield: data.shield,
         shieldMax: data.shieldMax || data.shield || 0,
         state: data.state || 'patrol',
+        // Velocity for dead-reckoning interpolation (units/sec)
+        vx: data.vx || 0,
+        vy: data.vy || 0,
         // Swarm egg hatching - track spawn time for 2.5 second hatch animation
         spawnTime: isSwarm ? now : null,
         hatchDuration: isSwarm ? (data.type === 'swarm_queen' ? 4000 : 2500) : 0,
@@ -264,6 +284,9 @@ const Entities = {
       npc.targetPosition.x = data.x;
       npc.targetPosition.y = data.y;
       npc.targetRotation = data.rotation || npc.targetRotation;
+      // Update velocity for dead-reckoning interpolation
+      if (data.vx !== undefined) npc.vx = data.vx;
+      if (data.vy !== undefined) npc.vy = data.vy;
       // Delta compression: only update hull/shield/state if present in update
       if (data.hull !== undefined) npc.hull = data.hull;
       if (data.shield !== undefined) npc.shield = data.shield;

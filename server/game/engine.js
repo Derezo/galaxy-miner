@@ -298,7 +298,6 @@ function tick() {
   // Update all game systems
   updatePlayers(deltaTime);
   updateBases(deltaTime);  // Check for bases near players and spawn NPCs
-  npc.rebuildNPCSpatialHash();  // Rebuild spatial hash before NPC queries
   updateNPCs(deltaTime);
   updateMining(deltaTime);
   updateWreckage(deltaTime);
@@ -613,6 +612,10 @@ function updateNPCs(deltaTime) {
       continue;
     }
 
+    // Save pre-AI position for velocity computation
+    const prevX = npcEntity.position.x;
+    const prevY = npcEntity.position.y;
+
     // ============================================
     // SWARM EGG HATCHING - Skip AI for eggs, only broadcast position
     // ============================================
@@ -624,6 +627,9 @@ function updateNPCs(deltaTime) {
         npcEntity.state = 'patrol';
         npcEntity.hatchTime = null; // Clear hatch time so isHatching returns false
       }
+      // Eggs are stationary - zero velocity
+      npcEntity._vx = 0;
+      npcEntity._vy = 0;
       // Queue the NPC update for batched delivery (state will be 'hatching' until complete)
       queueNpcUpdate(npcEntity, {
         id: npcId,
@@ -637,7 +643,9 @@ function updateNPCs(deltaTime) {
         hull: npcEntity.hull,
         hullMax: npcEntity.hullMax,
         shield: npcEntity.shield,
-        shieldMax: npcEntity.shieldMax
+        shieldMax: npcEntity.shieldMax,
+        vx: 0,
+        vy: 0
       });
       continue; // Skip all AI processing for hatching eggs
     }
@@ -856,6 +864,17 @@ function updateNPCs(deltaTime) {
       npcEntity.miningTargetPos = action.targetPos;
     }
 
+    // Compute velocity from position delta for client-side dead reckoning
+    // deltaTime is in ms; convert to seconds for units/sec velocity
+    const dtSec = deltaTime / 1000;
+    if (dtSec > 0) {
+      npcEntity._vx = (npcEntity.position.x - prevX) / dtSec;
+      npcEntity._vy = (npcEntity.position.y - prevY) / dtSec;
+    } else {
+      npcEntity._vx = 0;
+      npcEntity._vy = 0;
+    }
+
     // Broadcast NPC position update
     // Include name/type/faction so players who just entered range get full data
     const npcUpdateData = {
@@ -870,7 +889,9 @@ function updateNPCs(deltaTime) {
       hull: npcEntity.hull,
       hullMax: npcEntity.hullMax,
       shield: npcEntity.shield,
-      shieldMax: npcEntity.shieldMax
+      shieldMax: npcEntity.shieldMax,
+      vx: npcEntity._vx,
+      vy: npcEntity._vy
     };
 
     // Include wreckage collection position for tractor beam animation
@@ -2122,12 +2143,14 @@ function buildNpcDelta(socketId, fullData) {
     return { ...fullData, f: 1 }; // f=1 means full state
   }
 
-  // Build delta: always include id, x, y, rotation
+  // Build delta: always include id, x, y, rotation, velocity
   const delta = {
     id: npcId,
     x: fullData.x,
     y: fullData.y,
-    rotation: fullData.rotation
+    rotation: fullData.rotation,
+    vx: fullData.vx || 0,
+    vy: fullData.vy || 0
   };
 
   // Only include changed fields

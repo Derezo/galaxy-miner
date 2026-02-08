@@ -45,7 +45,9 @@ function register(socket) {
       hull: data.hull,
       hullMax: data.hullMax,
       shield: data.shield,
-      shieldMax: data.shieldMax
+      shieldMax: data.shieldMax,
+      vx: data.vx || 0,
+      vy: data.vy || 0
     };
     // Include wreckage collection position for tractor beam animation
     if (data.collectingWreckagePos) {
@@ -84,7 +86,9 @@ function register(socket) {
           hull: data.hull,
           hullMax: data.hullMax,
           shield: data.shield,
-          shieldMax: data.shieldMax
+          shieldMax: data.shieldMax,
+          vx: data.vx || 0,
+          vy: data.vy || 0
         };
         if (data.collectingWreckagePos) {
           npcData.collectingWreckagePos = data.collectingWreckagePos;
@@ -94,12 +98,14 @@ function register(socket) {
         }
         Entities.updateNPC(npcData);
       } else if (existingNpc) {
-        // Delta update - only position/rotation + changed fields
+        // Delta update - only position/rotation/velocity + changed fields
         const npcData = {
           id: data.id,
           x: data.x,
           y: data.y,
-          rotation: data.rotation
+          rotation: data.rotation,
+          vx: data.vx || 0,
+          vy: data.vy || 0
         };
         // Apply only fields that are present in the delta
         if (data.state !== undefined) npcData.state = data.state;
