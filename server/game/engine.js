@@ -28,6 +28,9 @@ const lastBaseCheck = new Map(); // baseId -> lastCheckTime
 // Track void NPCs scheduled for rift respawn (prevent duplicate timers)
 const scheduledRiftRespawns = new Set(); // npcId -> scheduled
 
+// Per-player NPC update batches - accumulated during tick, flushed at end
+const npcBatches = new Map(); // socketId -> [npcUpdateData, ...]
+
 // ============================================
 // PLAYER DEBUFF SYSTEM
 // Tracks active debuffs (slows, DoTs) on players
@@ -608,8 +611,8 @@ function updateNPCs(deltaTime) {
         npcEntity.state = 'patrol';
         npcEntity.hatchTime = null; // Clear hatch time so isHatching returns false
       }
-      // Broadcast the NPC update (state will be 'hatching' until complete)
-      broadcastNearNpc(npcEntity, 'npc:update', {
+      // Queue the NPC update for batched delivery (state will be 'hatching' until complete)
+      queueNpcUpdate(npcEntity, {
         id: npcId,
         type: npcEntity.type,
         name: npcEntity.name,
@@ -867,7 +870,7 @@ function updateNPCs(deltaTime) {
       npcUpdateData.miningTargetPos = npcEntity.miningTargetPos;
     }
 
-    broadcastNearNpc(npcEntity, 'npc:update', npcUpdateData);
+    queueNpcUpdate(npcEntity, npcUpdateData);
 
     // Handle NPC actions
     if (action && action.action === 'fire') {
@@ -1785,6 +1788,9 @@ function updateNPCs(deltaTime) {
       socketModule.broadcastQueenAura(auraResult);
     }
   }
+
+  // Flush all accumulated NPC updates as batched messages (one per player)
+  flushNpcBatches();
 }
 
 function updateMining(deltaTime) {
@@ -1984,6 +1990,42 @@ function broadcastWreckageNear(wreckage, event, data) {
       io.to(socketId).emit(event, data);
     }
   }
+}
+
+/**
+ * Queue an NPC update for batched delivery.
+ * Instead of emitting individual npc:update events, this accumulates
+ * updates per-player and flushes them as a single npc:batch message.
+ */
+function queueNpcUpdate(npcEntity, data) {
+  if (!connectedPlayers) return;
+
+  for (const [socketId, player] of connectedPlayers) {
+    const dx = player.position.x - npcEntity.position.x;
+    const dy = player.position.y - npcEntity.position.y;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+
+    const broadcastRange = getPlayerBroadcastRange(player);
+    if (dist <= broadcastRange) {
+      if (!npcBatches.has(socketId)) {
+        npcBatches.set(socketId, []);
+      }
+      npcBatches.get(socketId).push(data);
+    }
+  }
+}
+
+/**
+ * Flush all accumulated NPC update batches to players.
+ * Sends one npc:batch message per player containing all NPC updates for this tick.
+ */
+function flushNpcBatches() {
+  for (const [socketId, batch] of npcBatches) {
+    if (batch.length > 0) {
+      io.to(socketId).emit('npc:batch', batch);
+    }
+  }
+  npcBatches.clear();
 }
 
 function broadcastNearNpc(npcEntity, event, data) {

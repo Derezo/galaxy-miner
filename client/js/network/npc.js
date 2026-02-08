@@ -63,6 +63,41 @@ function register(socket) {
     }
   });
 
+  // Batched NPC updates - server sends all nearby NPC updates in a single message per tick
+  socket.on('npc:batch', (batch) => {
+    for (const data of batch) {
+      const existingNpc = Entities.npcs.get(data.id);
+      const isNewNpc = !existingNpc;
+
+      const npcData = {
+        id: data.id,
+        type: data.type,
+        name: data.name,
+        faction: data.faction,
+        x: data.x,
+        y: data.y,
+        rotation: data.rotation,
+        state: data.state,
+        hull: data.hull,
+        hullMax: data.hullMax,
+        shield: data.shield,
+        shieldMax: data.shieldMax
+      };
+      if (data.collectingWreckagePos) {
+        npcData.collectingWreckagePos = data.collectingWreckagePos;
+      }
+      if (data.miningTargetPos) {
+        npcData.miningTargetPos = data.miningTargetPos;
+      }
+      Entities.updateNPC(npcData);
+
+      // Create rift portal for void NPCs first seen
+      if (isNewNpc && data.faction === 'void' && typeof RiftPortal !== 'undefined') {
+        RiftPortal.create(data.id, data.x, data.y, data.type, 'idle');
+      }
+    }
+  });
+
   // NPC action events - used for immediate state updates like mining beam
   socket.on('npc:action', (data) => {
     const npc = Entities.npcs.get(data.npcId);
