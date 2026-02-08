@@ -1496,6 +1496,7 @@ function deactivateBase(baseId) {
       continue;
     }
     activeNPCs.delete(npcId);
+    npcSpatialHash.remove(npcId);
   }
 
   activeBases.delete(baseId);
@@ -1839,6 +1840,7 @@ function spawnDreadnoughtAtBase(baseId) {
   };
 
   activeNPCs.set(npcId, npc);
+  npcSpatialHash.insert(npcId, npc.position.x, npc.position.y);
   base.spawnedNPCs.push(npcId);
 
   return npc;
@@ -2009,6 +2011,7 @@ function removeNPC(npcId) {
   }
 
   activeNPCs.delete(npcId);
+  npcSpatialHash.remove(npcId);
   return npc;
 }
 
@@ -2084,6 +2087,7 @@ function damageBase(baseId, damage, attackerId = null) {
       logger.info(`[WORM_CLEANUP] Method 1: Found ${progress.attachedDrones.size} drones in assimilationProgress`);
       for (const droneId of progress.attachedDrones) {
         activeNPCs.delete(droneId);
+        npcSpatialHash.remove(droneId);
         destroyedDrones.push(droneId);
       }
       assimilationProgress.delete(baseId);
@@ -2096,6 +2100,7 @@ function damageBase(baseId, damage, attackerId = null) {
       if (npc.attachedToBase === baseId) {
         method2Count++;
         activeNPCs.delete(npcId);
+        npcSpatialHash.remove(npcId);
         if (!destroyedDrones.includes(npcId)) {
           destroyedDrones.push(npcId);
         }
@@ -2113,6 +2118,7 @@ function damageBase(baseId, damage, attackerId = null) {
         if (activeNPCs.has(droneId)) {
           method3Count++;
           activeNPCs.delete(droneId);
+          npcSpatialHash.remove(droneId);
           if (!destroyedDrones.includes(droneId)) {
             destroyedDrones.push(droneId);
           }
@@ -2342,6 +2348,7 @@ function spawnHauler(baseId) {
   };
 
   activeNPCs.set(haulerId, hauler);
+  npcSpatialHash.insert(haulerId, hauler.position.x, hauler.position.y);
   base.spawnedNPCs.push(haulerId);
   base.hasHauler = true;
 
@@ -2362,6 +2369,7 @@ function destroyBase(baseId) {
   // NPCs will be removed in damageBase, but ensure cleanup
   for (const npcId of base.spawnedNPCs) {
     activeNPCs.delete(npcId);
+    npcSpatialHash.remove(npcId);
   }
   base.spawnedNPCs = [];
 }
@@ -2584,6 +2592,7 @@ function spawnNPCsForSector(sectorX, sectorY) {
     };
 
     activeNPCs.set(npcId, npc);
+    npcSpatialHash.insert(npcId, npc.position.x, npc.position.y);
     spawned.push(npc);
   }
 
@@ -2830,6 +2839,7 @@ function damageNPC(npcId, damage, attackerId = null) {
     }
 
     activeNPCs.delete(npcId);
+    npcSpatialHash.remove(npcId);
 
     return {
       destroyed: true,
@@ -3124,6 +3134,7 @@ function spawnQueenMinions(queen, count) {
     };
 
     activeNPCs.set(minionId, minion);
+    npcSpatialHash.insert(minionId, minion.position.x, minion.position.y);
     queen.spawnedMinions.push(minionId);
 
     spawned.push({
@@ -3385,6 +3396,7 @@ function spawnRogueMinerNPC(baseId, npcType) {
   }
 
   activeNPCs.set(npcId, npc);
+  npcSpatialHash.insert(npcId, npc.position.x, npc.position.y);
 
   // Track in base spawned list
   if (!base.spawnedNPCs) base.spawnedNPCs = [];
@@ -3442,6 +3454,7 @@ function spawnVoidNPCFromRift(npcType, riftPosition, options = {}) {
   };
 
   activeNPCs.set(npcId, npc);
+  npcSpatialHash.insert(npcId, npc.position.x, npc.position.y);
 
   // Track in base if provided
   if (options.baseId) {
@@ -3546,6 +3559,9 @@ module.exports = {
   spawnDreadnoughtAtBase,
   // Spatial hash for efficient range queries
   rebuildNPCSpatialHash,
+  updateNPCInHash,
+  insertNPCInHash,
+  removeNPCFromHash,
   // Swarm exclusion zone cleanup
   cleanupExcludedSwarmHives,
   isInSwarmExclusionZone

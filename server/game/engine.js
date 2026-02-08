@@ -875,6 +875,9 @@ function updateNPCs(deltaTime) {
       npcEntity._vy = 0;
     }
 
+    // Incrementally update this NPC's position in the spatial hash (no-op if same cell)
+    npc.updateNPCInHash(npcId, npcEntity);
+
     // Broadcast NPC position update
     // Include name/type/faction so players who just entered range get full data
     const npcUpdateData = {
@@ -1303,9 +1306,11 @@ function updateNPCs(deltaTime) {
 
         // Add to active NPCs
         npc.activeNPCs.set(kingId, barnacleKing);
+        npc.insertNPCInHash(kingId, barnacleKing.position.x, barnacleKing.position.y);
 
         // Remove Hauler from activeNPCs
         npc.activeNPCs.delete(npcId);
+        npc.removeNPCFromHash(npcId);
 
         // Broadcast transformation
         broadcastNearNpc(barnacleKing, 'scavenger:barnacleKingSpawn', {
@@ -1618,6 +1623,7 @@ function updateNPCs(deltaTime) {
               deathEffect: 'void_consume'
             });
             npc.activeNPCs.delete(action.targetNpcId);
+            npc.removeNPCFromHash(action.targetNpcId);
           }
         }
       }
@@ -1725,6 +1731,7 @@ function updateNPCs(deltaTime) {
         // Mark for removal after rift animation
         setTimeout(() => {
           npc.activeNPCs.delete(action.npcId);
+          npc.removeNPCFromHash(action.npcId);
         }, 1000);
         continue;
       }
@@ -1743,6 +1750,7 @@ function updateNPCs(deltaTime) {
       // Mark for removal after rift animation
       setTimeout(() => {
         npc.activeNPCs.delete(action.npcId);
+        npc.removeNPCFromHash(action.npcId);
       }, 1000);
 
       // Schedule respawn after 10-15 seconds with full health
@@ -1805,6 +1813,7 @@ function updateNPCs(deltaTime) {
       logger.warn(`[WORM_DESPAWN] Attached worm ${npcId} being despawned while attached to base ${npcToRemove.attachedToBase}`);
     }
     npc.activeNPCs.delete(npcId);
+    npc.removeNPCFromHash(npcId);
   }
 
   // ============================================
