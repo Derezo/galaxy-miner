@@ -18,6 +18,7 @@ const GraphicsSettings = {
   _advancedMode: false,   // Whether user is using slider vs presets
   _renderScale: 1.0,      // Canvas resolution scale (0.5-1.0), lower = better perf
   _autoQuality: false,    // Whether FrameBudgetMonitor auto-adjusts quality
+  _targetFPS: 60,         // Target frame rate (30/45/60) - FrameBudgetMonitor may auto-reduce
 
   // Preset definitions
   _presets: {
@@ -167,6 +168,41 @@ const GraphicsSettings = {
     this._autoQuality = !!enabled;
     this.save();
     console.log('[GraphicsSettings] Auto-quality set to:', this._autoQuality);
+  },
+
+  // ============================================
+  // Target FPS (Adaptive Frame Rate)
+  // ============================================
+
+  /**
+   * Get current target FPS (30, 45, or 60)
+   * Used by Game.loop() to control render rate and by FrameBudgetMonitor
+   * for adaptive frame rate reduction.
+   * @returns {number} Target FPS
+   */
+  getTargetFPS() {
+    return this._targetFPS;
+  },
+
+  /**
+   * Set target FPS (clamped to valid values: 30, 45, or 60)
+   * @param {number} fps - Desired target FPS
+   */
+  setTargetFPS(fps) {
+    const validFPS = [30, 45, 60];
+    // Clamp to nearest valid value
+    const clamped = validFPS.reduce((prev, curr) =>
+      Math.abs(curr - fps) < Math.abs(prev - fps) ? curr : prev
+    );
+
+    const oldFPS = this._targetFPS;
+    this._targetFPS = clamped;
+
+    if (oldFPS !== this._targetFPS) {
+      this.save();
+      console.log('[GraphicsSettings] Target FPS set to:', this._targetFPS);
+      this._notifyListeners();
+    }
   },
 
   // ============================================
@@ -463,6 +499,7 @@ const GraphicsSettings = {
         advancedMode: this._advancedMode,
         renderScale: this._renderScale,
         autoQuality: this._autoQuality,
+        targetFPS: this._targetFPS,
         version: 2  // Version for migration detection
       }));
     } catch (e) {
@@ -504,6 +541,9 @@ const GraphicsSettings = {
             ? Math.max(0.5, Math.min(1.0, parsed.renderScale))
             : defaultRenderScale;
           this._autoQuality = parsed.autoQuality || false;
+          // Restore target FPS if saved (default 60)
+          const validFPS = [30, 45, 60];
+          this._targetFPS = validFPS.includes(parsed.targetFPS) ? parsed.targetFPS : 60;
         }
       } else {
         // First launch (no saved settings) - default to Medium on mobile devices
@@ -531,9 +571,10 @@ const GraphicsSettings = {
     this._advancedMode = false;
     this._renderScale = 1.0;
     this._autoQuality = false;
+    this._targetFPS = 60;
     this.save();
     this._notifyListeners();
-    console.log('[GraphicsSettings] Reset to defaults (quality: 80, renderScale: 1.0, autoQuality: false)');
+    console.log('[GraphicsSettings] Reset to defaults (quality: 80, renderScale: 1.0, autoQuality: false, targetFPS: 60)');
   },
 
   /**
@@ -546,6 +587,7 @@ const GraphicsSettings = {
     console.log('Advanced Mode:', this._advancedMode);
     console.log('Render Scale:', this._renderScale);
     console.log('Auto-Quality:', this._autoQuality);
+    console.log('Target FPS:', this._targetFPS);
     console.log('LOD:', this.getLOD());
     console.log('Particle Multiplier:', this.getParticleMultiplier().toFixed(2));
     console.log('Pool Size:', this.getPoolSize());

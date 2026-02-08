@@ -8,6 +8,11 @@
  * Quality steps: 100 -> 80 -> 60 -> 40 -> 20 -> 10 -> 0
  * These align with GraphicsSettings presets and QualityScaler thresholds.
  *
+ * FPS reduction is interleaved with quality steps as a degradation strategy:
+ *   100 -> 80 -> 60 -> 40 -> 20 -> (FPS 45) -> 10 -> (FPS 30) -> 0
+ * This preserves visual quality longer by reducing frame rate before
+ * stripping the last visual effects.
+ *
  * Hysteresis prevents thrashing:
  * - 2s sustained below target -> step down
  * - 5s sustained above target -> step up
@@ -27,6 +32,14 @@ const FrameBudgetMonitor = {
 
   // Quality stepping ladder (descending order)
   _qualitySteps: [100, 80, 60, 40, 20, 10, 0],
+
+  // FPS reduction steps: when quality drops to this level and FPS is above the step,
+  // reduce FPS instead of dropping quality further.
+  // Ladder: quality 100->80->60->40->20 -> (FPS 45) -> 10 -> (FPS 30) -> 0
+  _fpsSteps: [
+    { quality: 20, fps: 45 },  // At quality 20, reduce to 45 FPS before dropping to 10
+    { quality: 10, fps: 30 }   // At quality 10, reduce to 30 FPS before dropping to 0
+  ],
 
   // Rolling frame time buffer (circular)
   _frameTimes: null,               // Float64Array for frame times in ms
@@ -55,9 +68,9 @@ const FrameBudgetMonitor = {
     this._lastAdjustmentTime = 0;
     this._pauseUntil = 0;
 
-    // Set target FPS based on device type
-    if (typeof DeviceDetect !== 'undefined' && DeviceDetect.isMobile) {
-      this._targetFPS = this._mobileTargetFPS;
+    // Sync target FPS from GraphicsSettings (user preference or previous auto-adjustment)
+    if (typeof GraphicsSettings !== 'undefined') {
+      this._targetFPS = GraphicsSettings.getTargetFPS();
     }
 
     // Load auto-quality preference from GraphicsSettings
@@ -151,6 +164,24 @@ const FrameBudgetMonitor = {
     if (typeof GraphicsSettings === 'undefined') return;
 
     const currentQuality = GraphicsSettings.getQuality();
+    const currentFPS = GraphicsSettings.getTargetFPS();
+
+    // Check if we should reduce FPS instead of quality
+    // Walk through FPS steps to see if one applies at the current quality
+    for (const step of this._fpsSteps) {
+      if (currentQuality === step.quality && currentFPS > step.fps) {
+        // Reduce FPS instead of dropping quality
+        Logger.log('[FrameBudgetMonitor] Stepping DOWN FPS:', currentFPS, '->', step.fps,
+          '(quality:', currentQuality, ', avgFPS:', this.getAverageFPS().toFixed(1), ')');
+
+        GraphicsSettings.setTargetFPS(step.fps);
+        this._targetFPS = step.fps;
+        this._lastAdjustmentTime = now;
+        this._resetFrameData();
+        return;
+      }
+    }
+
     const nextStep = this._getNextLowerStep(currentQuality);
 
     if (nextStep === null) {
@@ -176,10 +207,46 @@ const FrameBudgetMonitor = {
     if (typeof GraphicsSettings === 'undefined') return;
 
     const currentQuality = GraphicsSettings.getQuality();
+    const currentFPS = GraphicsSettings.getTargetFPS();
+
+    // Check if we should raise FPS before raising quality
+    // Walk through FPS steps in reverse to find if FPS was reduced at this quality level
+    for (let i = this._fpsSteps.length - 1; i >= 0; i--) {
+      const step = this._fpsSteps[i];
+      if (currentQuality === step.quality && currentFPS <= step.fps) {
+        // Find the next higher FPS to restore to
+        // The previous FPS step (or 60 if this is the first step)
+        const prevStepIndex = i - 1;
+        const targetFPS = prevStepIndex >= 0 ? this._fpsSteps[prevStepIndex].fps : 60;
+
+        if (currentFPS < targetFPS) {
+          Logger.log('[FrameBudgetMonitor] Stepping UP FPS:', currentFPS, '->', targetFPS,
+            '(quality:', currentQuality, ', avgFPS:', this.getAverageFPS().toFixed(1), ')');
+
+          GraphicsSettings.setTargetFPS(targetFPS);
+          this._targetFPS = targetFPS;
+          this._lastAdjustmentTime = now;
+          this._resetFrameData();
+          return;
+        }
+      }
+    }
+
     const nextStep = this._getNextHigherStep(currentQuality);
 
     if (nextStep === null) {
-      // Already at maximum quality
+      // Already at maximum quality - but check if FPS can still be raised
+      if (currentFPS < 60) {
+        // Raise FPS back toward 60
+        const targetFPS = currentFPS === 30 ? 45 : 60;
+        Logger.log('[FrameBudgetMonitor] Stepping UP FPS:', currentFPS, '->', targetFPS,
+          '(quality: max, avgFPS:', this.getAverageFPS().toFixed(1), ')');
+
+        GraphicsSettings.setTargetFPS(targetFPS);
+        this._targetFPS = targetFPS;
+        this._lastAdjustmentTime = now;
+        this._resetFrameData();
+      }
       return;
     }
 
@@ -355,6 +422,9 @@ const FrameBudgetMonitor = {
     }
 
     console.log('Quality Steps:', this._qualitySteps.join(' -> '));
+    console.log('FPS Steps:', this._fpsSteps.map(s => `q${s.quality}->fps${s.fps}`).join(', '));
+    console.log('Current FPS Target:', typeof GraphicsSettings !== 'undefined'
+      ? GraphicsSettings.getTargetFPS() : 'N/A');
     console.log('Next step down:', this._getNextLowerStep(currentQuality) || 'at minimum');
     console.log('Next step up:', this._getNextHigherStep(currentQuality) || 'at maximum');
     console.groupEnd();

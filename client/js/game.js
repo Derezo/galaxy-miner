@@ -6,6 +6,7 @@ const Game = {
   deltaTime: 0,
   _tabVisible: true,
   _visibilityHandler: null,
+  _renderAccumulator: 0,
 
   start() {
     if (this.running) return;
@@ -20,6 +21,7 @@ const Game = {
       } else {
         this._tabVisible = true;
         this.lastTime = performance.now(); // Prevent huge deltaTime spike
+        this._renderAccumulator = 0; // Reset accumulator to avoid burst rendering
         Logger.log('Tab visible - resuming render');
 
         // Pause frame budget monitor briefly to let frame times stabilize
@@ -56,10 +58,26 @@ const Game = {
       FrameBudgetMonitor.recordFrameTime(frameTimeMs);
     }
 
+    // Always update (keeps input responsive, interpolation smooth)
     this.update(this.deltaTime);
 
+    // Only render at target frame rate
     if (this._tabVisible) {
-      this.render();
+      this._renderAccumulator += frameTimeMs;
+      const targetInterval = 1000 / (
+        typeof GraphicsSettings !== 'undefined'
+          ? GraphicsSettings.getTargetFPS()
+          : 60
+      );
+
+      if (this._renderAccumulator >= targetInterval) {
+        this.render();
+        this._renderAccumulator -= targetInterval;
+        // Prevent accumulator from growing unbounded after tab switch
+        if (this._renderAccumulator > targetInterval) {
+          this._renderAccumulator = 0;
+        }
+      }
     }
 
     requestAnimationFrame(() => this.loop());
