@@ -89,6 +89,11 @@ const AutoQuality = {
       requestAnimationFrame(benchmark);
     };
 
+    // Show toast so user knows optimization is happening
+    if (typeof Toast !== 'undefined' && Toast.show) {
+      Toast.show('Optimizing for your device...', 'info');
+    }
+
     requestAnimationFrame(benchmark);
   },
 

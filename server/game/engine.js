@@ -2717,6 +2717,8 @@ function getAllNPCs() {
 // Called from socket handlers on auth, movement, and disconnect.
 
 function insertPlayerInHash(socketId, player) {
+  // Clear stale delta-compression state to prevent incorrect updates if socketId is reused
+  playerLastSeen.delete(socketId);
   playerSpatialHash.insert(socketId, player.position.x, player.position.y);
 }
 
