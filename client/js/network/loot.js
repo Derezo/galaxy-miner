@@ -80,10 +80,23 @@ function register(socket) {
   });
 
   socket.on('loot:error', (data) => {
-    // Silently ignore common errors - these should fail silently without notification
-    const silentErrors = ['No wreckage within range', 'Too far from wreckage'];
-    if (silentErrors.includes(data.message)) {
-      // Reset state silently and return - no need to notify user
+    // Handle common collection errors with minimal feedback
+    if (data.message === 'Too far from wreckage') {
+      // Show brief floating text so player knows why collection failed
+      if (typeof Player !== 'undefined') {
+        Player.multiCollecting = false;
+        Player.multiCollectWreckageIds = null;
+        Player.collectProgress = 0;
+        Player.collectTotalTime = 0;
+        if (typeof FloatingTextSystem !== 'undefined' && Player.position) {
+          FloatingTextSystem.add(Player.position.x, Player.position.y, 'Too far', '#ff8800');
+        }
+      }
+      window.Logger.log('[Loot] Error (too far):', data.message);
+      return;
+    }
+    if (data.message === 'No wreckage within range') {
+      // Wreckage already collected - silently reset
       if (typeof Player !== 'undefined') {
         Player.multiCollecting = false;
         Player.multiCollectWreckageIds = null;
@@ -237,12 +250,16 @@ function register(socket) {
   socket.on('relic:plunderSuccess', (data) => {
     Logger.log('[Plunder] Plunder success!', data);
 
-    // Show success notification
-    if (data.credits > 0) {
-      NotificationManager.success(`Plundered ${data.credits} credits!`);
-    }
-    if (data.loot && data.loot.length > 0) {
-      NotificationManager.success(`Plundered ${data.loot.length} items!`);
+    // Show plunder rewards using the same reward display as mining/wreckage
+    if (typeof NotificationManager !== 'undefined') {
+      const reward = {};
+      if (data.credits > 0) reward.credits = data.credits;
+      if (data.loot && data.loot.length > 0) {
+        reward.resources = data.loot
+          .filter(item => item.type === 'resource')
+          .map(item => ({ type: item.resource, name: item.resource.replace(/_/g, ' '), quantity: item.quantity }));
+      }
+      NotificationManager.queueReward(reward);
     }
 
     // Spawn visual effects at base position
@@ -255,22 +272,8 @@ function register(socket) {
       FloatingTextSystem.add(data.position.x, data.position.y, 'PLUNDERED!', '#ffd700');
     }
 
-    // Update player credits
-    if (data.credits > 0) {
-      Player.credits += data.credits;
-      if (typeof UIState !== 'undefined') {
-        UIState.set({ credits: Player.credits });
-      }
-    }
-
-    // Add loot items to inventory
-    if (data.loot && data.loot.length > 0) {
-      data.loot.forEach(item => {
-        if (item.type === 'resource') {
-          Player.addResource(item.resource, item.quantity);
-        }
-      });
-    }
+    // Credits and inventory are updated by the server's 'inventory:update' event
+    // which fires immediately after plunderSuccess (see server/socket/relic.js)
   });
 
   socket.on('relic:plunderFailed', (data) => {

@@ -81,7 +81,7 @@
 
 /* Typography */
 body {
-  background: var(--color-bg-base);
+  background: #000008;
   color: var(--color-text);
   font-family: 'Courier New', monospace;
   overflow: hidden;
@@ -147,8 +147,8 @@ a:hover {
 #gameCanvas {
   position: fixed;
   top: 0;
-  left: 0;
-  width: 100%;
+  left: 50%;
+  transform: translateX(-50%);
   height: 100%;
 }
 

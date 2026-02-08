@@ -170,31 +170,49 @@ const MobileHUD = {
     if (typeof Player === 'undefined') return;
 
     // Priority order matches desktop M key behavior
+    // Mining/wreckage take precedence over plunder so players can interact near bases
     // 1. Wormhole (if gem equipped and near wormhole)
     if (Player._nearestWormhole && Player.hasRelic('WORMHOLE_GEM') && !Player.inWormholeTransit) {
       Player.tryEnterWormhole();
       return;
     }
 
-    // 2. Base plunder (if skull & bones equipped and near base)
-    if (Player._nearestBase && Player.hasRelic('SKULL_AND_BONES')) {
-      Player.tryPlunderBase();
-      return;
-    }
-
-    // 3. Mining (if near mineable and not already mining)
+    // 2. Mining (if near mineable and not already mining)
     if (Player._nearestMineable && !Player.miningTarget) {
       Player.tryMine();
       return;
     }
 
-    // 4. Multi-collect wreckage (if has Scrap Siphon)
-    if (Player.hasRelic('SCRAP_SIPHON')) {
+    // 3. Multi-collect wreckage (if has Scrap Siphon and wreckage in range)
+    if (Player.hasRelic('SCRAP_SIPHON') && typeof Entities !== 'undefined' &&
+        Entities.hasNonDerelictWreckageInRange(Player.position, CONSTANTS.RELIC_TYPES?.SCRAP_SIPHON?.effects?.multiWreckageRange || 300)) {
       Player.tryMultiCollectWreckage();
       return;
     }
 
-    // 5. Single collect wreckage
+    // 4. Single collect wreckage (if wreckage in range)
+    if (typeof Entities !== 'undefined' && Entities.getClosestWreckage(Player.position, CONSTANTS.MINING_RANGE || 100)) {
+      Player.tryCollectWreckage();
+      return;
+    }
+
+    // 5. Derelict salvage
+    if (Player._nearestDerelict) {
+      Player.trySalvageDerelict();
+      return;
+    }
+
+    // 6. Base plunder (if skull & bones equipped and near base)
+    if (Player._nearestBase && Player.hasRelic('SKULL_AND_BONES')) {
+      Player.tryPlunderBase();
+      return;
+    }
+
+    // 7. Fallback: try wreckage/siphon even if nothing detected in range
+    if (Player.hasRelic('SCRAP_SIPHON')) {
+      Player.tryMultiCollectWreckage();
+      return;
+    }
     Player.tryCollectWreckage();
   },
 

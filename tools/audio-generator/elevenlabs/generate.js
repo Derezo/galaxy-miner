@@ -203,6 +203,13 @@ const SOUNDS = {
         prompt:
           "Catastrophic hull impact, devastating metal explosion with cascading system failures, near destruction",
       },
+      {
+        id: "base_hit",
+        filename: "base_hit.mp3",
+        duration: 0.6,
+        prompt:
+          "Heavy metallic impact on large space station hull with deep resonant clang and structural vibration then massive armored surface being struck with reverberating bass thud",
+      },
     ],
   },
 
@@ -408,6 +415,20 @@ const SOUNDS = {
         prompt:
           "Epic alien spider boss death sequence, catastrophic multi-phase organic explosion, collapsing creature with massive debris scatter, triumphant victory",
       },
+      {
+        id: "void_leviathan_death",
+        filename: "void_leviathan_death.mp3",
+        duration: 5.0,
+        prompt:
+          "Massive void entity dying with dimensional implosion and dark energy collapsing inward with reality tearing apart then deep bass shockwave followed by ethereal silence and cosmic horror creature death with otherworldly wailing fading into void",
+      },
+      {
+        id: "foreman_spawn",
+        filename: "foreman_spawn.mp3",
+        duration: 2.0,
+        prompt:
+          "Heavy industrial mining boss emerging with massive machinery powering up and grinding metal then deep diesel engine roar with hydraulic pressure release and menacing mechanical awakening",
+      },
     ],
   },
 
@@ -441,6 +462,13 @@ const SOUNDS = {
         duration: 0.6,
         prompt:
           "Ultra-rare loot pickup, epic triumphant fanfare with cosmic resonance, legendary discovery",
+      },
+      {
+        id: "salvage",
+        filename: "salvage.mp3",
+        duration: 0.6,
+        prompt:
+          "Derelict ship salvage collection sound with metal scraping and mechanical parts being gathered then tractor beam pulling debris with satisfying acquisition chime",
       },
     ],
   },
@@ -476,6 +504,13 @@ const SOUNDS = {
         duration: 0.5,
         prompt:
           "Asteroid cracking and breaking apart, rock fracturing sound with debris scatter",
+      },
+      {
+        id: "void_warp_transit",
+        filename: "void_warp_transit.mp3",
+        duration: 2.0,
+        prompt:
+          "Deep warping subspace warp drive sound, distorted spacetime tearing, low rumbling bass with ethereal high-frequency shimmer, sci-fi faster-than-light jump, darker and more intense than a normal wormhole transit",
       },
     ],
   },
@@ -853,6 +888,13 @@ const SOUNDS = {
         duration: 0.7,
         prompt:
           "Spacetime distortion artifact sound, dimensional warping resonance with cosmic power surge, reality-bending discovery",
+      },
+      {
+        id: "reward_relic_subspace",
+        filename: "relic_subspace.mp3",
+        duration: 0.7,
+        prompt:
+          "Subspace warp drive artifact discovery with dimensional warping resonance and faster-than-light energy surge then deep space-bending vibration with ascending ethereal tones",
       },
     ],
   },

@@ -85,11 +85,11 @@ const WorldLayer = {
       let renderBase = base;
       if (typeof Entities !== 'undefined') {
         const serverBase = Entities.bases.get(base.id);
-        if (serverBase && serverBase.position) {
+        if (serverBase) {
+          // Use procedural position (base.x/y from getVisibleObjects, computed every frame).
+          // Only merge non-positional server state (health, faction, etc.)
           renderBase = {
             ...base,
-            x: serverBase.position.x,
-            y: serverBase.position.y,
             health: serverBase.health,
             maxHealth: serverBase.maxHealth,
             type: serverBase.type || base.type,

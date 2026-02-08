@@ -168,6 +168,16 @@ const SoundConfig = {
   },
 
   // ============================================
+  // IMPACTS - Base Hit
+  // ============================================
+  base_hit: {
+    file: "impacts/base_hit.mp3",
+    baseVolume: 0.85,
+    priority: 75,
+    category: "sfx",
+  },
+
+  // ============================================
   // DESTRUCTION - Player Death
   // ============================================
   death_player: {
@@ -512,6 +522,12 @@ const SoundConfig = {
     file: "ui/relic_acquired.mp3",
     baseVolume: 0.8,
     priority: 100,
+    category: "sfx",
+  },
+  salvage: {
+    file: "loot/salvage.mp3",
+    baseVolume: 0.6,
+    priority: 50,
     category: "sfx",
   },
 

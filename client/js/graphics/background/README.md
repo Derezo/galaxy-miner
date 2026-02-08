@@ -124,8 +124,25 @@ World.getVisibleObjects()
 
 ---
 
+### SimplexNoise.js
+**Role**: Seedable 2D/3D simplex noise with FBM helper for procedural texture generation.
+
+**API**:
+- `SimplexNoise.create(seed)` - Returns `{noise2D(x,y), noise3D(x,y,z)}`
+- `SimplexNoise.fbm(noiseFn, x, y, octaves, lacunarity, gain)` - Fractional Brownian motion
+
+---
+
 ### NebulaRenderer.js
-**Role**: Renders soft cloud formations that respond to activity level.
+**Role**: Renders noise-textured cloud formations across multiple parallax layers, drawn directly to the main canvas each frame for correct per-layer parallax scrolling.
+
+**Quality Scaling** (via `GraphicsSettings.getNebulaConfig()`):
+| LOD | Layers | Textures | Size | Blend | Flow | Look |
+|-----|--------|----------|------|-------|------|------|
+| 0-1 | off | 0 | — | — | no | No nebula |
+| 2 | 1 | 3 | 128px | source-over | no | Soft organic clouds |
+| 3 | 2 | 5 | 256px | screen | no | Deep + mid layers, luminous |
+| 4 | 3 | 6 | 512px | screen | yes | Three depth layers, flowing |
 
 **Activity-Based Opacity**:
 | Activity Range | Opacity | Visual Feel |
@@ -135,17 +152,24 @@ World.getVisibleObjects()
 | 0.5 - 0.8 | 12-20% | Visible formations |
 | 0.8 - 1.0 | 20-30% | Rich backdrop |
 
+**Texture Generation**:
+- Simplex noise FBM with radial falloff mask → organic, irregular cloud shapes
+- Palette-colored RGBA via `getImageData`/`putImageData`
+- Spread across frames if >100ms estimated (1-2 textures/frame)
+- Regenerated on palette change (invisible during 45-90s blend)
+
 **Cloud Properties**:
-- 12 clouds per 3000-unit tile
+- 4-5 clouds per layer per 3000-unit tile
 - Size range: 200-500 units
-- Stretch: 0.6-1.4x (horizontal and vertical)
+- Scale: 0.6-1.4x (horizontal and vertical)
 - Hue offset: -15 to +15 degrees from palette
 
 **Animation**:
-- Parallax: 0.01x (almost stationary)
+- Parallax: varies per layer (0.005x deep, 0.015x mid, 0.025x near)
 - Drift speed: 0.0001 (extremely slow)
 - Pulse period: 60-120 seconds
 - Rotation: 0.001 rad/s
+- LOD 4: animated UV flow within oversized textures
 
 ## Integration
 
@@ -175,6 +199,7 @@ Scripts must be loaded in this order (see `client/index.html`):
 <script src="js/graphics/background/ZoneSampler.js"></script>
 <script src="js/graphics/background/PaletteManager.js"></script>
 <script src="js/graphics/background/StarfieldRenderer.js"></script>
+<script src="js/graphics/background/SimplexNoise.js"></script>
 <script src="js/graphics/background/NebulaRenderer.js"></script>
 <script src="js/graphics/background/BackgroundSystem.js"></script>
 ```
@@ -191,14 +216,17 @@ Scripts must be loaded in this order (see `client/index.html`):
 
 ### Memory Usage
 - Stars: ~270 objects (pre-allocated)
-- Clouds: 12 objects (pre-allocated)
+- Clouds: 4-12 objects per layer (pre-allocated)
+- Nebula textures: ~200KB (LOD 2), ~1.3MB (LOD 3), ~6MB (LOD 4)
 - No per-frame allocations (optimized)
 
 ### Optimization Notes
 1. **ZoneSampler** uses 500ms throttling to avoid expensive object iteration
 2. **Both renderers** use tile-based culling to skip off-screen elements
-3. **No gradients** are created per frame (simple circle rendering)
-4. **Seeded random** ensures consistent star positions without regeneration
+3. **Star cache** avoids re-rendering stars every frame (1.5x viewport offscreen canvas)
+4. **Nebula textures** are pre-rendered offscreen canvases — per-frame cost is cheap `drawImage` calls
+5. **Seeded random** ensures consistent star/cloud positions without regeneration
+6. **Texture regeneration** spreads across frames (1-2 per frame) to avoid hitching
 
 ## Tuning Guide
 
@@ -266,7 +294,5 @@ config: {
 ## Future Enhancements
 
 Potential improvements marked for future work:
-1. **Perlin noise nebula** - More organic cloud textures
-2. **Offscreen canvas caching** - Render nebula to cache, update only on changes
-3. **Star brightness by distance** - Stars fade near celestial bodies
-4. **Comet/shooting star events** - Rare animated effects
+1. **Star brightness by distance** - Stars fade near celestial bodies
+2. **Comet/shooting star events** - Rare animated effects

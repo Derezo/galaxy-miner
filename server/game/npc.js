@@ -414,6 +414,7 @@ let lastQueenSpawnTime = 0;
 // Void Leviathan tracking
 let activeLeviathan = null;
 let lastLeviathanSpawnTime = 0;
+let leviathanSpawnPending = false;
 let lastQueenAuraBroadcast = 0;
 
 /**
@@ -497,16 +498,20 @@ function findAssimilationTarget(drone, searchRange = CONSTANTS.SWARM_ASSIMILATIO
     // Skip swarm bases and already assimilated bases
     if (base.faction === 'swarm' || assimilatedBases.has(baseId)) continue;
 
-    // Skip bases in swarm exclusion zone (within 10 sectors of origin)
-    if (isInSwarmExclusionZone(base.x, base.y)) continue;
+    const currentPos = world.getObjectPosition(baseId);
+    const bx = currentPos ? currentPos.x : base.x;
+    const by = currentPos ? currentPos.y : base.y;
 
-    const dx = base.x - droneX;
-    const dy = base.y - droneY;
+    // Skip bases in swarm exclusion zone (within 10 sectors of origin)
+    if (isInSwarmExclusionZone(bx, by)) continue;
+
+    const dx = bx - droneX;
+    const dy = by - droneY;
     const dist = Math.sqrt(dx * dx + dy * dy);
 
     if (dist < searchRange && dist < nearestDist) {
       nearestDist = dist;
-      nearestBase = { ...base, id: baseId, distance: dist };
+      nearestBase = { ...base, id: baseId, x: bx, y: by, distance: dist };
     }
   }
 
@@ -527,6 +532,10 @@ function attachDroneToBase(droneId, baseId) {
   if (!drone || !base) {
     return { success: false, reason: 'invalid_target' };
   }
+
+  const currentPos = world.getObjectPosition(baseId);
+  const bx = currentPos ? currentPos.x : base.x;
+  const by = currentPos ? currentPos.y : base.y;
 
   // Check if drone is already attached somewhere
   if (drone.attachedToBase) {
@@ -550,8 +559,8 @@ function attachDroneToBase(droneId, baseId) {
   const angle = progress.attachedDrones.size * (Math.PI * 2 / 3); // Spread around base
   const attachRadius = 30; // Distance from base center
   drone.position = {
-    x: base.x + Math.cos(angle) * attachRadius,
-    y: base.y + Math.sin(angle) * attachRadius
+    x: bx + Math.cos(angle) * attachRadius,
+    y: by + Math.sin(angle) * attachRadius
   };
   drone.x = drone.position.x;
   drone.y = drone.position.y;
@@ -645,7 +654,10 @@ function isAttachedDrone(npcId) {
  * @returns {Object} Conversion result with converted NPCs
  */
 function convertBaseToSwarm(baseId, base) {
-  const sectorKey = getSectorKey(base.x, base.y);
+  const currentPos = world.getObjectPosition(baseId);
+  const bx = currentPos ? currentPos.x : base.x;
+  const by = currentPos ? currentPos.y : base.y;
+  const sectorKey = getSectorKey(bx, by);
 
   // Store original info
   assimilatedBases.set(baseId, {
@@ -708,7 +720,7 @@ function convertBaseToSwarm(baseId, base) {
   }
 
   // Check if queen should spawn (range-based: 3+ bases within 10,000 units)
-  const queenCheck = checkQueenSpawnConditions({ x: base.x, y: base.y });
+  const queenCheck = checkQueenSpawnConditions({ x: bx, y: by });
 
   logger.info(`Base ${baseId} assimilated to swarm. Total assimilated bases: ${assimilatedBases.size}. Queen spawn: ${queenCheck?.shouldSpawn || false}`);
 
@@ -716,7 +728,7 @@ function convertBaseToSwarm(baseId, base) {
   // This ensures the queen spawns atomically with the base conversion
   let spawnedQueen = null;
   if (queenCheck?.shouldSpawn) {
-    const spawnPos = queenCheck.spawnPosition || { x: base.x, y: base.y };
+    const spawnPos = queenCheck.spawnPosition || { x: bx, y: by };
     logger.info(`[NPC] Spawning queen directly from convertBaseToSwarm at (${Math.round(spawnPos.x)}, ${Math.round(spawnPos.y)})`);
     spawnedQueen = spawnSwarmQueen(spawnPos);
     if (spawnedQueen) {
@@ -795,17 +807,23 @@ function checkQueenSpawnConditions(newBasePosition) {
 
   // Find primary swarm hive (original swarm_hive type base)
   let primaryHive = null;
+  let primaryHiveId = null;
   for (const [baseId, base] of activeBases) {
     if (base.type === 'swarm_hive' && !base.destroyed) {
       primaryHive = base;
+      primaryHiveId = baseId;
       break;
     }
   }
 
   // If no primary hive, use the new base position
-  const referencePoint = primaryHive
-    ? { x: primaryHive.x, y: primaryHive.y }
-    : newBasePosition;
+  let referencePoint;
+  if (primaryHive) {
+    const hivePos = world.getObjectPosition(primaryHiveId);
+    referencePoint = hivePos || { x: primaryHive.x, y: primaryHive.y };
+  } else {
+    referencePoint = newBasePosition;
+  }
 
   // Count assimilated bases within 10,000 units of reference point
   const QUEEN_TRIGGER_RANGE = 10000;
@@ -815,8 +833,9 @@ function checkQueenSpawnConditions(newBasePosition) {
     const base = activeBases.get(baseId);
     if (!base) continue;
 
-    const dx = base.x - referencePoint.x;
-    const dy = base.y - referencePoint.y;
+    const basePos = world.getObjectPosition(baseId);
+    const dx = (basePos ? basePos.x : base.x) - referencePoint.x;
+    const dy = (basePos ? basePos.y : base.y) - referencePoint.y;
     const dist = Math.sqrt(dx * dx + dy * dy);
 
     if (dist <= QUEEN_TRIGGER_RANGE) {
@@ -928,8 +947,9 @@ function checkLeviathanSpawn(deadNPC, position) {
   const config = CONSTANTS.VOID_LEVIATHAN_SPAWN;
   if (!config) return null;
 
-  // Check if already active
+  // Check if already active or spawn pending
   if (activeLeviathan) return null;
+  if (leviathanSpawnPending) return null;
 
   // Check cooldown
   if (Date.now() - lastLeviathanSpawnTime < config.SPAWN_COOLDOWN) return null;
@@ -937,6 +957,7 @@ function checkLeviathanSpawn(deadNPC, position) {
   // Roll for spawn chance (5%)
   if (Math.random() > config.SPAWN_CHANCE) return null;
 
+  leviathanSpawnPending = true;
   logger.info(`[VOID] Leviathan spawn triggered by death of ${deadNPC.type} at (${Math.round(position.x)}, ${Math.round(position.y)})`);
 
   return {
@@ -1001,6 +1022,7 @@ function spawnVoidLeviathan(position) {
   activeNPCs.set(leviathanId, leviathan);
   npcSpatialHash.insert(leviathanId, leviathan.position.x, leviathan.position.y);
   activeLeviathan = leviathan;
+  leviathanSpawnPending = false;
   lastLeviathanSpawnTime = Date.now();
 
   logger.info(`[VOID] Leviathan spawning at (${Math.round(position.x)}, ${Math.round(position.y)})`);
@@ -1026,6 +1048,13 @@ function handleLeviathanDeath(leviathanId) {
  */
 function getActiveLeviathan() {
   return activeLeviathan;
+}
+
+/**
+ * Clear the leviathan spawn pending flag (used when spawn is aborted)
+ */
+function clearLeviathanPending() {
+  leviathanSpawnPending = false;
 }
 
 /**
@@ -1989,6 +2018,17 @@ function getActiveBase(baseId) {
   return activeBases.get(baseId);
 }
 
+// Get active base by ID with computed orbital position
+function getActiveBaseWithPosition(baseId) {
+  const base = activeBases.get(baseId);
+  if (!base) return null;
+  const currentPos = world.getObjectPosition(baseId);
+  if (currentPos) {
+    return { ...base, x: currentPos.x, y: currentPos.y };
+  }
+  return base;
+}
+
 // Get all active bases (returns the Map)
 function getActiveBases() {
   return activeBases;
@@ -2619,9 +2659,17 @@ function updateNPC(npc, players, deltaTime) {
     }
   }
 
+  // Refresh homeBasePosition with current orbital position
+  if (npc.homeBaseId) {
+    const currentPos = world.getObjectPosition(npc.homeBaseId);
+    if (currentPos) {
+      npc.homeBasePosition = currentPos;
+    }
+  }
+
   // Use the new AI system for faction-specific behavior
-  // Pass getActiveBase for scavengers, getBasesInRange for pirates
-  return ai.updateNPCAI(npc, players, activeNPCs, deltaTime, getActiveBase, getBasesInRange, npcSpatialHash);
+  // Pass getActiveBaseWithPosition for scavengers, getBasesInRange for pirates
+  return ai.updateNPCAI(npc, players, activeNPCs, deltaTime, getActiveBaseWithPosition, getBasesInRange, npcSpatialHash);
 }
 
 /**
@@ -2818,14 +2866,8 @@ function damageNPC(npcId, damage, attackerId = null) {
       }
     }
 
-    // Void NPC death - chance to spawn Void Leviathan
-    if (npc.faction === 'void' && npc.type !== 'void_leviathan') {
-      const leviathanSpawn = checkLeviathanSpawn(npc, { x: npc.position.x, y: npc.position.y });
-      if (leviathanSpawn) {
-        // Return spawn trigger for engine to handle
-        leviathanSpawn.triggerLeviathanSpawn = true;
-      }
-    }
+    // Note: Void Leviathan spawn check is handled by engine.js after damageNPC returns,
+    // to avoid setting leviathanSpawnPending before the engine can act on it.
 
     // Clean up Leviathan AI state when Leviathan dies
     if (npc.type === 'void_leviathan') {
@@ -3485,6 +3527,7 @@ module.exports = {
   spawnNPCFromBase,
   updateBaseSpawning,
   getActiveBase,
+  getActiveBaseWithPosition,
   getActiveBases,
   isInBaseTerritory,
   activeBases,
@@ -3537,6 +3580,7 @@ module.exports = {
   spawnVoidLeviathan,
   handleLeviathanDeath,
   getActiveLeviathan,
+  clearLeviathanPending,
   // Void rift respawning
   spawnVoidNPCFromRift,
   clearAssimilationProgress,

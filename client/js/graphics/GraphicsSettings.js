@@ -44,7 +44,7 @@ const GraphicsSettings = {
    */
   init() {
     this.load();
-    console.log('[GraphicsSettings] Initialized - quality:', this._quality,
+    Logger.log('[GraphicsSettings] Initialized - quality:', this._quality,
       'preset:', this.getPreset(), 'advancedMode:', this._advancedMode);
   },
 
@@ -71,7 +71,7 @@ const GraphicsSettings = {
 
     if (oldQuality !== this._quality) {
       this.save();
-      console.log('[GraphicsSettings] Quality set to:', this._quality);
+      Logger.log('[GraphicsSettings] Quality set to:', this._quality);
 
       if (notify) {
         this._notifyListeners();
@@ -113,7 +113,7 @@ const GraphicsSettings = {
     if (preset) {
       this.setQuality(preset.value);
     } else {
-      console.warn('[GraphicsSettings] Unknown preset:', presetName);
+      Logger.warn('[GraphicsSettings] Unknown preset:', presetName);
     }
   },
 
@@ -167,7 +167,7 @@ const GraphicsSettings = {
   setAutoQuality(enabled) {
     this._autoQuality = !!enabled;
     this.save();
-    console.log('[GraphicsSettings] Auto-quality set to:', this._autoQuality);
+    Logger.log('[GraphicsSettings] Auto-quality set to:', this._autoQuality);
   },
 
   // ============================================
@@ -200,7 +200,7 @@ const GraphicsSettings = {
 
     if (oldFPS !== this._targetFPS) {
       this.save();
-      console.log('[GraphicsSettings] Target FPS set to:', this._targetFPS);
+      Logger.log('[GraphicsSettings] Target FPS set to:', this._targetFPS);
       this._notifyListeners();
     }
   },
@@ -239,7 +239,7 @@ const GraphicsSettings = {
       try {
         callback(this._quality);
       } catch (e) {
-        console.error('[GraphicsSettings] Listener error:', e);
+        Logger.error('[GraphicsSettings] Listener error:', e);
       }
     }
   },
@@ -338,8 +338,13 @@ const GraphicsSettings = {
     if (typeof QualityScaler !== 'undefined') {
       return QualityScaler.getNebulaConfig(this._quality);
     }
-    // Fallback
-    return { enabled: true, cloudCount: 12, opacityMultiplier: 1.0 };
+    // Fallback (high quality)
+    return {
+      enabled: true, layers: 2, parallaxes: [0.005, 0.015],
+      cloudsPerLayer: [5, 4], textureSize: 256,
+      noiseOctaves: 5, opacityMultiplier: 1.0,
+      blendMode: 'screen', animatedFlow: false
+    };
   },
 
   /**
@@ -393,7 +398,7 @@ const GraphicsSettings = {
 
     if (oldScale !== this._renderScale) {
       this.save();
-      console.log('[GraphicsSettings] Render scale set to:', this._renderScale);
+      Logger.log('[GraphicsSettings] Render scale set to:', this._renderScale);
       this._notifyListeners();
     }
   },
@@ -423,7 +428,7 @@ const GraphicsSettings = {
     if (quality !== undefined) {
       this.setQuality(quality);
     } else {
-      console.warn('[GraphicsSettings] Invalid legacy level:', level);
+      Logger.warn('[GraphicsSettings] Invalid legacy level:', level);
     }
   },
 
@@ -462,7 +467,7 @@ const GraphicsSettings = {
         return this.getDeathEffectConfig().particleMultiplier;
 
       default:
-        console.warn('[GraphicsSettings] Unknown key:', key);
+        Logger.warn('[GraphicsSettings] Unknown key:', key);
         return undefined;
     }
   },
@@ -503,7 +508,7 @@ const GraphicsSettings = {
         version: 2  // Version for migration detection
       }));
     } catch (e) {
-      console.error('[GraphicsSettings] Failed to save:', e);
+      Logger.error('[GraphicsSettings] Failed to save:', e);
     }
   },
 
@@ -529,7 +534,7 @@ const GraphicsSettings = {
           this._quality = quality !== undefined ? quality : 80;
           this._advancedMode = false;
           this._renderScale = defaultRenderScale;
-          console.log('[GraphicsSettings] Migrated from legacy format, level:', parsed.level, '-> quality:', this._quality);
+          Logger.log('[GraphicsSettings] Migrated from legacy format, level:', parsed.level, '-> quality:', this._quality);
           this.save(); // Save in new format
         } else {
           // v2 format
@@ -552,7 +557,7 @@ const GraphicsSettings = {
           // Set Medium as initial default before benchmark completes
           this._quality = 40;
           this._renderScale = 0.75;
-          console.log('[GraphicsSettings] Mobile device detected on first launch, defaulting to Medium (quality: 40), renderScale: 0.75');
+          Logger.log('[GraphicsSettings] Mobile device detected on first launch, defaulting to Medium (quality: 40), renderScale: 0.75');
 
           // Run auto-quality benchmark to replace the fixed default with a measured value
           if (typeof AutoQuality !== 'undefined') {
@@ -560,7 +565,7 @@ const GraphicsSettings = {
               if (quality !== null) {
                 GraphicsSettings.setQuality(quality);
                 GraphicsSettings.save();
-                console.log('[GraphicsSettings] Auto-quality benchmark set quality to:', quality);
+                Logger.log('[GraphicsSettings] Auto-quality benchmark set quality to:', quality);
 
                 // Show toast notification if Toast system is available
                 if (typeof Toast !== 'undefined' && Toast.show) {
@@ -573,7 +578,7 @@ const GraphicsSettings = {
         }
       }
     } catch (e) {
-      console.error('[GraphicsSettings] Failed to load:', e);
+      Logger.error('[GraphicsSettings] Failed to load:', e);
       this._quality = 80;
       this._advancedMode = false;
       this._renderScale = 1.0;
@@ -592,27 +597,26 @@ const GraphicsSettings = {
     this._targetFPS = 60;
     this.save();
     this._notifyListeners();
-    console.log('[GraphicsSettings] Reset to defaults (quality: 80, renderScale: 1.0, autoQuality: false, targetFPS: 60)');
+    Logger.log('[GraphicsSettings] Reset to defaults (quality: 80, renderScale: 1.0, autoQuality: false, targetFPS: 60)');
   },
 
   /**
    * Debug: Log current state
    */
   debug() {
-    console.group('[GraphicsSettings] Current State');
-    console.log('Quality:', this._quality);
-    console.log('Preset:', this.getPresetLabel());
-    console.log('Advanced Mode:', this._advancedMode);
-    console.log('Render Scale:', this._renderScale);
-    console.log('Auto-Quality:', this._autoQuality);
-    console.log('Target FPS:', this._targetFPS);
-    console.log('LOD:', this.getLOD());
-    console.log('Particle Multiplier:', this.getParticleMultiplier().toFixed(2));
-    console.log('Pool Size:', this.getPoolSize());
-    console.log('Starfield:', this.getStarfieldConfig());
-    console.log('Nebula:', this.getNebulaConfig());
-    console.log('Listeners:', this._listeners.length);
-    console.groupEnd();
+    Logger.log(
+      '[GraphicsSettings] Current State:',
+      'quality=' + this._quality,
+      'preset=' + this.getPresetLabel(),
+      'advancedMode=' + this._advancedMode,
+      'renderScale=' + this._renderScale,
+      'autoQuality=' + this._autoQuality,
+      'targetFPS=' + this._targetFPS,
+      'LOD=' + this.getLOD(),
+      'particleMultiplier=' + this.getParticleMultiplier().toFixed(2),
+      'poolSize=' + this.getPoolSize(),
+      'listeners=' + this._listeners.length
+    );
   }
 };
 

@@ -12,6 +12,7 @@ const Renderer = {
   _renderScale: 1.0, // Canvas resolution scale (0.5-1.0), lower = better perf on mobile
   width: 0, // Logical width (CSS pixels)
   height: 0, // Logical height (CSS pixels)
+  MAX_GAME_WIDTH: 800, // Cap desktop viewport width for cinematic framing
 
   // Screen shake system
   screenShake: {
@@ -145,6 +146,11 @@ const Renderer = {
     const cssWidth = window.innerWidth;
     const cssHeight = window.innerHeight;
 
+    // Cap game viewport width on desktop for focused, cinematic view
+    const isMobile = typeof DeviceDetect !== 'undefined' && DeviceDetect.isMobile;
+    const gameWidth = isMobile ? cssWidth : Math.min(cssWidth, this.MAX_GAME_WIDTH);
+    const gameHeight = cssHeight;
+
     // Refresh render scale from GraphicsSettings if available
     if (typeof GraphicsSettings !== 'undefined') {
       this._renderScale = GraphicsSettings.getRenderScale();
@@ -153,12 +159,12 @@ const Renderer = {
     // Set canvas buffer size (scaled by DPR and renderScale)
     // renderScale < 1 produces a smaller buffer that the browser upscales
     const bufferScale = this.dpr * this._renderScale;
-    this.canvas.width = cssWidth * bufferScale;
-    this.canvas.height = cssHeight * bufferScale;
+    this.canvas.width = gameWidth * bufferScale;
+    this.canvas.height = gameHeight * bufferScale;
 
-    // CSS display size stays at full resolution (browser handles upscale)
-    this.canvas.style.width = cssWidth + 'px';
-    this.canvas.style.height = cssHeight + 'px';
+    // CSS display size (centered via CSS transform)
+    this.canvas.style.width = gameWidth + 'px';
+    this.canvas.style.height = gameHeight + 'px';
 
     // Scale context to match combined DPR + renderScale
     this.ctx.setTransform(bufferScale, 0, 0, bufferScale, 0, 0);
@@ -173,11 +179,11 @@ const Renderer = {
     }
 
     // Store logical dimensions for game code (always CSS pixels)
-    this.width = cssWidth;
-    this.height = cssHeight;
+    this.width = gameWidth;
+    this.height = gameHeight;
 
     // Track portrait mode for responsive game systems
-    this.portraitMode = cssWidth < cssHeight;
+    this.portraitMode = gameWidth < gameHeight;
 
     // Sync to RenderContext
     if (typeof RenderContext !== 'undefined') {
@@ -2686,14 +2692,15 @@ const Renderer = {
    * @param {number} worldY - World Y coordinate
    * @param {string} typePrefix - Type prefix (AST, PLN, NPC, BASE, SELF)
    * @param {string} [color] - Text color override
+   * @param {string} [shortLabel] - Optional short label to use instead of truncated ID
    */
-  drawHitboxLabel(ctx, screenX, screenY, size, id, worldX, worldY, typePrefix, color) {
+  drawHitboxLabel(ctx, screenX, screenY, size, id, worldX, worldY, typePrefix, color, shortLabel) {
     ctx.save();
     ctx.font = '9px monospace';
     ctx.fillStyle = color || 'rgba(255, 255, 255, 0.9)';
 
     // Truncate ID to last 4 characters
-    const shortId = String(id || '????').slice(-4);
+    const shortId = shortLabel || String(id || '????').slice(-4);
 
     // Top-left: Type + ID
     ctx.textAlign = 'left';
@@ -2748,7 +2755,8 @@ const Renderer = {
       const screen = this.worldToScreen(base.x, base.y);
       const size = base.size || 30;
       ctx.strokeRect(screen.x - size, screen.y - size, size * 2, size * 2);
-      this.drawHitboxLabel(ctx, screen.x, screen.y, size, base.id, base.x, base.y, 'BASE', 'rgba(255, 165, 0, 0.9)');
+      const baseShortName = base.type ? base.type.split('_').pop() : null;
+      this.drawHitboxLabel(ctx, screen.x, screen.y, size, base.id, base.x, base.y, 'BASE', 'rgba(255, 165, 0, 0.9)', baseShortName);
     }
 
     // NPCs - faction colored circles

@@ -17,6 +17,7 @@ const Entities = {
   bases: new Map(),      // Track active bases for radar display
   projectileTrails: [],  // Track recent weapon fire for radar (Tier 4+)
   _lastStaleCheck: 0,    // Timestamp of last staleness check
+  _baseBroadcastTick: 0, // Incremented on each bases:nearby broadcast
 
   // Scrap Siphon animation state
   siphonAnimations: new Map(), // wreckageId -> { startTime, duration, startPos, targetPos }
@@ -57,55 +58,83 @@ const Entities = {
     }
     this.projectiles.length = writeIdx;
 
-    // Update wreckage (rotation animation)
+    // Update wreckage (rotation animation + safety-net pruning)
     this.updateWreckageRotation(dt);
+    this._pruneExpiredWreckage();
 
     // Periodically check for stale entities (desync detection)
     this._checkStaleEntities();
   },
 
   // Check for entities that haven't received updates in too long
+  // Prunes stale NPCs that are outside broadcast range and haven't been updated
   _checkStaleEntities() {
     const now = Date.now();
     if (now - this._lastStaleCheck < STALE_CHECK_INTERVAL) return;
     this._lastStaleCheck = now;
 
     const ds = getDebugSync();
-    if (!ds || !ds.isEnabled()) return;
+    const debugEnabled = ds && ds.isEnabled();
 
-    // Check NPCs for staleness
+    // Compute broadcast range (2x radar range) for stale NPC pruning
+    const playerPos = (typeof Player !== 'undefined' && Player.position) ? Player.position : null;
+    const broadcastRange = (typeof Player !== 'undefined' && Player.getRadarRange)
+      ? Player.getRadarRange() * 2
+      : 1000; // fallback
+
+    // Check NPCs for staleness - prune if stale AND outside broadcast range
+    const PRUNE_THRESHOLD = 5000; // 5 seconds with no update
     for (const [id, npc] of this.npcs) {
-      if (npc.lastUpdateTime && now - npc.lastUpdateTime > STALE_THRESHOLD) {
+      if (!npc.lastUpdateTime) continue;
+      const staleDuration = now - npc.lastUpdateTime;
+
+      if (staleDuration > PRUNE_THRESHOLD && playerPos) {
+        const dx = npc.position.x - playerPos.x;
+        const dy = npc.position.y - playerPos.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+
+        if (dist > broadcastRange) {
+          // Stale and outside broadcast range - remove
+          if (debugEnabled) {
+            ds.log('ENTITY_PRUNED', {
+              entityId: id, type: npc.type, faction: npc.faction,
+              staleDuration, distance: Math.round(dist), broadcastRange
+            });
+          }
+          this.npcs.delete(id);
+          continue;
+        }
+      }
+
+      // Debug logging for stale NPCs still in range
+      if (debugEnabled && staleDuration > STALE_THRESHOLD) {
         ds.log('ENTITY_STALE', {
-          entityId: id,
-          type: npc.type,
-          faction: npc.faction,
-          staleDuration: now - npc.lastUpdateTime,
-          state: npc.state,
-          position: npc.position
+          entityId: id, type: npc.type, faction: npc.faction,
+          staleDuration, state: npc.state, position: npc.position
         });
       }
     }
 
-    // Check other players for staleness
-    for (const [id, player] of this.players) {
-      if (player.lastUpdateTime && now - player.lastUpdateTime > STALE_THRESHOLD) {
-        ds.log('ENTITY_STALE', {
-          entityId: id,
-          type: 'player',
-          username: player.username,
-          staleDuration: now - player.lastUpdateTime,
-          position: player.position
-        });
+    // Check other players for staleness (debug logging only, no pruning)
+    if (debugEnabled) {
+      for (const [id, player] of this.players) {
+        if (player.lastUpdateTime && now - player.lastUpdateTime > STALE_THRESHOLD) {
+          ds.log('ENTITY_STALE', {
+            entityId: id, type: 'player', username: player.username,
+            staleDuration: now - player.lastUpdateTime, position: player.position
+          });
+        }
       }
     }
   },
 
   interpolateEntity(entity, dt) {
     // Velocity-based dead reckoning with smooth error correction
-    // Predict position using last known velocity from server
-    entity.position.x += (entity.vx || 0) * dt;
-    entity.position.y += (entity.vy || 0) * dt;
+    // Use smoothed velocity if available (NPCs with formation jitter), raw otherwise (players)
+    const predVx = entity.smoothVx !== undefined ? entity.smoothVx : (entity.vx || 0);
+    const predVy = entity.smoothVy !== undefined ? entity.smoothVy : (entity.vy || 0);
+    entity.position.x += predVx * dt;
+    entity.position.y += predVy * dt;
 
     // Smooth correction toward server-authoritative target position
     if (entity.targetPosition) {
@@ -285,8 +314,19 @@ const Entities = {
       npc.targetPosition.y = data.y;
       npc.targetRotation = data.rotation || npc.targetRotation;
       // Update velocity for dead-reckoning interpolation
-      if (data.vx !== undefined) npc.vx = data.vx;
-      if (data.vy !== undefined) npc.vy = data.vy;
+      // Apply exponential smoothing to dampen formation jitter (0.7/0.3 blend)
+      if (data.vx !== undefined) {
+        npc.vx = data.vx;
+        npc.smoothVx = jumpDistance > TELEPORT_THRESHOLD
+          ? data.vx  // Snap on teleport
+          : 0.7 * (npc.smoothVx || 0) + 0.3 * data.vx;
+      }
+      if (data.vy !== undefined) {
+        npc.vy = data.vy;
+        npc.smoothVy = jumpDistance > TELEPORT_THRESHOLD
+          ? data.vy
+          : 0.7 * (npc.smoothVy || 0) + 0.3 * data.vy;
+      }
       // Delta compression: only update hull/shield/state if present in update
       if (data.hull !== undefined) npc.hull = data.hull;
       if (data.shield !== undefined) npc.shield = data.shield;
@@ -475,6 +515,18 @@ const Entities = {
     }
   },
 
+  // Safety-net: remove wreckage that should have despawned but server event was missed
+  _pruneExpiredWreckage() {
+    const now = Date.now();
+    for (const [id, w] of this.wreckage) {
+      // 5 second grace period past server despawn time
+      if (w.despawnTime && now > w.despawnTime + 5000) {
+        this.wreckage.delete(id);
+        this.siphonAnimations.delete(id);
+      }
+    }
+  },
+
   // Scrap Siphon animation methods
   startSiphonAnimation(wreckageIds, duration) {
     const now = Date.now();
@@ -575,10 +627,13 @@ const Entities = {
   },
 
   // Update bases from server broadcast (for radar display)
+  // Uses merge strategy with grace period to prevent edge-of-range flickering
   updateBases(basesArray) {
-    // Clear old bases and replace with new data
-    this.bases.clear();
+    this._baseBroadcastTick++;
+
+    // Merge incoming bases (add/update)
     for (const base of basesArray) {
+      const existing = this.bases.get(base.id);
       const baseData = {
         id: base.id,
         position: base.position || { x: base.x, y: base.y },
@@ -591,7 +646,8 @@ const Entities = {
         maxHealth: base.maxHealth,
         size: base.size,
         scrapPile: base.scrapPile || null,
-        claimCredits: base.claimCredits || 0
+        claimCredits: base.claimCredits || 0,
+        _lastSeenTick: this._baseBroadcastTick
       };
 
       // Store orbital parameters for client-side position prediction
@@ -603,11 +659,23 @@ const Entities = {
         baseData.starX = base.starX;
         baseData.starY = base.starY;
         baseData.starId = base.starId;
-        // Store the server's computed position timestamp for sync
         baseData.lastServerUpdate = Date.now();
       }
 
+      // Preserve assimilation state from existing base
+      if (existing) {
+        if (existing.assimilationProgress != null) baseData.assimilationProgress = existing.assimilationProgress;
+        if (existing.assimilationThreshold != null) baseData.assimilationThreshold = existing.assimilationThreshold;
+      }
+
       this.bases.set(base.id, baseData);
+    }
+
+    // Prune bases not seen for 3+ consecutive broadcasts (1.5s grace period at 500ms interval)
+    for (const [id, base] of this.bases) {
+      if (this._baseBroadcastTick - (base._lastSeenTick || 0) >= 3) {
+        this.bases.delete(id);
+      }
     }
   },
 

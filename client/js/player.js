@@ -377,27 +377,26 @@ const Player = {
     }
 
     // Update UI hints - only show one at a time based on priority
-    // Priority: Wormhole > Plunder > Derelict > Mining
+    // Priority: Wormhole > Mining/Wreckage > Derelict > Plunder
     const miningHint = document.getElementById('mining-hint');
     const salvageHint = document.getElementById('salvage-hint');
 
     const hasWormhole = this._nearestWormhole && this.hasRelic('WORMHOLE_GEM');
-    const hasPlunder = this._nearestBase && this.hasRelic('SKULL_AND_BONES');
-    const hasDerelict = this._nearestDerelict;
     const hasMineable = nearestMineable && !this.miningTarget;
-
-    // Show salvage hint if derelict nearby and no higher priority
-    if (hasDerelict && !hasWormhole && !hasPlunder) {
-      salvageHint.classList.remove('hidden');
-    } else {
-      salvageHint.classList.add('hidden');
-    }
+    const hasDerelict = this._nearestDerelict;
 
     // Show mining hint if mineable nearby and no higher priority
-    if (hasMineable && !hasDerelict && !hasWormhole && !hasPlunder) {
+    if (hasMineable && !hasWormhole) {
       miningHint.classList.remove('hidden');
     } else {
       miningHint.classList.add('hidden');
+    }
+
+    // Show salvage hint if derelict nearby and no higher priority
+    if (hasDerelict && !hasMineable && !hasWormhole) {
+      salvageHint.classList.remove('hidden');
+    } else {
+      salvageHint.classList.add('hidden');
     }
 
     this._nearestMineable = nearestMineable;

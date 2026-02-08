@@ -9,6 +9,7 @@ const SettingsPanel = {
   // Track individual mute states (separate from AudioManager's global mute)
   categoryMuted: {
     master: false,
+    music: false,
     sfx: false,
     ambient: false,
     ui: false
@@ -28,12 +29,14 @@ const SettingsPanel = {
    */
   _generateHTML() {
     const masterVol = this._getVolume('master');
+    const musicVol = this._getVolume('music');
     const sfxVol = this._getVolume('sfx');
     const ambientVol = this._getVolume('ambient');
     const uiVol = this._getVolume('ui');
 
     // Check if all categories are muted
     const allMuted = this.categoryMuted.master &&
+                     this.categoryMuted.music &&
                      this.categoryMuted.sfx &&
                      this.categoryMuted.ambient &&
                      this.categoryMuted.ui;
@@ -51,6 +54,7 @@ const SettingsPanel = {
           </div>
 
           ${this._renderVolumeRow('master', 'Master', masterVol)}
+          ${this._renderVolumeRow('music', 'Music', musicVol)}
           ${this._renderVolumeRow('sfx', 'SFX', sfxVol)}
           ${this._renderVolumeRow('ambient', 'Ambient', ambientVol)}
           ${this._renderVolumeRow('ui', 'UI', uiVol)}
@@ -135,6 +139,7 @@ const SettingsPanel = {
     if (!muteAllCheckbox) return;
 
     const allMuted = this.categoryMuted.master &&
+                     this.categoryMuted.music &&
                      this.categoryMuted.sfx &&
                      this.categoryMuted.ambient &&
                      this.categoryMuted.ui;
@@ -155,7 +160,7 @@ const SettingsPanel = {
       AudioManager.setVolume(category, 0);
     } else {
       // Restore to default or last known value
-      const defaults = { master: 1, sfx: 0.7, ambient: 0.5, ui: 0.6 };
+      const defaults = { master: 1, music: 0.5, sfx: 0.7, ambient: 0.5, ui: 0.6 };
       AudioManager.setVolume(category, defaults[category]);
     }
   },
@@ -172,7 +177,7 @@ const SettingsPanel = {
         const shouldMute = muteAllCheckbox.checked;
 
         // Update all category mute states
-        ['master', 'sfx', 'ambient', 'ui'].forEach(category => {
+        ['master', 'music', 'sfx', 'ambient', 'ui'].forEach(category => {
           this.categoryMuted[category] = shouldMute;
           this._applyMuteState(category, shouldMute);
 
@@ -189,7 +194,7 @@ const SettingsPanel = {
           if (valueDisplay && shouldMute) {
             valueDisplay.textContent = '0%';
           } else if (valueDisplay && !shouldMute) {
-            const defaults = { master: 100, sfx: 70, ambient: 50, ui: 60 };
+            const defaults = { master: 100, music: 50, sfx: 70, ambient: 50, ui: 60 };
             valueDisplay.textContent = `${defaults[category]}%`;
             if (slider) slider.value = defaults[category];
           }
@@ -264,12 +269,13 @@ const SettingsPanel = {
     if (resetBtn) {
       resetBtn.addEventListener('click', () => {
         // Reset mute states
-        this.categoryMuted = { master: false, sfx: false, ambient: false, ui: false };
+        this.categoryMuted = { master: false, music: false, sfx: false, ambient: false, ui: false };
 
         if (typeof AudioManager !== 'undefined') {
           // Reset all volumes to defaults
           if (AudioManager.setVolume) {
             AudioManager.setVolume('master', 1);
+            AudioManager.setVolume('music', 0.5);
             AudioManager.setVolume('sfx', 0.7);
             AudioManager.setVolume('ambient', 0.5);
             AudioManager.setVolume('ui', 0.6);

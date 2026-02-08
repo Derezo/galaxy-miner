@@ -208,7 +208,6 @@ function generateSectorFromStarSystem(sectorX, sectorY) {
     for (const base of system.bases) {
       // Skip hostile faction bases in Graveyard zone and buffer zone
       if (inGraveyardBuffer && graveyardConfig?.BLOCKED_FACTIONS?.includes(base.faction)) {
-        logger.category('graveyard', `Blocking ${base.type} (faction: ${base.faction}) in sector (${sectorX},${sectorY}) - buffer zone`);
         continue;
       }
 
@@ -230,7 +229,6 @@ function generateSectorFromStarSystem(sectorX, sectorY) {
             starX + maxReach >= bufferMinX && starX - maxReach < bufferMaxX &&
             starY + maxReach >= bufferMinY && starY - maxReach < bufferMaxY;
           if (orbitCouldCrossBuffer) {
-            logger.category('graveyard', `Blocking orbital ${base.type} (faction: ${base.faction}) - orbit crosses buffer zone`);
             continue;
           }
         }
@@ -239,8 +237,8 @@ function generateSectorFromStarSystem(sectorX, sectorY) {
         const maxReach = base.orbitRadius + (base.size || 100);
         if (starX + maxReach >= sectorMinX && starX - maxReach < sectorMaxX &&
             starY + maxReach >= sectorMinY && starY - maxReach < sectorMaxY) {
-          // Debug: log bases added near graveyard
-          if (Math.abs(sectorX) <= 3 && Math.abs(sectorY) <= 3) {
+          // Debug: log bases added in graveyard zone
+          if (inGraveyard) {
             logger.category('graveyard', `Adding orbital ${base.type} (faction: ${base.faction}, id: ${base.id}) to sector (${sectorX},${sectorY})`);
           }
           sector.bases.push({
@@ -252,8 +250,8 @@ function generateSectorFromStarSystem(sectorX, sectorY) {
         }
       } else if (isInSector(base.x, base.y)) {
         // Static base - just check if in sector
-        // Debug: log bases added near graveyard
-        if (Math.abs(sectorX) <= 3 && Math.abs(sectorY) <= 3) {
+        // Debug: log bases added in graveyard zone
+        if (inGraveyard) {
           logger.category('graveyard', `Adding static ${base.type} (faction: ${base.faction}, id: ${base.id}) to sector (${sectorX},${sectorY})`);
         }
         sector.bases.push({
@@ -1158,9 +1156,22 @@ function getObjectPosition(objectId, time) {
   // Bases - handle orbital bases and binary star systems
   if (type === 'base') {
     // Find parent star to check for binary system
-    const parentStar = object.starId
+    let parentStar = object.starId
       ? sector.stars.find(s => s.id === object.starId)
       : null;
+
+    // Fallback: if star not in this sector, look up the star system directly
+    if (!parentStar && object.starId && objectId.startsWith('ss_')) {
+      // ss_{superX}_{superY}_{systemIndex} -> first 4 parts
+      const systemId = parts.slice(0, 4).join('_');
+      const system = StarSystem.getStarSystemById(systemId);
+      if (system) {
+        parentStar = system.primaryStar;
+        if (system.binaryInfo) {
+          parentStar = { ...parentStar, binaryInfo: system.binaryInfo };
+        }
+      }
+    }
 
     let starPos;
     if (parentStar && parentStar.binaryInfo) {

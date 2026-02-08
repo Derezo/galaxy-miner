@@ -248,7 +248,8 @@ const RewardDisplay = {
           'VOID_CRYSTAL': 'reward_relic_void',
           'SWARM_HIVE_CORE': 'reward_relic_swarm',
           'PIRATE_TREASURE': 'reward_relic_pirate',
-          'WORMHOLE_GEM': 'reward_relic_wormhole'
+          'WORMHOLE_GEM': 'reward_relic_wormhole',
+          'SUBSPACE_WARP_DRIVE': 'reward_relic_subspace'
         };
         soundId = relicSounds[reward.relicType] || 'reward_relic_starmap';
         break;

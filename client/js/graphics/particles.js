@@ -473,6 +473,7 @@ const ParticleSystem = {
     // Build indices sorted by color
     const indices = this._getSortIndices(len);
     for (let i = 0; i < len; i++) indices[i] = i;
+    indices.length = len;
     indices.sort((a, b) => {
       if (particles[a].color < particles[b].color) return -1;
       if (particles[a].color > particles[b].color) return 1;

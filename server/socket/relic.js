@@ -156,7 +156,7 @@ function calculatePlunderRewards(base) {
 
     case 'scavenger_yard':
       // Steal entire scrap pile contents
-      if (base.scrapPile && base.scrapPile.contents) {
+      if (base.scrapPile && base.scrapPile.contents && base.scrapPile.contents.length > 0) {
         // Convert wreckage contents to resources
         // Note: Wreckage contents use 'resourceType' from LootPools
         for (const item of base.scrapPile.contents) {
@@ -168,6 +168,26 @@ function calculatePlunderRewards(base) {
           } else if (item.credits) {
             rewards.credits += item.credits;
           }
+        }
+      }
+      // Fallback: if scrap pile is empty, generate loot from base pool
+      if (rewards.credits === 0 && rewards.resources.length === 0) {
+        const generated = LootPools.generateLoot(base.type);
+        if (generated && generated.length > 0) {
+          for (const item of generated) {
+            if (item.type === 'resource') {
+              rewards.resources.push({
+                resource: item.resourceType,
+                quantity: item.quantity || 1
+              });
+            } else if (item.type === 'credits') {
+              rewards.credits += item.amount || 100;
+            }
+          }
+        }
+        // Minimum credits if still nothing
+        if (rewards.credits === 0 && rewards.resources.length === 0) {
+          rewards.credits = 50 + Math.floor(Math.random() * 100);
         }
       }
       break;

@@ -51,7 +51,7 @@ function register(socket) {
       Toast.show(`${data.inviterName} invited you to fleet "${data.fleetName}"`, 'info');
     }
     if (typeof AudioManager !== 'undefined' && AudioManager.isReady && AudioManager.isReady()) {
-      AudioManager.play('notification');
+      AudioManager.play('notification_info');
     }
   });
 

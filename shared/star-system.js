@@ -590,7 +590,9 @@ Object.assign(StarSystem, {
         maxHealth: hubConfig.health,
         size: hubConfig.size,
         patrolRadius: hubConfig.patrolRadius,
-        starId: star.id
+        starId: star.id,
+        starX: star.x,
+        starY: star.y
       });
     }
 
@@ -746,6 +748,70 @@ Object.assign(StarSystem, {
           resources: this.getAsteroidResources(rng, 'uncommon'), // Mining claims have decent resources
           claimId: claim.id
         });
+      }
+
+      // Ensure minimum asteroid count - if placement failed due to sun danger zone or spacing,
+      // try again with relaxed spacing (50 instead of 100)
+      const placedAsteroids = claimObjects.filter(o => o.type === 'asteroid');
+      const MIN_ASTEROIDS = 3;
+      if (placedAsteroids.length < MIN_ASTEROIDS) {
+        const needed = MIN_ASTEROIDS - placedAsteroids.length;
+        for (let i = 0; i < needed; i++) {
+          // Try with tighter placement - random angle, fixed close distance
+          for (let attempt = 0; attempt < 50; attempt++) {
+            const angle = rng() * Math.PI * 2;
+            const dist = claimConfig.MIN_DISTANCE + rng() * 400; // Closer to claim
+            const x = claim.x + Math.cos(angle) * dist;
+            const y = claim.y + Math.sin(angle) * dist;
+
+            // Skip sun danger zone
+            if (isInSunDanger(x, y)) continue;
+
+            // Relaxed spacing check (50 instead of 100)
+            let tooClose = false;
+            for (const existing of claimObjects) {
+              const dx = x - existing.x;
+              const dy = y - existing.y;
+              if (Math.sqrt(dx * dx + dy * dy) < 50) {
+                tooClose = true;
+                break;
+              }
+            }
+            if (tooClose) continue;
+
+            // Place the asteroid
+            const asteroidType = this.selectAsteroidType(rng);
+            const sizeClass = this.selectAsteroidSizeClass(rng);
+            const sizeClassData = config.ASTEROID_SIZE_CLASSES?.[sizeClass] || {
+              sizeRange: [10, 30],
+              rotationSpeed: [0.2, 0.8],
+              vertices: [6, 9],
+              irregularity: 0.25
+            };
+            const [sizeMin, sizeMax] = sizeClassData.sizeRange;
+            const size = sizeMin + rng() * (sizeMax - sizeMin);
+            const [rotMin, rotMax] = sizeClassData.rotationSpeed;
+            const rotationSpeed = (rotMin + rng() * (rotMax - rotMin)) * (rng() > 0.5 ? 1 : -1);
+            const idx = placedAsteroids.length + i;
+            const shapeSeed = this.hash(`${systemId}_claim_asteroid_${claimIdx}_fill${idx}`, claim.x, claim.y);
+            const shape = this.generateAsteroidShape(shapeSeed, sizeClassData);
+
+            claimObjects.push({
+              id: `${systemId}_asteroid_clm${claimIdx}af${idx}`,
+              type: 'asteroid',
+              asteroidType,
+              sizeClass,
+              x,
+              y,
+              size,
+              rotationSpeed,
+              shape,
+              resources: this.getAsteroidResources(rng, 'uncommon'),
+              claimId: claim.id
+            });
+            break; // Placed successfully
+          }
+        }
       }
 
       miningObjects.push(...claimObjects);

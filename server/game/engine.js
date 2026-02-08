@@ -2445,6 +2445,11 @@ function playerAttackNPC(attackerId, npcId, weaponType, weaponTier, damageOverri
 
         // Spawn the Leviathan after the cinematic sequence
         setTimeout(() => {
+          // Double-check no leviathan spawned during the cinematic delay
+          if (npc.getActiveLeviathan()) {
+            npc.clearLeviathanPending();
+            return;
+          }
           const leviathan = npc.spawnVoidLeviathan(spawnPosition);
           if (leviathan) {
             // Broadcast the Leviathan emergence
@@ -2464,6 +2469,8 @@ function playerAttackNPC(attackerId, npcId, weaponType, weaponTier, damageOverri
               fromRift: true,
               riftPosition: leviathan.riftPortal
             });
+          } else {
+            npc.clearLeviathanPending();
           }
         }, leviathanSpawn.sequenceDuration);
       }

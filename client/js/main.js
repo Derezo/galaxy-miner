@@ -29,6 +29,7 @@ const GalaxyMiner = {
     NotificationManager.init();
     EmoteWheel.init();
     AudioManager.init();
+    if (typeof MusicManager !== 'undefined') MusicManager.init();
 
     // Initialize mobile modules (only activate on mobile devices)
     if (typeof VirtualJoystick !== 'undefined') {
@@ -74,6 +75,8 @@ const GalaxyMiner = {
 
     // Start game loop
     Game.start();
+
+    if (typeof MusicManager !== 'undefined') MusicManager.start();
   },
 
   /**
@@ -105,6 +108,7 @@ const GalaxyMiner = {
   stopGame() {
     this.gameStarted = false;
     Game.stop();
+    if (typeof MusicManager !== 'undefined') MusicManager.stop();
 
     // Show auth, hide HUD
     document.getElementById('auth-screen').classList.remove('hidden');

@@ -1672,7 +1672,7 @@ const DeathEffects = {
 
     // Play void death sound
     if (typeof AudioManager !== 'undefined' && AudioManager.isReady && AudioManager.isReady()) {
-      AudioManager.playAt('boss_death', x, y);
+      AudioManager.playAt('void_leviathan_death', x, y);
     }
 
     Logger.log('Void Leviathan death sequence triggered at', x, y);

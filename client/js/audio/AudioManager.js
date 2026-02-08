@@ -8,6 +8,7 @@ const AudioManager = (function () {
     sfx: 1.0,
     ambient: 0.6,
     ui: 0.8,
+    music: 0.5,
   };
 
   // Mute state
@@ -325,6 +326,14 @@ const AudioManager = (function () {
     saveVolumes();
 
     Logger.log(`Volume ${category} set to ${volumes[category].toFixed(2)}`);
+
+    // Notify MusicManager of volume changes
+    if (category === 'music' && typeof MusicManager !== 'undefined') {
+      MusicManager.setVolume(volumes[category]);
+    }
+    if (category === 'master' && typeof MusicManager !== 'undefined') {
+      MusicManager.updateMasterVolume();
+    }
   }
 
   /**
@@ -351,6 +360,8 @@ const AudioManager = (function () {
     });
 
     Logger.log("Audio muted");
+
+    if (typeof MusicManager !== 'undefined') MusicManager.setVolume(0);
   }
 
   /**
@@ -366,6 +377,8 @@ const AudioManager = (function () {
       volumes = { ...volumesBeforeMute };
       volumesBeforeMute = null;
     }
+
+    if (typeof MusicManager !== 'undefined') MusicManager.setVolume(volumes.music);
 
     Logger.log("Audio unmuted");
   }
@@ -426,9 +439,11 @@ const AudioManager = (function () {
     if (document.hidden) {
       // Page hidden - reduce volume or pause loops
       stopAllLoops();
+      if (typeof MusicManager !== 'undefined') MusicManager.pause();
     } else {
       // Page visible - resume audio context if needed
       AudioContextManager.resume();
+      if (typeof MusicManager !== 'undefined') MusicManager.resume();
     }
   }
 

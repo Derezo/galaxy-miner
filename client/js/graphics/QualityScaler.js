@@ -230,15 +230,30 @@ const QualityScaler = {
    */
   getNebulaConfig(quality) {
     if (!this.isEnabled(quality, 'nebulaClouds')) {
-      return { enabled: false, cloudCount: 0, opacityMultiplier: 0 };
+      return { enabled: false };
     }
 
     const lod = this.scaleLOD(quality);
 
     const configs = {
-      2: { enabled: true, cloudCount: 6, opacityMultiplier: 0.6 },
-      3: { enabled: true, cloudCount: 12, opacityMultiplier: 1.0 },
-      4: { enabled: true, cloudCount: 18, opacityMultiplier: 1.2 }
+      2: {
+        enabled: true, layers: 1, parallaxes: [0.01],
+        cloudsPerLayer: [4], textureSize: 128,
+        noiseOctaves: 3, opacityMultiplier: 0.6,
+        blendMode: 'source-over', animatedFlow: false
+      },
+      3: {
+        enabled: true, layers: 2, parallaxes: [0.005, 0.015],
+        cloudsPerLayer: [5, 4], textureSize: 256,
+        noiseOctaves: 5, opacityMultiplier: 1.0,
+        blendMode: 'screen', animatedFlow: false
+      },
+      4: {
+        enabled: true, layers: 3, parallaxes: [0.005, 0.015, 0.025],
+        cloudsPerLayer: [5, 4, 3], textureSize: 512,
+        noiseOctaves: 6, opacityMultiplier: 1.2,
+        blendMode: 'screen', animatedFlow: true
+      }
     };
 
     return configs[lod] || configs[2];
@@ -309,9 +324,8 @@ const QualityScaler = {
    */
   debugPresets() {
     const presets = [0, 10, 40, 80, 100];
-    console.group('[QualityScaler] Preset Values');
     for (const q of presets) {
-      console.log(`Quality ${q}:`, {
+      Logger.log('[QualityScaler] Quality ' + q + ':', {
         lod: this.scaleLOD(q),
         lodName: this.getLODName(q),
         particleMultiplier: this.getParticleMultiplier(q).toFixed(2),
@@ -320,7 +334,6 @@ const QualityScaler = {
         nebula: this.getNebulaConfig(q)
       });
     }
-    console.groupEnd();
   }
 };
 
