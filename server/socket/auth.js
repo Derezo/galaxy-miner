@@ -82,7 +82,7 @@ function register(socket, deps) {
   socket.on('auth:logout', () => {
     const authenticatedUserId = getAuthenticatedUserId();
     if (authenticatedUserId) {
-      cleanupPlayer(socket, authenticatedUserId);
+      cleanupPlayer(socket, authenticatedUserId, deps);
       setAuthenticatedUserId(null);
     }
   });
@@ -135,6 +135,9 @@ function setupAuthenticatedPlayer(socket, playerData, token, deps) {
 
   connectedPlayers.set(socket.id, player);
   userSockets.set(playerData.id, socket.id);
+
+  // Insert into player spatial hash for efficient broadcast queries
+  deps.engine.insertPlayerInHash(socket.id, player);
 
   // Join sector rooms for efficient proximity broadcasting
   joinSectorRooms(socket, player);

@@ -81,6 +81,9 @@ function cleanupPlayer(socket, userId, deps) {
   // Leave sector rooms
   leaveSectorRooms(socket);
 
+  // Remove from player spatial hash before deleting from connectedPlayers
+  deps.engine.removePlayerFromHash(socket.id);
+
   connectedPlayers.delete(socket.id);
   userSockets.delete(userId);
 

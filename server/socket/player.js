@@ -43,6 +43,9 @@ function register(socket, deps) {
     player.velocity = { x: data.vx, y: data.vy };
     player.rotation = data.rotation;
 
+    // Update player spatial hash for efficient broadcast queries
+    deps.engine.updatePlayerInHash(socket.id, player);
+
     // Update sector rooms if player moved to a different sector
     updatePlayerSectorRooms(socket, player);
 
@@ -119,6 +122,9 @@ function register(socket, deps) {
     player.isDead = false;
     player.deathTime = null;
     player.deathPosition = null;
+
+    // Update player spatial hash for new respawn position
+    deps.engine.updatePlayerInHash(socket.id, player);
 
     // Emit respawn event to player
     socket.emit('player:respawn', {

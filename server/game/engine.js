@@ -9,6 +9,7 @@ const world = require('../world');
 const starDamage = require('./star-damage');
 const logger = require('../../shared/logger');
 const Physics = require('../../shared/physics');
+const SpatialHash = require('./spatial-hash');
 
 let io = null;
 let connectedPlayers = null;
@@ -30,6 +31,16 @@ const scheduledRiftRespawns = new Set(); // npcId -> scheduled
 
 // Per-player NPC update batches - accumulated during tick, flushed at end
 const npcBatches = new Map(); // socketId -> [npcUpdateData, ...]
+
+// Spatial hash for player positions - used by broadcast functions to avoid O(players) scans
+const playerSpatialHash = new SpatialHash(500); // 500 unit cells
+
+// Delta compression: track last NPC state sent to each player
+const playerLastSeen = new Map(); // socketId -> Map<npcId, { x, y, rotation, state, hull, shield, tick }>
+
+// Full refresh interval (every 100 ticks = 5 seconds at 20 ticks/sec)
+const FULL_REFRESH_INTERVAL = 100;
+let currentTick = 0;
 
 // ============================================
 // PLAYER DEBUFF SYSTEM
@@ -277,6 +288,8 @@ function stop() {
 
 function tick() {
   if (!running) return;
+
+  currentTick++;
 
   const now = Date.now();
   const deltaTime = now - lastTickTime;
@@ -1979,7 +1992,15 @@ function broadcastNearbyBasesToPlayers(now) {
 function broadcastWreckageNear(wreckage, event, data) {
   if (!connectedPlayers) return;
 
-  for (const [socketId, player] of connectedPlayers) {
+  // Query spatial hash for nearby players instead of scanning all players
+  const candidates = playerSpatialHash.query(
+    wreckage.position.x, wreckage.position.y, MAX_TIER_BROADCAST_RANGE
+  );
+
+  for (const socketId of candidates) {
+    const player = connectedPlayers.get(socketId);
+    if (!player) continue;
+
     const dx = player.position.x - wreckage.position.x;
     const dy = player.position.y - wreckage.position.y;
     const dist = Math.sqrt(dx * dx + dy * dy);
@@ -1993,14 +2014,23 @@ function broadcastWreckageNear(wreckage, event, data) {
 }
 
 /**
- * Queue an NPC update for batched delivery.
+ * Queue an NPC update for batched delivery with delta compression.
  * Instead of emitting individual npc:update events, this accumulates
  * updates per-player and flushes them as a single npc:batch message.
+ * Delta compression sends only changed fields after the first full state.
  */
 function queueNpcUpdate(npcEntity, data) {
   if (!connectedPlayers) return;
 
-  for (const [socketId, player] of connectedPlayers) {
+  // Query spatial hash for nearby players instead of scanning all players
+  const candidates = playerSpatialHash.query(
+    npcEntity.position.x, npcEntity.position.y, MAX_TIER_BROADCAST_RANGE
+  );
+
+  for (const socketId of candidates) {
+    const player = connectedPlayers.get(socketId);
+    if (!player) continue;
+
     const dx = player.position.x - npcEntity.position.x;
     const dy = player.position.y - npcEntity.position.y;
     const dist = Math.sqrt(dx * dx + dy * dy);
@@ -2010,14 +2040,88 @@ function queueNpcUpdate(npcEntity, data) {
       if (!npcBatches.has(socketId)) {
         npcBatches.set(socketId, []);
       }
-      npcBatches.get(socketId).push(data);
+
+      // Build delta-compressed update for this player
+      const delta = buildNpcDelta(socketId, data);
+      npcBatches.get(socketId).push(delta);
     }
   }
 }
 
 /**
+ * Build a delta-compressed NPC update for a specific player.
+ * First-time encounters and periodic refreshes send full state (f=1 flag).
+ * Subsequent updates send only id + position + rotation + changed fields.
+ */
+function buildNpcDelta(socketId, fullData) {
+  if (!playerLastSeen.has(socketId)) {
+    playerLastSeen.set(socketId, new Map());
+  }
+  const lastSeen = playerLastSeen.get(socketId);
+  const npcId = fullData.id;
+  const prev = lastSeen.get(npcId);
+
+  // Full state if: first time seeing this NPC, or periodic refresh
+  const needsFull = !prev || (currentTick - prev.tick >= FULL_REFRESH_INTERVAL);
+
+  // Normalize optional position fields (null when absent)
+  const collectingWreckagePos = fullData.collectingWreckagePos || null;
+  const miningTargetPos = fullData.miningTargetPos || null;
+
+  if (needsFull) {
+    // Send full state with flag
+    lastSeen.set(npcId, {
+      x: fullData.x, y: fullData.y,
+      rotation: fullData.rotation,
+      state: fullData.state,
+      hull: fullData.hull,
+      shield: fullData.shield,
+      collectingWreckagePos,
+      miningTargetPos,
+      tick: currentTick
+    });
+    return { ...fullData, f: 1 }; // f=1 means full state
+  }
+
+  // Build delta: always include id, x, y, rotation
+  const delta = {
+    id: npcId,
+    x: fullData.x,
+    y: fullData.y,
+    rotation: fullData.rotation
+  };
+
+  // Only include changed fields
+  if (fullData.state !== prev.state) delta.state = fullData.state;
+  if (fullData.hull !== prev.hull) delta.hull = fullData.hull;
+  if (fullData.shield !== prev.shield) delta.shield = fullData.shield;
+  // Include beam targets when they change (including transitions to/from null)
+  if (collectingWreckagePos !== prev.collectingWreckagePos) {
+    delta.collectingWreckagePos = collectingWreckagePos;
+  }
+  if (miningTargetPos !== prev.miningTargetPos) {
+    delta.miningTargetPos = miningTargetPos;
+  }
+
+  // Update last seen
+  lastSeen.set(npcId, {
+    x: fullData.x, y: fullData.y,
+    rotation: fullData.rotation,
+    state: fullData.state,
+    hull: fullData.hull,
+    shield: fullData.shield,
+    collectingWreckagePos,
+    miningTargetPos,
+    tick: currentTick
+  });
+
+  return delta;
+}
+
+/**
  * Flush all accumulated NPC update batches to players.
  * Sends one npc:batch message per player containing all NPC updates for this tick.
+ * Also cleans up stale playerLastSeen entries for disconnected players.
  */
 function flushNpcBatches() {
   for (const [socketId, batch] of npcBatches) {
@@ -2026,12 +2130,27 @@ function flushNpcBatches() {
     }
   }
   npcBatches.clear();
+
+  // Clean up stale playerLastSeen entries for disconnected players
+  for (const socketId of playerLastSeen.keys()) {
+    if (!connectedPlayers || !connectedPlayers.has(socketId)) {
+      playerLastSeen.delete(socketId);
+    }
+  }
 }
 
 function broadcastNearNpc(npcEntity, event, data) {
   if (!connectedPlayers) return;
 
-  for (const [socketId, player] of connectedPlayers) {
+  // Query spatial hash for nearby players instead of scanning all players
+  const candidates = playerSpatialHash.query(
+    npcEntity.position.x, npcEntity.position.y, MAX_TIER_BROADCAST_RANGE
+  );
+
+  for (const socketId of candidates) {
+    const player = connectedPlayers.get(socketId);
+    if (!player) continue;
+
     const dx = player.position.x - npcEntity.position.x;
     const dy = player.position.y - npcEntity.position.y;
     const dist = Math.sqrt(dx * dx + dy * dy);
@@ -2048,7 +2167,13 @@ function broadcastNearNpc(npcEntity, event, data) {
 function broadcastInRange(position, range, event, data) {
   if (!connectedPlayers) return;
 
-  for (const [socketId, player] of connectedPlayers) {
+  // Query spatial hash for nearby players instead of scanning all players
+  const candidates = playerSpatialHash.query(position.x, position.y, range);
+
+  for (const socketId of candidates) {
+    const player = connectedPlayers.get(socketId);
+    if (!player) continue;
+
     const dx = player.position.x - position.x;
     const dy = player.position.y - position.y;
     const dist = Math.sqrt(dx * dx + dy * dy);
@@ -2516,6 +2641,22 @@ function getAllNPCs() {
   return npc.activeNPCs;
 }
 
+// === Player Spatial Hash Management ===
+// These functions maintain the player spatial hash used by broadcast functions.
+// Called from socket handlers on auth, movement, and disconnect.
+
+function insertPlayerInHash(socketId, player) {
+  playerSpatialHash.insert(socketId, player.position.x, player.position.y);
+}
+
+function removePlayerFromHash(socketId) {
+  playerSpatialHash.remove(socketId);
+}
+
+function updatePlayerInHash(socketId, player) {
+  playerSpatialHash.update(socketId, player.position.x, player.position.y);
+}
+
 module.exports = {
   init,
   start,
@@ -2529,5 +2670,8 @@ module.exports = {
   getWreckage,
   removeWreckage,
   getAllNPCs,
-  loot
+  loot,
+  insertPlayerInHash,
+  removePlayerFromHash,
+  updatePlayerInHash
 };

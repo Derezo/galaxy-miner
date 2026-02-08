@@ -93,6 +93,9 @@ function register(socket, deps) {
           player.position = { x: completeResult.position.x, y: completeResult.position.y };
           player.velocity = { x: 0, y: 0 };
 
+          // Update player spatial hash for new wormhole exit position
+          deps.engine.updatePlayerInHash(socket.id, player);
+
           // Save new position to database
           const sectorX = Math.floor(completeResult.position.x / config.SECTOR_SIZE);
           const sectorY = Math.floor(completeResult.position.y / config.SECTOR_SIZE);
