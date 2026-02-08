@@ -16,6 +16,7 @@ const GraphicsSettings = {
   // Core state
   _quality: 80,           // 0-100 continuous quality value
   _advancedMode: false,   // Whether user is using slider vs presets
+  _renderScale: 1.0,      // Canvas resolution scale (0.5-1.0), lower = better perf
 
   // Preset definitions
   _presets: {
@@ -309,6 +310,34 @@ const GraphicsSettings = {
   },
 
   // ============================================
+  // Resolution Scaling
+  // ============================================
+
+  /**
+   * Get current render scale (0.5-1.0)
+   * Used for canvas resolution scaling - lower values reduce GPU load
+   * @returns {number} Render scale factor
+   */
+  getRenderScale() {
+    return this._renderScale;
+  },
+
+  /**
+   * Set render scale (clamped to 0.5-1.0)
+   * @param {number} scale - Render scale factor
+   */
+  setRenderScale(scale) {
+    const oldScale = this._renderScale;
+    this._renderScale = Math.max(0.5, Math.min(1.0, scale));
+
+    if (oldScale !== this._renderScale) {
+      this.save();
+      console.log('[GraphicsSettings] Render scale set to:', this._renderScale);
+      this._notifyListeners();
+    }
+  },
+
+  // ============================================
   // Backwards Compatibility API
   // ============================================
 
@@ -407,6 +436,7 @@ const GraphicsSettings = {
       localStorage.setItem(this._storageKey, JSON.stringify({
         quality: this._quality,
         advancedMode: this._advancedMode,
+        renderScale: this._renderScale,
         version: 2  // Version for migration detection
       }));
     } catch (e) {
@@ -423,12 +453,19 @@ const GraphicsSettings = {
       if (saved) {
         const parsed = JSON.parse(saved);
 
+        // Mobile detection for default render scale
+        // Note: DeviceDetect.init() hasn't been called yet at this point, so we
+        // check the user agent directly (same regex DeviceDetect uses)
+        const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+        const defaultRenderScale = isMobile ? 0.75 : 1.0;
+
         // Handle migration from v1 (level-based) to v2 (quality-based)
         if (parsed.level && !parsed.quality) {
           // Legacy format - convert level to quality
           const quality = this._legacyPresetMapping[parsed.level];
           this._quality = quality !== undefined ? quality : 80;
           this._advancedMode = false;
+          this._renderScale = defaultRenderScale;
           console.log('[GraphicsSettings] Migrated from legacy format, level:', parsed.level, '-> quality:', this._quality);
           this.save(); // Save in new format
         } else {
@@ -437,12 +474,24 @@ const GraphicsSettings = {
             ? Math.max(0, Math.min(100, parsed.quality))
             : 80;
           this._advancedMode = parsed.advancedMode || false;
+          this._renderScale = typeof parsed.renderScale === 'number'
+            ? Math.max(0.5, Math.min(1.0, parsed.renderScale))
+            : defaultRenderScale;
+        }
+      } else {
+        // First launch (no saved settings) - default to Medium on mobile devices
+        const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+        if (isMobile) {
+          this._quality = 40;
+          this._renderScale = 0.75;
+          console.log('[GraphicsSettings] Mobile device detected on first launch, defaulting to Medium (quality: 40), renderScale: 0.75');
         }
       }
     } catch (e) {
       console.error('[GraphicsSettings] Failed to load:', e);
       this._quality = 80;
       this._advancedMode = false;
+      this._renderScale = 1.0;
     }
   },
 
@@ -452,9 +501,10 @@ const GraphicsSettings = {
   reset() {
     this._quality = 80;
     this._advancedMode = false;
+    this._renderScale = 1.0;
     this.save();
     this._notifyListeners();
-    console.log('[GraphicsSettings] Reset to defaults (quality: 80)');
+    console.log('[GraphicsSettings] Reset to defaults (quality: 80, renderScale: 1.0)');
   },
 
   /**
@@ -465,6 +515,7 @@ const GraphicsSettings = {
     console.log('Quality:', this._quality);
     console.log('Preset:', this.getPresetLabel());
     console.log('Advanced Mode:', this._advancedMode);
+    console.log('Render Scale:', this._renderScale);
     console.log('LOD:', this.getLOD());
     console.log('Particle Multiplier:', this.getParticleMultiplier().toFixed(2));
     console.log('Pool Size:', this.getPoolSize());

@@ -9,6 +9,7 @@ const Renderer = {
   miningNotification: null,
   lastDt: 0,
   dpr: 1, // Device pixel ratio for high-DPI displays
+  _renderScale: 1.0, // Canvas resolution scale (0.5-1.0), lower = better perf on mobile
   width: 0, // Logical width (CSS pixels)
   height: 0, // Logical height (CSS pixels)
 
@@ -27,6 +28,13 @@ const Renderer = {
     // Set DPI scaling (cap at 2 for performance on high-DPI mobile)
     this.dpr = Math.min(window.devicePixelRatio || 1, 2);
 
+    // Set render scale from GraphicsSettings (persisted), or default by device type
+    if (typeof GraphicsSettings !== 'undefined') {
+      this._renderScale = GraphicsSettings.getRenderScale();
+    } else if (typeof DeviceDetect !== 'undefined' && DeviceDetect.isMobile) {
+      this._renderScale = 0.75;
+    }
+
     // Handle resize
     window.addEventListener("resize", () => this.resize());
     this.resize();
@@ -36,6 +44,7 @@ const Renderer = {
       RenderContext.canvas = this.canvas;
       RenderContext.ctx = this.ctx;
       RenderContext.dpr = this.dpr;
+      RenderContext.renderScale = this._renderScale;
       RenderContext.width = this.width;
       RenderContext.height = this.height;
       RenderContext.camera = this.camera;
@@ -125,18 +134,28 @@ const Renderer = {
     const cssWidth = window.innerWidth;
     const cssHeight = window.innerHeight;
 
-    // Set canvas buffer size (scaled by DPR for crisp rendering)
-    this.canvas.width = cssWidth * this.dpr;
-    this.canvas.height = cssHeight * this.dpr;
+    // Refresh render scale from GraphicsSettings if available
+    if (typeof GraphicsSettings !== 'undefined') {
+      this._renderScale = GraphicsSettings.getRenderScale();
+    }
 
-    // Set CSS display size
+    // Set canvas buffer size (scaled by DPR and renderScale)
+    // renderScale < 1 produces a smaller buffer that the browser upscales
+    const bufferScale = this.dpr * this._renderScale;
+    this.canvas.width = cssWidth * bufferScale;
+    this.canvas.height = cssHeight * bufferScale;
+
+    // CSS display size stays at full resolution (browser handles upscale)
     this.canvas.style.width = cssWidth + 'px';
     this.canvas.style.height = cssHeight + 'px';
 
-    // Scale context to match DPR
-    this.ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+    // Scale context to match combined DPR + renderScale
+    this.ctx.setTransform(bufferScale, 0, 0, bufferScale, 0, 0);
 
-    // Store logical dimensions for game code
+    // Enable bilinear filtering for smooth upscale when renderScale < 1
+    this.ctx.imageSmoothingEnabled = true;
+
+    // Store logical dimensions for game code (always CSS pixels)
     this.width = cssWidth;
     this.height = cssHeight;
 
@@ -145,6 +164,7 @@ const Renderer = {
 
     // Sync to RenderContext
     if (typeof RenderContext !== 'undefined') {
+      RenderContext.renderScale = this._renderScale;
       RenderContext.width = this.width;
       RenderContext.height = this.height;
       RenderContext.portraitMode = this.portraitMode;
@@ -492,9 +512,9 @@ const Renderer = {
     const screen = this.worldToScreen(x, y);
     return (
       screen.x > -margin &&
-      screen.x < this.canvas.width + margin &&
+      screen.x < this.width + margin &&
       screen.y > -margin &&
-      screen.y < this.canvas.height + margin
+      screen.y < this.height + margin
     );
   },
 
@@ -902,9 +922,137 @@ const Renderer = {
     const size = wormhole.size;
     const time = Date.now() / 1000;
 
+    // Get LOD level for quality-based rendering
+    const lod = typeof GraphicsSettings !== 'undefined' ? GraphicsSettings.getLOD() : 3;
+
     ctx.save();
     ctx.translate(screen.x, screen.y);
 
+    // LOD 0 (Minimal, quality 0-9): Dark circle with colored border ring only
+    if (lod === 0) {
+      // Dark filled circle
+      ctx.fillStyle = 'rgba(5, 10, 30, 0.7)';
+      ctx.beginPath();
+      ctx.arc(0, 0, size * 0.85, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Cyan border ring
+      ctx.strokeStyle = '#00ccff';
+      ctx.lineWidth = 2;
+      ctx.globalAlpha = 0.7;
+      ctx.beginPath();
+      ctx.arc(0, 0, size * 0.85, 0, Math.PI * 2);
+      ctx.stroke();
+
+      // Small bright center dot
+      ctx.globalAlpha = 0.9;
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath();
+      ctx.arc(0, 0, size * 0.08, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.restore();
+      return;
+    }
+
+    // LOD 1 (Low, quality 10-29): Void gradient + 4 arms (40 segments) + 12 particles + core glow, no rings
+    if (lod === 1) {
+      // Background void gradient (same as full, keeps the visual identity)
+      const voidGradient = ctx.createRadialGradient(0, 0, 0, 0, 0, size);
+      voidGradient.addColorStop(0, "rgba(200, 230, 255, 0.15)");
+      voidGradient.addColorStop(0.15, "rgba(100, 180, 255, 0.1)");
+      voidGradient.addColorStop(0.4, "rgba(20, 40, 80, 0.3)");
+      voidGradient.addColorStop(0.7, "rgba(5, 10, 30, 0.5)");
+      voidGradient.addColorStop(0.9, "rgba(0, 0, 10, 0.3)");
+      voidGradient.addColorStop(1, "transparent");
+      ctx.fillStyle = voidGradient;
+      ctx.beginPath();
+      ctx.arc(0, 0, size, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Reduced spiral arms: 4 arms, 40 segments each (vs 8 arms x 80 segments)
+      const lodArmColors = ["#00ffff", "#4488ff", "#ff8844", "#00ccff"];
+
+      for (let arm = 0; arm < 4; arm++) {
+        const armAngle = (arm / 4) * Math.PI * 2;
+        const rotationSpeed = 1.5 + (arm % 3) * 0.4;
+        const baseRotation = time * rotationSpeed + armAngle;
+
+        ctx.save();
+        ctx.rotate(baseRotation);
+
+        ctx.beginPath();
+        const spiralTurns = 2.0;
+        const startRadius = size * 0.92;
+        const endRadius = size * 0.05;
+
+        for (let i = 0; i <= 40; i++) {
+          const t = i / 40;
+          const angle = t * Math.PI * 2 * spiralTurns;
+          const radius =
+            startRadius - (startRadius - endRadius) * Math.pow(t, 0.8);
+          const wobble = Math.sin(t * 12 + time * 4) * 2;
+          const x = Math.cos(angle) * (radius + wobble);
+          const y = Math.sin(angle) * (radius + wobble);
+
+          if (i === 0) {
+            ctx.moveTo(x, y);
+          } else {
+            ctx.lineTo(x, y);
+          }
+        }
+
+        const armOpacity = 0.5 + Math.sin(time * 4 + arm * 0.8) * 0.3;
+        ctx.strokeStyle = lodArmColors[arm];
+        ctx.lineWidth = 2.5 + Math.sin(time * 5 + arm) * 1;
+        ctx.globalAlpha = armOpacity;
+        ctx.stroke();
+        ctx.restore();
+      }
+
+      ctx.globalAlpha = 1;
+
+      // Reduced particles: 12 (vs 36)
+      for (let i = 0; i < 12; i++) {
+        const particleTime = (time * 0.8 + i * 0.36) % 1;
+        const particleAngle = (i / 12) * Math.PI * 2 + time * 2.5;
+        const particleRadius = size * (0.95 - particleTime * 0.9);
+        const spiralOffset = particleTime * Math.PI * 4;
+
+        const px = Math.cos(particleAngle + spiralOffset) * particleRadius;
+        const py = Math.sin(particleAngle + spiralOffset) * particleRadius;
+
+        const particleSize = 1.5 + particleTime * 2.5;
+        const particleAlpha = 0.4 + particleTime * 0.5;
+
+        const colors = ["#ffffff", "#00ffff", "#ffaa44", "#88ddff", "#ffcc66"];
+        ctx.fillStyle = colors[i % colors.length];
+        ctx.globalAlpha = particleAlpha;
+        ctx.beginPath();
+        ctx.arc(px, py, particleSize, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      ctx.globalAlpha = 1;
+
+      // No concentric rings at LOD 1
+
+      // Core glow (simplified - single gradient instead of two)
+      const coreGlow = ctx.createRadialGradient(0, 0, 0, 0, 0, size * 0.25);
+      coreGlow.addColorStop(0, "rgba(255, 255, 255, 0.95)");
+      coreGlow.addColorStop(0.3, "rgba(200, 240, 255, 0.6)");
+      coreGlow.addColorStop(0.7, "rgba(100, 200, 255, 0.2)");
+      coreGlow.addColorStop(1, "transparent");
+      ctx.fillStyle = coreGlow;
+      ctx.beginPath();
+      ctx.arc(0, 0, size * 0.25, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.restore();
+      return;
+    }
+
+    // LOD 2+ (Medium/High/Ultra, quality 30+): Full rendering - unchanged
     // Background void - dark outer edges fading to transparent (no border)
     const voidGradient = ctx.createRadialGradient(0, 0, 0, 0, 0, size);
     voidGradient.addColorStop(0, "rgba(200, 230, 255, 0.15)"); // Bright center glow

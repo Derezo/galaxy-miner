@@ -7,6 +7,7 @@ const RenderContext = {
   ctx: null,
   camera: { x: 0, y: 0 },
   dpr: 1, // Device pixel ratio for high-DPI displays
+  renderScale: 1.0, // Canvas resolution scale (0.5-1.0), synced from Renderer
   width: 0, // Logical width (CSS pixels)
   height: 0, // Logical height (CSS pixels)
   portraitMode: false,
@@ -45,18 +46,23 @@ const RenderContext = {
     const cssWidth = window.innerWidth;
     const cssHeight = window.innerHeight;
 
-    // Set canvas buffer size (scaled by DPR for crisp rendering)
-    this.canvas.width = cssWidth * this.dpr;
-    this.canvas.height = cssHeight * this.dpr;
+    // Set canvas buffer size (scaled by DPR and renderScale)
+    // renderScale < 1 produces a smaller buffer that the browser upscales
+    const bufferScale = this.dpr * this.renderScale;
+    this.canvas.width = cssWidth * bufferScale;
+    this.canvas.height = cssHeight * bufferScale;
 
-    // Set CSS display size
+    // CSS display size stays at full resolution (browser handles upscale)
     this.canvas.style.width = cssWidth + 'px';
     this.canvas.style.height = cssHeight + 'px';
 
-    // Scale context to match DPR
-    this.ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+    // Scale context to match combined DPR + renderScale
+    this.ctx.setTransform(bufferScale, 0, 0, bufferScale, 0, 0);
 
-    // Store logical dimensions for game code
+    // Enable bilinear filtering for smooth upscale when renderScale < 1
+    this.ctx.imageSmoothingEnabled = true;
+
+    // Store logical dimensions for game code (always CSS pixels)
     this.width = cssWidth;
     this.height = cssHeight;
 
@@ -260,9 +266,9 @@ const RenderContext = {
     const screen = this.worldToScreen(x, y);
     return (
       screen.x > -margin &&
-      screen.x < this.canvas.width + margin &&
+      screen.x < this.width + margin &&
       screen.y > -margin &&
-      screen.y < this.canvas.height + margin
+      screen.y < this.height + margin
     );
   }
 };

@@ -638,11 +638,30 @@ const World = {
     const sectorX = Math.floor(position.x / CONSTANTS.SECTOR_SIZE);
     const sectorY = Math.floor(position.y / CONSTANTS.SECTOR_SIZE);
 
+    // Viewport AABB for sector culling (500px margin for large stars)
+    const SECTOR_CULL_MARGIN = 500;
+    const halfExtent = viewDistance / 2 + SECTOR_CULL_MARGIN;
+    const viewMinX = position.x - halfExtent;
+    const viewMaxX = position.x + halfExtent;
+    const viewMinY = position.y - halfExtent;
+    const viewMaxY = position.y + halfExtent;
+
     // Cache for star systems with binary info
     const systemCache = new Map();
 
     for (let dx = -2; dx <= 2; dx++) {
       for (let dy = -2; dy <= 2; dy++) {
+        // Sector AABB vs viewport AABB culling
+        const sectorWorldX = (sectorX + dx) * CONSTANTS.SECTOR_SIZE;
+        const sectorWorldY = (sectorY + dy) * CONSTANTS.SECTOR_SIZE;
+        const sectorMaxX = sectorWorldX + CONSTANTS.SECTOR_SIZE;
+        const sectorMaxY = sectorWorldY + CONSTANTS.SECTOR_SIZE;
+
+        if (sectorMaxX < viewMinX || sectorWorldX > viewMaxX ||
+            sectorMaxY < viewMinY || sectorWorldY > viewMaxY) {
+          continue;
+        }
+
         const sector = this.getSector(sectorX + dx, sectorY + dy);
 
         // Process stars - binary stars need position updates

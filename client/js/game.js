@@ -4,17 +4,37 @@ const Game = {
   running: false,
   lastTime: 0,
   deltaTime: 0,
+  _tabVisible: true,
+  _visibilityHandler: null,
 
   start() {
     if (this.running) return;
     this.running = true;
     this.lastTime = performance.now();
+
+    // Background tab optimization: skip rendering when tab is hidden
+    this._visibilityHandler = () => {
+      if (document.hidden) {
+        this._tabVisible = false;
+        Logger.log('Tab hidden - skipping render');
+      } else {
+        this._tabVisible = true;
+        this.lastTime = performance.now(); // Prevent huge deltaTime spike
+        Logger.log('Tab visible - resuming render');
+      }
+    };
+    document.addEventListener('visibilitychange', this._visibilityHandler);
+
     this.loop();
     Logger.log('Game loop started');
   },
 
   stop() {
     this.running = false;
+    if (this._visibilityHandler) {
+      document.removeEventListener('visibilitychange', this._visibilityHandler);
+      this._visibilityHandler = null;
+    }
     Logger.log('Game loop stopped');
   },
 
@@ -26,7 +46,10 @@ const Game = {
     this.lastTime = currentTime;
 
     this.update(this.deltaTime);
-    this.render();
+
+    if (this._tabVisible) {
+      this.render();
+    }
 
     requestAnimationFrame(() => this.loop());
   },
