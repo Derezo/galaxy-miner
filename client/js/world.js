@@ -1,6 +1,18 @@
 // Galaxy Miner - World Generation (Client)
 // Now uses StarSystem layer for Solar System model generation
 
+// Module-level reusable structures to reduce GC pressure in getVisibleObjects()
+const _visibleObjectsResult = {
+  stars: [],
+  planets: [],
+  asteroids: [],
+  wormholes: [],
+  bases: []
+};
+const _systemCache = new Map();
+// Reusable star position object for orbital computations
+const _starPos = { x: 0, y: 0 };
+
 const World = {
   seed: null,
   sectors: new Map(),
@@ -623,13 +635,13 @@ const World = {
   },
 
   getVisibleObjects(position, viewDistance) {
-    const objects = {
-      stars: [],
-      planets: [],
-      asteroids: [],
-      wormholes: [],
-      bases: []
-    };
+    // Reuse module-level result object and clear arrays (avoids per-call allocation)
+    const objects = _visibleObjectsResult;
+    objects.stars.length = 0;
+    objects.planets.length = 0;
+    objects.asteroids.length = 0;
+    objects.wormholes.length = 0;
+    objects.bases.length = 0;
 
     const orbitTime = Physics.getOrbitTime();
     const asteroidTime = Physics.getPhysicsTime();
@@ -646,8 +658,9 @@ const World = {
     const viewMinY = position.y - halfExtent;
     const viewMaxY = position.y + halfExtent;
 
-    // Cache for star systems with binary info
-    const systemCache = new Map();
+    // Reuse module-level Map for star system binary cache
+    _systemCache.clear();
+    const systemCache = _systemCache;
 
     for (let dx = -2; dx <= 2; dx++) {
       for (let dy = -2; dy <= 2; dy++) {
@@ -678,21 +691,24 @@ const World = {
               secondaryPos: positions.secondary,
               binaryInfo: star.binaryInfo
             });
-            // Determine if this is primary or secondary
+            // Mutate in-place (positions are recomputed every frame from physics)
             if (star.isPrimaryBinary === false) {
-              objects.stars.push({ ...star, x: positions.secondary.x, y: positions.secondary.y });
+              star.x = positions.secondary.x;
+              star.y = positions.secondary.y;
             } else {
-              objects.stars.push({ ...star, x: positions.primary.x, y: positions.primary.y });
+              star.x = positions.primary.x;
+              star.y = positions.primary.y;
             }
+            objects.stars.push(star);
           } else if (star.isBinary && star.systemId) {
             // Primary star of binary - check if we already computed positions
             const cached = systemCache.get(star.systemId);
             if (cached) {
-              objects.stars.push({ ...star, x: cached.primaryPos.x, y: cached.primaryPos.y });
-            } else {
-              // Need to get binary info from another star in this system
-              objects.stars.push(star);
+              // Mutate in-place (positions are recomputed every frame from physics)
+              star.x = cached.primaryPos.x;
+              star.y = cached.primaryPos.y;
             }
+            objects.stars.push(star);
           } else {
             // Single star - no movement
             objects.stars.push(star);
@@ -722,17 +738,22 @@ const World = {
               starPos = parentStar.isPrimaryBinary === false ? positions.secondary : positions.primary;
             }
           } else if (planet.starX !== undefined) {
-            starPos = { x: planet.starX, y: planet.starY };
+            _starPos.x = planet.starX;
+            _starPos.y = planet.starY;
+            starPos = _starPos;
           } else if (parentStar) {
-            starPos = { x: parentStar.x, y: parentStar.y };
+            _starPos.x = parentStar.x;
+            _starPos.y = parentStar.y;
+            starPos = _starPos;
           }
 
           if (starPos && planet.orbitSpeed) {
             const pos = Physics.computePlanetPosition(planet, starPos, orbitTime);
-            objects.planets.push({ ...planet, x: pos.x, y: pos.y });
-          } else {
-            objects.planets.push(planet);
+            // Mutate in-place (positions are recomputed every frame from orbital mechanics)
+            planet.x = pos.x;
+            planet.y = pos.y;
           }
+          objects.planets.push(planet);
         }
 
         // Asteroids - orbital vs bouncing physics
@@ -757,39 +778,45 @@ const World = {
                 starPos = parentStar.isPrimaryBinary === false ? positions.secondary : positions.primary;
               }
             } else if (asteroid.starX !== undefined) {
-              starPos = { x: asteroid.starX, y: asteroid.starY };
+              _starPos.x = asteroid.starX;
+              _starPos.y = asteroid.starY;
+              starPos = _starPos;
             } else if (parentStar) {
-              starPos = { x: parentStar.x, y: parentStar.y };
+              _starPos.x = parentStar.x;
+              _starPos.y = parentStar.y;
+              starPos = _starPos;
             } else {
-              starPos = { x: asteroid.starX || asteroid.x, y: asteroid.starY || asteroid.y };
+              _starPos.x = asteroid.starX || asteroid.x;
+              _starPos.y = asteroid.starY || asteroid.y;
+              starPos = _starPos;
             }
 
             const pos = Physics.computeBeltAsteroidPosition(asteroid, starPos, orbitTime);
-            objects.asteroids.push({
-              ...asteroid,
-              x: pos.x,
-              y: pos.y,
-              currentAngle: pos.angle,
-              state: 'orbiting'
-            });
+            // Mutate in-place (positions are recomputed every frame from physics)
+            asteroid.x = pos.x;
+            asteroid.y = pos.y;
+            asteroid.currentAngle = pos.angle;
+            asteroid.state = 'orbiting';
+            objects.asteroids.push(asteroid);
           } else if (asteroid.initialX !== undefined) {
             // Bouncing/drifting asteroid - use legacy physics
             const state = Physics.getAsteroidPosition(asteroid, sector.stars, asteroidTime);
-            objects.asteroids.push({
-              ...asteroid,
-              x: state.x,
-              y: state.y,
-              state: state.state,
-              capturedBy: state.capturedBy
-            });
+            // Mutate in-place (positions are recomputed every frame from physics)
+            asteroid.x = state.x;
+            asteroid.y = state.y;
+            asteroid.state = state.state;
+            asteroid.capturedBy = state.capturedBy;
+            objects.asteroids.push(asteroid);
           } else {
             // Static asteroid
             objects.asteroids.push(asteroid);
           }
         }
 
-        // Wormholes don't move
-        objects.wormholes.push(...sector.wormholes);
+        // Wormholes don't move - push individually to avoid spread allocation
+        for (let wi = 0; wi < sector.wormholes.length; wi++) {
+          objects.wormholes.push(sector.wormholes[wi]);
+        }
 
         // Bases - compute positions for orbital bases and binary star systems
         for (const base of sector.bases) {
@@ -812,34 +839,36 @@ const World = {
               starPos = parentStar.isPrimaryBinary === false ? positions.secondary : positions.primary;
             }
           } else if (base.starX !== undefined) {
-            starPos = { x: base.starX, y: base.starY };
+            _starPos.x = base.starX;
+            _starPos.y = base.starY;
+            starPos = _starPos;
           } else if (parentStar) {
-            starPos = { x: parentStar.x, y: parentStar.y };
+            _starPos.x = parentStar.x;
+            _starPos.y = parentStar.y;
+            starPos = _starPos;
           }
-
-          // Compute final position
-          let finalX = base.x;
-          let finalY = base.y;
 
           if (starPos && base.orbitRadius && base.orbitSpeed) {
-            // Orbital base - compute current orbital position
+            // Orbital base - mutate in-place (recomputed every frame from orbit params)
             const elapsedSeconds = orbitTime / 1000;
             const currentAngle = base.orbitAngle + (base.orbitSpeed * elapsedSeconds);
-            finalX = starPos.x + Math.cos(currentAngle) * base.orbitRadius;
-            finalY = starPos.y + Math.sin(currentAngle) * base.orbitRadius;
+            base.x = starPos.x + Math.cos(currentAngle) * base.orbitRadius;
+            base.y = starPos.y + Math.sin(currentAngle) * base.orbitRadius;
+            objects.bases.push(base);
           } else if (starPos && base.starX !== undefined) {
-            // Static base in binary system - compute offset from moving star
+            // Static base in binary system - uses base.x for offset, so cannot mutate
+            // This is a rare case (binary system static bases)
             const offsetX = base.x - base.starX;
             const offsetY = base.y - base.starY;
-            finalX = starPos.x + offsetX;
-            finalY = starPos.y + offsetY;
+            objects.bases.push({
+              ...base,
+              x: starPos.x + offsetX,
+              y: starPos.y + offsetY
+            });
+          } else {
+            // Non-orbital, non-binary base - push directly
+            objects.bases.push(base);
           }
-
-          objects.bases.push({
-            ...base,
-            x: finalX,
-            y: finalY
-          });
         }
       }
     }

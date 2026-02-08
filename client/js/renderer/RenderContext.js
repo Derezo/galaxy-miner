@@ -248,11 +248,14 @@ const RenderContext = {
    * @param {number} y - World Y
    * @returns {{ x: number, y: number }} Screen coordinates
    */
+  // Shared mutable result object for worldToScreen() to avoid per-call allocation.
+  // SAFETY: callers must consume .x/.y before the next worldToScreen() call.
+  _screenPos: { x: 0, y: 0 },
+
   worldToScreen(x, y) {
-    return {
-      x: x - this.camera.x,
-      y: y - this.camera.y
-    };
+    this._screenPos.x = x - this.camera.x;
+    this._screenPos.y = y - this.camera.y;
+    return this._screenPos;
   },
 
   /**
@@ -263,12 +266,14 @@ const RenderContext = {
    * @returns {boolean} True if on screen
    */
   isOnScreen(x, y, margin = 100) {
-    const screen = this.worldToScreen(x, y);
+    // Inlined to avoid overwriting _screenPos when called before worldToScreen
+    const sx = x - this.camera.x;
+    const sy = y - this.camera.y;
     return (
-      screen.x > -margin &&
-      screen.x < this.width + margin &&
-      screen.y > -margin &&
-      screen.y < this.height + margin
+      sx > -margin &&
+      sx < this.width + margin &&
+      sy > -margin &&
+      sy < this.height + margin
     );
   }
 };

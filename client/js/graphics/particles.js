@@ -231,22 +231,54 @@ const ParticleSystem = {
    * @param {number} count - Base particle count (will be scaled by quality)
    * @param {Object} spread - Spread values for randomization
    */
+  // Reusable config object for spawnBurst to avoid per-particle allocation
+  _burstConfig: {
+    x: 0, y: 0, vx: 0, vy: 0, life: 0, size: 0,
+    color: '#ffffff', secondaryColor: null, decay: 1, drag: 1,
+    type: 'default', rotation: 0, rotationSpeed: 0,
+    gravity: 0, pulse: false, pulseSpeed: 0, essential: false
+  },
+
   spawnBurst(config, count, spread = {}) {
     // Apply particle multiplier to reduce particle counts on lower settings
     const adjustedCount = this.scaleCount(count);
 
     if (adjustedCount === 0) return;
 
+    // Copy base config properties into reusable object once
+    const bc = this._burstConfig;
+    bc.color = config.color || '#ffffff';
+    bc.secondaryColor = config.secondaryColor || null;
+    bc.decay = config.decay ?? 1;
+    bc.drag = config.drag ?? 1;
+    bc.type = config.type || 'default';
+    bc.rotation = config.rotation || 0;
+    bc.rotationSpeed = config.rotationSpeed || 0;
+    bc.gravity = config.gravity || 0;
+    bc.pulse = config.pulse || false;
+    bc.pulseSpeed = config.pulseSpeed || 0;
+    bc.essential = config.essential || false;
+
+    // Pre-compute base values and spread multipliers
+    const baseVx = config.vx || 0;
+    const baseVy = config.vy || 0;
+    const baseLife = config.life || 500;
+    const baseSize = config.size || 2;
+    const spreadX = spread.x || 0;
+    const spreadY = spread.y || 0;
+    const spreadVx = spread.vx || 0;
+    const spreadVy = spread.vy || 0;
+    const spreadLife = spread.life || 0;
+    const spreadSize = spread.size || 0;
+
     for (let i = 0; i < adjustedCount; i++) {
-      this.spawn({
-        ...config,
-        x: config.x + (Math.random() - 0.5) * (spread.x || 0),
-        y: config.y + (Math.random() - 0.5) * (spread.y || 0),
-        vx: (config.vx || 0) + (Math.random() - 0.5) * (spread.vx || 0),
-        vy: (config.vy || 0) + (Math.random() - 0.5) * (spread.vy || 0),
-        life: (config.life || 500) + (Math.random() - 0.5) * (spread.life || 0),
-        size: (config.size || 2) + (Math.random() - 0.5) * (spread.size || 0)
-      });
+      bc.x = config.x + (Math.random() - 0.5) * spreadX;
+      bc.y = config.y + (Math.random() - 0.5) * spreadY;
+      bc.vx = baseVx + (Math.random() - 0.5) * spreadVx;
+      bc.vy = baseVy + (Math.random() - 0.5) * spreadVy;
+      bc.life = baseLife + (Math.random() - 0.5) * spreadLife;
+      bc.size = baseSize + (Math.random() - 0.5) * spreadSize;
+      this.spawn(bc);
     }
   },
 
