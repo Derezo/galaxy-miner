@@ -376,6 +376,7 @@ const StarEffects = {
   drawCoronaGlow(ctx, screenX, screenY, star) {
     const size = star.size || 400;
     const coronaRadius = size * 1.5;
+    const starColor = star.color || '#ffff00';
 
     ctx.save();
 
@@ -384,29 +385,51 @@ const StarEffects = {
     const shimmer = 0.85 + Math.sin(time * 2) * 0.15;
 
     // Get colors for this star type
-    const colors = this.getFlareColors(star.color || '#ffff00');
+    const colors = this.getFlareColors(starColor);
 
-    // Outer corona glow
-    const gradient = ctx.createRadialGradient(screenX, screenY, size * 0.9, screenX, screenY, coronaRadius);
-    gradient.addColorStop(0, colors.outer + '40');
-    gradient.addColorStop(0.5, colors.outer + '15');
-    gradient.addColorStop(1, 'transparent');
+    // Use origin-centered cached gradients + translate for position
+    ctx.translate(screenX, screenY);
+
+    // Outer corona glow (cached by size + color since both are static per star)
+    let gradient;
+    if (typeof GradientCache !== 'undefined' && GradientCache._ctx) {
+      const outerKey = `corona_outer_${size}_${starColor}`;
+      gradient = GradientCache.getRadial(outerKey, size * 0.9, coronaRadius, [
+        [0, colors.outer + '40'],
+        [0.5, colors.outer + '15'],
+        [1, 'transparent']
+      ]);
+    } else {
+      gradient = ctx.createRadialGradient(0, 0, size * 0.9, 0, 0, coronaRadius);
+      gradient.addColorStop(0, colors.outer + '40');
+      gradient.addColorStop(0.5, colors.outer + '15');
+      gradient.addColorStop(1, 'transparent');
+    }
 
     ctx.globalAlpha = shimmer;
     ctx.fillStyle = gradient;
     ctx.beginPath();
-    ctx.arc(screenX, screenY, coronaRadius, 0, Math.PI * 2);
+    ctx.arc(0, 0, coronaRadius, 0, Math.PI * 2);
     ctx.fill();
 
-    // Inner corona detail
-    const innerGradient = ctx.createRadialGradient(screenX, screenY, size * 0.8, screenX, screenY, size * 1.1);
-    innerGradient.addColorStop(0, colors.inner + '60');
-    innerGradient.addColorStop(1, colors.outer + '20');
+    // Inner corona detail (cached by size + color)
+    let innerGradient;
+    if (typeof GradientCache !== 'undefined' && GradientCache._ctx) {
+      const innerKey = `corona_inner_${size}_${starColor}`;
+      innerGradient = GradientCache.getRadial(innerKey, size * 0.8, size * 1.1, [
+        [0, colors.inner + '60'],
+        [1, colors.outer + '20']
+      ]);
+    } else {
+      innerGradient = ctx.createRadialGradient(0, 0, size * 0.8, 0, 0, size * 1.1);
+      innerGradient.addColorStop(0, colors.inner + '60');
+      innerGradient.addColorStop(1, colors.outer + '20');
+    }
 
     ctx.globalAlpha = 0.5 + shimmer * 0.3;
     ctx.fillStyle = innerGradient;
     ctx.beginPath();
-    ctx.arc(screenX, screenY, size * 1.1, 0, Math.PI * 2);
+    ctx.arc(0, 0, size * 1.1, 0, Math.PI * 2);
     ctx.fill();
 
     ctx.restore();

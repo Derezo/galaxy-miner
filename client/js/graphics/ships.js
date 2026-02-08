@@ -261,7 +261,17 @@ const ShipGeometry = {
     const scale = this.SIZE_SCALE[tier] || 1;
     const size = this.SIZE * scale;
 
-    // Gradient from rear to nose
+    // Use gradient cache if available (gradient is already origin-centered)
+    if (typeof GradientCache !== 'undefined' && GradientCache._ctx) {
+      const key = `ship_hull_${tier}_${colors.gradientStart}_${colors.gradientMid}_${colors.gradientEnd}`;
+      return GradientCache.getLinear(key, -size * 0.7, 0, size, 0, [
+        [0, colors.gradientStart],
+        [0.4, colors.gradientMid],
+        [1, colors.gradientEnd]
+      ]);
+    }
+
+    // Fallback: create directly on context
     const gradient = ctx.createLinearGradient(-size * 0.7, 0, size, 0);
     gradient.addColorStop(0, colors.gradientStart);
     gradient.addColorStop(0.4, colors.gradientMid);
@@ -283,6 +293,16 @@ const ShipGeometry = {
     const size = this.SIZE * scale;
     const glowRadius = size * (1.5 + glowIntensity);
 
+    // Use gradient cache if available (gradient is already origin-centered)
+    if (typeof GradientCache !== 'undefined' && GradientCache._ctx) {
+      const key = `ship_glow_${tier}_${colors.glow}`;
+      return GradientCache.getRadial(key, size * 0.3, glowRadius, [
+        [0, colors.glow],
+        [1, 'transparent']
+      ]);
+    }
+
+    // Fallback: create directly on context
     const gradient = ctx.createRadialGradient(0, 0, size * 0.3, 0, 0, glowRadius);
     gradient.addColorStop(0, colors.glow);
     gradient.addColorStop(1, 'transparent');

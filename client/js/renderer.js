@@ -51,6 +51,17 @@ const Renderer = {
       RenderContext.screenShake = this.screenShake;
     }
 
+    // Initialize gradient cache (before other graphics systems that use it)
+    if (typeof GradientCache !== 'undefined') {
+      GradientCache.init(this.ctx);
+      // Clear gradient cache on quality/LOD changes
+      if (typeof GraphicsSettings !== 'undefined') {
+        GraphicsSettings.addListener(() => {
+          GradientCache.clear();
+        });
+      }
+    }
+
     // Initialize graphics systems
     ParticleSystem.init();
     ShipGeometry.init();
@@ -154,6 +165,12 @@ const Renderer = {
 
     // Enable bilinear filtering for smooth upscale when renderScale < 1
     this.ctx.imageSmoothingEnabled = true;
+
+    // Clear and re-init gradient cache (canvas resize invalidates context state)
+    if (typeof GradientCache !== 'undefined') {
+      GradientCache.clear();
+      GradientCache.init(this.ctx);
+    }
 
     // Store logical dimensions for game code (always CSS pixels)
     this.width = cssWidth;
@@ -501,20 +518,25 @@ const Renderer = {
     }
   },
 
+  // Shared mutable result object for worldToScreen() to avoid per-call allocation.
+  // SAFETY: callers must consume .x/.y before the next worldToScreen() call.
+  _screenPos: { x: 0, y: 0 },
+
   worldToScreen(x, y) {
-    return {
-      x: x - this.camera.x,
-      y: y - this.camera.y,
-    };
+    this._screenPos.x = x - this.camera.x;
+    this._screenPos.y = y - this.camera.y;
+    return this._screenPos;
   },
 
   isOnScreen(x, y, margin = 100) {
-    const screen = this.worldToScreen(x, y);
+    // Inlined to avoid overwriting _screenPos when called before worldToScreen
+    const sx = x - this.camera.x;
+    const sy = y - this.camera.y;
     return (
-      screen.x > -margin &&
-      screen.x < this.width + margin &&
-      screen.y > -margin &&
-      screen.y < this.height + margin
+      sx > -margin &&
+      sx < this.width + margin &&
+      sy > -margin &&
+      sy < this.height + margin
     );
   },
 
@@ -738,42 +760,70 @@ const Renderer = {
     };
     const scheme = colorSchemes[star.color] || colorSchemes["#ffff00"];
 
+    const starColor = star.color || "#ffff00";
+    const useGradientCache = typeof GradientCache !== 'undefined' && GradientCache._ctx;
+
     if (lod === 0) {
       // LOD 0 (Minimal): Solid color circle only
-      ctx.fillStyle = star.color || "#ffff00";
+      ctx.fillStyle = starColor;
       ctx.beginPath();
       ctx.arc(screen.x, screen.y, size, 0, Math.PI * 2);
       ctx.fill();
     } else if (lod === 1) {
       // LOD 1 (Low): Simple 2-stop gradient, no glow
-      const gradient = ctx.createRadialGradient(
-        screen.x, screen.y, 0,
-        screen.x, screen.y, size
-      );
-      gradient.addColorStop(0, scheme.core);
-      gradient.addColorStop(1, star.color);
+      let gradient;
+      if (useGradientCache) {
+        const key = `star_l1_${size}_${starColor}`;
+        gradient = GradientCache.getRadial(key, 0, size, [
+          [0, scheme.core],
+          [1, starColor]
+        ]);
+      } else {
+        gradient = ctx.createRadialGradient(
+          0, 0, 0, 0, 0, size
+        );
+        gradient.addColorStop(0, scheme.core);
+        gradient.addColorStop(1, starColor);
+      }
 
+      ctx.save();
+      ctx.translate(screen.x, screen.y);
       ctx.fillStyle = gradient;
       ctx.beginPath();
-      ctx.arc(screen.x, screen.y, size, 0, Math.PI * 2);
+      ctx.arc(0, 0, size, 0, Math.PI * 2);
       ctx.fill();
+      ctx.restore();
     } else {
       // LOD 2+ (Medium/High/Ultra): Full multi-layer gradient
-      const gradient = ctx.createRadialGradient(
-        screen.x, screen.y, 0,
-        screen.x, screen.y, size * turbulence
-      );
+      // Cache with base size; turbulence variation (0.95-1.05) is negligible for gradient shape
+      let gradient;
+      if (useGradientCache) {
+        const key = `star_l2_${size}_${starColor}`;
+        gradient = GradientCache.getRadial(key, 0, size, [
+          [0, scheme.core],
+          [0.25, scheme.mid],
+          [0.7, starColor],
+          [0.9, scheme.outer + "aa"],
+          [1, "transparent"]
+        ]);
+      } else {
+        gradient = ctx.createRadialGradient(
+          0, 0, 0, 0, 0, size * turbulence
+        );
+        gradient.addColorStop(0, scheme.core);
+        gradient.addColorStop(0.25, scheme.mid);
+        gradient.addColorStop(0.7, starColor);
+        gradient.addColorStop(0.9, scheme.outer + "aa");
+        gradient.addColorStop(1, "transparent");
+      }
 
-      gradient.addColorStop(0, scheme.core);
-      gradient.addColorStop(0.25, scheme.mid);
-      gradient.addColorStop(0.7, star.color);
-      gradient.addColorStop(0.9, scheme.outer + "aa");
-      gradient.addColorStop(1, "transparent");
-
+      ctx.save();
+      ctx.translate(screen.x, screen.y);
       ctx.fillStyle = gradient;
       ctx.beginPath();
-      ctx.arc(screen.x, screen.y, size * turbulence, 0, Math.PI * 2);
+      ctx.arc(0, 0, size * turbulence, 0, Math.PI * 2);
       ctx.fill();
+      ctx.restore();
 
       // Animated dark spots on surface (sunspots) - LOD 2+ only
       ctx.save();
@@ -793,19 +843,31 @@ const Renderer = {
       }
       ctx.restore();
 
-      // Bright white core - LOD 2+ only
-      const coreGradient = ctx.createRadialGradient(
-        screen.x, screen.y, 0,
-        screen.x, screen.y, size * 0.3
-      );
-      coreGradient.addColorStop(0, "#ffffff");
-      coreGradient.addColorStop(0.5, "#ffffee");
-      coreGradient.addColorStop(1, "transparent");
+      // Bright white core - LOD 2+ only (cached: always white, keyed by size)
+      let coreGradient;
+      if (useGradientCache) {
+        const coreKey = `star_core_${size}`;
+        coreGradient = GradientCache.getRadial(coreKey, 0, size * 0.3, [
+          [0, "#ffffff"],
+          [0.5, "#ffffee"],
+          [1, "transparent"]
+        ]);
+      } else {
+        coreGradient = ctx.createRadialGradient(
+          0, 0, 0, 0, 0, size * 0.3
+        );
+        coreGradient.addColorStop(0, "#ffffff");
+        coreGradient.addColorStop(0.5, "#ffffee");
+        coreGradient.addColorStop(1, "transparent");
+      }
 
+      ctx.save();
+      ctx.translate(screen.x, screen.y);
       ctx.fillStyle = coreGradient;
       ctx.beginPath();
-      ctx.arc(screen.x, screen.y, size * 0.3, 0, Math.PI * 2);
+      ctx.arc(0, 0, size * 0.3, 0, Math.PI * 2);
       ctx.fill();
+      ctx.restore();
     }
 
     // Draw danger zone indicator (subtle ring at warm zone boundary) - all LODs
@@ -2377,8 +2439,11 @@ const Renderer = {
     const wreckagePos = npc.collectingWreckagePos;
     if (!wreckagePos) return;
 
-    // Convert wreckage world position to screen position using the same method as NPCs
-    const wreckageScreen = this.worldToScreen(wreckagePos.x, wreckagePos.y);
+    // Inline screen conversion to avoid overwriting shared _screenPos (caller holds reference)
+    const wreckageScreen = {
+      x: wreckagePos.x - camera.x,
+      y: wreckagePos.y - camera.y
+    };
 
     // Get NPC colors for scavengers
     const colors = {

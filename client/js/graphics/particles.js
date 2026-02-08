@@ -396,24 +396,36 @@ const ParticleSystem = {
       return;
     }
 
-    // Gradient glow - fewer stops at lower LOD
-    const gradient = ctx.createRadialGradient(x, y, 0, x, y, particle.size * 2);
+    // Bucket size to nearest 2px for cache key
+    const sizeKey = Math.round(particle.size / 2) * 2 || 2;
+    const outerR = sizeKey * 2;
+    let gradient;
 
-    if (lod >= 3) {
-      // High/Ultra: full gradient
-      gradient.addColorStop(0, particle.color);
-      gradient.addColorStop(0.5, particle.color + '80');
-      gradient.addColorStop(1, 'transparent');
+    if (typeof GradientCache !== 'undefined' && GradientCache._ctx) {
+      const key = `p_glow_${sizeKey}_${particle.color}_${lod >= 3 ? 'h' : 'l'}`;
+      const stops = lod >= 3
+        ? [[0, particle.color], [0.5, particle.color + '80'], [1, 'transparent']]
+        : [[0, particle.color], [1, 'transparent']];
+      gradient = GradientCache.getRadial(key, 0, outerR, stops);
     } else {
-      // Low/Medium: simplified gradient
-      gradient.addColorStop(0, particle.color);
-      gradient.addColorStop(1, 'transparent');
+      gradient = ctx.createRadialGradient(0, 0, 0, 0, 0, outerR);
+      if (lod >= 3) {
+        gradient.addColorStop(0, particle.color);
+        gradient.addColorStop(0.5, particle.color + '80');
+        gradient.addColorStop(1, 'transparent');
+      } else {
+        gradient.addColorStop(0, particle.color);
+        gradient.addColorStop(1, 'transparent');
+      }
     }
 
+    ctx.save();
+    ctx.translate(x, y);
     ctx.fillStyle = gradient;
     ctx.beginPath();
-    ctx.arc(x, y, particle.size * 2, 0, Math.PI * 2);
+    ctx.arc(0, 0, particle.size * 2, 0, Math.PI * 2);
     ctx.fill();
+    ctx.restore();
 
     // White core only at LOD 2+
     if (lod >= 2) {
@@ -448,14 +460,28 @@ const ParticleSystem = {
       return;
     }
 
-    const gradient = ctx.createRadialGradient(x, y, 0, x, y, particle.size);
-    gradient.addColorStop(0, particle.color);
-    gradient.addColorStop(1, 'transparent');
+    const sizeKey = Math.round(particle.size / 2) * 2 || 2;
+    let gradient;
 
+    if (typeof GradientCache !== 'undefined' && GradientCache._ctx) {
+      const key = `p_trail_${sizeKey}_${particle.color}`;
+      gradient = GradientCache.getRadial(key, 0, sizeKey, [
+        [0, particle.color],
+        [1, 'transparent']
+      ]);
+    } else {
+      gradient = ctx.createRadialGradient(0, 0, 0, 0, 0, particle.size);
+      gradient.addColorStop(0, particle.color);
+      gradient.addColorStop(1, 'transparent');
+    }
+
+    ctx.save();
+    ctx.translate(x, y);
     ctx.fillStyle = gradient;
     ctx.beginPath();
-    ctx.arc(x, y, particle.size, 0, Math.PI * 2);
+    ctx.arc(0, 0, particle.size, 0, Math.PI * 2);
     ctx.fill();
+    ctx.restore();
   },
 
   drawSmokeParticle(ctx, x, y, particle, lod) {
@@ -472,15 +498,31 @@ const ParticleSystem = {
       return;
     }
 
-    const gradient = ctx.createRadialGradient(x, y, 0, x, y, expandedSize);
-    gradient.addColorStop(0, particle.color + '60');
-    gradient.addColorStop(0.5, particle.color + '30');
-    gradient.addColorStop(1, 'transparent');
+    // Bucket expanded size to nearest 2px for cache key
+    const sizeKey = Math.round(expandedSize / 2) * 2 || 2;
+    let gradient;
 
+    if (typeof GradientCache !== 'undefined' && GradientCache._ctx) {
+      const key = `p_smoke_${sizeKey}_${particle.color}`;
+      gradient = GradientCache.getRadial(key, 0, sizeKey, [
+        [0, particle.color + '60'],
+        [0.5, particle.color + '30'],
+        [1, 'transparent']
+      ]);
+    } else {
+      gradient = ctx.createRadialGradient(0, 0, 0, 0, 0, expandedSize);
+      gradient.addColorStop(0, particle.color + '60');
+      gradient.addColorStop(0.5, particle.color + '30');
+      gradient.addColorStop(1, 'transparent');
+    }
+
+    ctx.save();
+    ctx.translate(x, y);
     ctx.fillStyle = gradient;
     ctx.beginPath();
-    ctx.arc(x, y, expandedSize, 0, Math.PI * 2);
+    ctx.arc(0, 0, expandedSize, 0, Math.PI * 2);
     ctx.fill();
+    ctx.restore();
   },
 
   drawEnergyParticle(ctx, x, y, particle, lod) {
@@ -496,18 +538,33 @@ const ParticleSystem = {
       return;
     }
 
-    // Outer glow
-    const outerGradient = ctx.createRadialGradient(x, y, 0, x, y, pulseSize * 2);
-    outerGradient.addColorStop(0, particle.color);
-    if (lod >= 3) {
-      outerGradient.addColorStop(0.4, particle.color + '80');
-    }
-    outerGradient.addColorStop(1, 'transparent');
+    // Bucket pulsing size to nearest 2px for cache key
+    const sizeKey = Math.round(pulseSize / 2) * 2 || 2;
+    const outerR = sizeKey * 2;
+    let outerGradient;
 
+    if (typeof GradientCache !== 'undefined' && GradientCache._ctx) {
+      const key = `p_energy_${sizeKey}_${particle.color}_${lod >= 3 ? 'h' : 'l'}`;
+      const stops = lod >= 3
+        ? [[0, particle.color], [0.4, particle.color + '80'], [1, 'transparent']]
+        : [[0, particle.color], [1, 'transparent']];
+      outerGradient = GradientCache.getRadial(key, 0, outerR, stops);
+    } else {
+      outerGradient = ctx.createRadialGradient(0, 0, 0, 0, 0, outerR);
+      outerGradient.addColorStop(0, particle.color);
+      if (lod >= 3) {
+        outerGradient.addColorStop(0.4, particle.color + '80');
+      }
+      outerGradient.addColorStop(1, 'transparent');
+    }
+
+    ctx.save();
+    ctx.translate(x, y);
     ctx.fillStyle = outerGradient;
     ctx.beginPath();
-    ctx.arc(x, y, pulseSize * 2, 0, Math.PI * 2);
+    ctx.arc(0, 0, pulseSize * 2, 0, Math.PI * 2);
     ctx.fill();
+    ctx.restore();
 
     // Bright core
     if (lod >= 2) {
@@ -580,16 +637,33 @@ const ParticleSystem = {
       return;
     }
 
-    // Outer orange/red
-    const outerGradient = ctx.createRadialGradient(x, y + size * 0.3, 0, x, y, size * 1.5);
-    outerGradient.addColorStop(0, particle.secondaryColor || '#ffff00');
-    outerGradient.addColorStop(0.4, particle.color);
-    outerGradient.addColorStop(1, 'transparent');
+    // Bucket size to nearest 2px for cache key
+    const sizeKey = Math.round(size / 2) * 2 || 2;
+    const secondaryColor = particle.secondaryColor || '#ffff00';
+    let outerGradient;
 
+    if (typeof GradientCache !== 'undefined' && GradientCache._ctx) {
+      // Flame gradient: offset center (0, size*0.3) to outer (0, 0) at size*1.5
+      const key = `p_flame_${sizeKey}_${particle.color}_${secondaryColor}`;
+      outerGradient = GradientCache.getRadial(key, 0, sizeKey * 1.5, [
+        [0, secondaryColor],
+        [0.4, particle.color],
+        [1, 'transparent']
+      ]);
+    } else {
+      outerGradient = ctx.createRadialGradient(0, size * 0.3, 0, 0, 0, size * 1.5);
+      outerGradient.addColorStop(0, secondaryColor);
+      outerGradient.addColorStop(0.4, particle.color);
+      outerGradient.addColorStop(1, 'transparent');
+    }
+
+    ctx.save();
+    ctx.translate(x, y);
     ctx.fillStyle = outerGradient;
     ctx.beginPath();
-    ctx.ellipse(x, y, size * 0.7, size * 1.2, 0, 0, Math.PI * 2);
+    ctx.ellipse(0, 0, size * 0.7, size * 1.2, 0, 0, Math.PI * 2);
     ctx.fill();
+    ctx.restore();
 
     // Inner bright core (only at LOD 2+)
     if (lod >= 2) {
