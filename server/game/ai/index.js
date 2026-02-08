@@ -303,9 +303,10 @@ function handleRageMode(npc, allPlayers, deltaTime) {
  * @param {number} deltaTime - Time since last update
  * @param {Function} getActiveBase - Function to look up base by ID (optional, for scavengers)
  * @param {Function} getBasesInRange - Function to get bases within range (optional, for pirates)
+ * @param {Object} npcSpatialHash - Spatial hash for efficient NPC range queries (optional, falls back to full scan)
  * @returns {Object|null} Action result (fire, etc.)
  */
-function updateNPCAI(npc, allPlayers, allNPCs, deltaTime, getActiveBase = null, getBasesInRange = null) {
+function updateNPCAI(npc, allPlayers, allNPCs, deltaTime, getActiveBase = null, getBasesInRange = null, npcSpatialHash = null) {
   // Special handling for orphaned NPCs in rage mode
   if (npc.orphaned && npc.state === 'rage') {
     return handleRageMode(npc, allPlayers, deltaTime);
@@ -338,22 +339,51 @@ function updateNPCAI(npc, allPlayers, allNPCs, deltaTime, getActiveBase = null, 
   };
   const hostileFactions = FACTION_ENEMIES[npc.faction] || [];
 
-  for (const [id, otherNpc] of allNPCs) {
-    if (id === npc.id) continue;
+  // Use spatial hash for O(k) lookup instead of iterating all NPCs
+  const allyRange = 500;
+  const queryRadius = Math.max(allyRange, npc.aggroRange);
 
-    const dx = otherNpc.position.x - npc.position.x;
-    const dy = otherNpc.position.y - npc.position.y;
-    const dist = Math.sqrt(dx * dx + dy * dy);
+  if (npcSpatialHash) {
+    const nearbyIds = npcSpatialHash.query(npc.position.x, npc.position.y, queryRadius);
 
-    if (otherNpc.faction === npc.faction) {
-      // Allies within 500 units
-      if (dist <= 500) {
-        nearbyAllies.push({ ...otherNpc, distance: dist });
+    for (const id of nearbyIds) {
+      if (id === npc.id) continue;
+      const otherNpc = allNPCs.get(id);
+      if (!otherNpc) continue;
+
+      const dx = otherNpc.position.x - npc.position.x;
+      const dy = otherNpc.position.y - npc.position.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+
+      if (otherNpc.faction === npc.faction) {
+        // Allies within 500 units
+        if (dist <= allyRange) {
+          nearbyAllies.push({ ...otherNpc, distance: dist });
+        }
+      } else if (hostileFactions.includes(otherNpc.faction)) {
+        // Hostile NPCs within aggro range
+        if (dist <= npc.aggroRange) {
+          nearbyHostiles.push({ ...otherNpc, distance: dist });
+        }
       }
-    } else if (hostileFactions.includes(otherNpc.faction)) {
-      // Hostile NPCs within aggro range
-      if (dist <= npc.aggroRange) {
-        nearbyHostiles.push({ ...otherNpc, distance: dist });
+    }
+  } else {
+    // Fallback: iterate all NPCs if spatial hash not available
+    for (const [id, otherNpc] of allNPCs) {
+      if (id === npc.id) continue;
+
+      const dx = otherNpc.position.x - npc.position.x;
+      const dy = otherNpc.position.y - npc.position.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+
+      if (otherNpc.faction === npc.faction) {
+        if (dist <= allyRange) {
+          nearbyAllies.push({ ...otherNpc, distance: dist });
+        }
+      } else if (hostileFactions.includes(otherNpc.faction)) {
+        if (dist <= npc.aggroRange) {
+          nearbyHostiles.push({ ...otherNpc, distance: dist });
+        }
       }
     }
   }

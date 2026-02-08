@@ -887,6 +887,7 @@ function spawnSwarmQueen(position) {
   };
 
   activeNPCs.set(queenId, queen);
+  npcSpatialHash.insert(queenId, queen.position.x, queen.position.y);
   activeQueen = queen;
   lastQueenSpawnTime = Date.now();
 
@@ -998,6 +999,7 @@ function spawnVoidLeviathan(position) {
   };
 
   activeNPCs.set(leviathanId, leviathan);
+  npcSpatialHash.insert(leviathanId, leviathan.position.x, leviathan.position.y);
   activeLeviathan = leviathan;
   lastLeviathanSpawnTime = Date.now();
 
@@ -1613,6 +1615,7 @@ function spawnNPCFromBase(baseId) {
   }
 
   activeNPCs.set(npcId, npc);
+  npcSpatialHash.insert(npcId, npc.position.x, npc.position.y);
   base.spawnedNPCs.push(npcId);
   base.lastSpawnTime = Date.now();
 
@@ -1687,6 +1690,7 @@ function spawnScoutFromBase(baseId) {
   };
 
   activeNPCs.set(npcId, npc);
+  npcSpatialHash.insert(npcId, npc.position.x, npc.position.y);
   base.spawnedNPCs.push(npcId);
 
   logger.log(`[PIRATE] Scout ${npcId} spawned at distance ${scoutConfig.spawnRadius} from base ${base.name}`);
@@ -1774,6 +1778,7 @@ function spawnCaptainFromIntel(baseId, intel) {
   };
 
   activeNPCs.set(npcId, npc);
+  npcSpatialHash.insert(npcId, npc.position.x, npc.position.y);
   base.spawnedNPCs.push(npcId);
 
   const targetDesc = intel.isBaseTarget ? `${intel.baseType} base` : intel.targetType;
@@ -2607,7 +2612,7 @@ function updateNPC(npc, players, deltaTime) {
 
   // Use the new AI system for faction-specific behavior
   // Pass getActiveBase for scavengers, getBasesInRange for pirates
-  return ai.updateNPCAI(npc, players, activeNPCs, deltaTime, getActiveBase, getBasesInRange);
+  return ai.updateNPCAI(npc, players, activeNPCs, deltaTime, getActiveBase, getBasesInRange, npcSpatialHash);
 }
 
 /**
@@ -2880,10 +2885,41 @@ function getNPCsInRange(position, range) {
 
 /**
  * Rebuild the NPC spatial hash from activeNPCs
- * Should be called once per tick before any range queries
+ * Kept as a safety net but no longer called every tick.
+ * Use incremental insert/update/remove instead.
  */
 function rebuildNPCSpatialHash() {
   npcSpatialHash.rebuild(activeNPCs);
+}
+
+/**
+ * Incrementally update a single NPC's position in the spatial hash.
+ * No-op if the NPC is still in the same cell (cell size 200u).
+ * @param {string|number} id - NPC ID
+ * @param {Object} entity - NPC entity with {position: {x, y}}
+ */
+function updateNPCInHash(id, entity) {
+  if (entity && entity.position) {
+    npcSpatialHash.update(id, entity.position.x, entity.position.y);
+  }
+}
+
+/**
+ * Insert a single NPC into the spatial hash (for spawning).
+ * @param {string|number} id - NPC ID
+ * @param {number} x - World X coordinate
+ * @param {number} y - World Y coordinate
+ */
+function insertNPCInHash(id, x, y) {
+  npcSpatialHash.insert(id, x, y);
+}
+
+/**
+ * Remove a single NPC from the spatial hash (for despawning/death).
+ * @param {string|number} id - NPC ID
+ */
+function removeNPCFromHash(id) {
+  npcSpatialHash.remove(id);
 }
 
 // Update NPC shield recharge
