@@ -511,4 +511,4 @@ socket.on('upgrade:error', ({ message }) => {
 - [Resources System](resources.md) - Complete resource reference
 - [Database Schema](database-schema.md#ships) - Ship component storage
 - [Socket Events](../api/socket-events.md#ship-events) - Upgrade events
-- [Configuration](../CLAUDE.md#upgrade-costs) - Upgrade constants
+- [Configuration](../../CLAUDE.md) - Project configuration and constants

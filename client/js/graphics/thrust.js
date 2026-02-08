@@ -72,13 +72,25 @@ const ThrustRenderer = {
   draw(ctx, position, rotation, velocity, camera, tier, intensity, dt, isBoosting = false) {
     if (intensity <= 0) return;
 
+    // Quality-based LOD system for thrust rendering
+    const quality = typeof GraphicsSettings !== 'undefined' ? GraphicsSettings.getQuality() : 80;
+
+    // Skip all thrust visuals at very low quality
+    if (quality < 5) return;
+
+    // LOD levels: 0 = core only, 1 = +plume, 2 = +outer glow, 3 = +afterburner rings
+    const lod = quality < 20 ? 0 : (quality < 50 ? 1 : (quality < 80 ? 2 : 3));
+
     const config = THRUST_CONFIG[tier] || THRUST_CONFIG[1];
     const size = CONSTANTS.SHIP_SIZE;
 
-    // Use boost visuals when boosting
-    if (isBoosting) {
+    // Use boost visuals when boosting (gated at quality 30+)
+    if (isBoosting && quality >= 30) {
       this.drawBoostEffect(ctx, position, rotation, velocity, camera, tier, intensity, dt);
       return;
+    } else if (isBoosting && quality < 30) {
+      // At low quality, draw simpler thrust even when boosting
+      // Fall through to normal thrust rendering
     }
 
     // Get exhaust position in world space
@@ -103,17 +115,21 @@ const ThrustRenderer = {
     const flicker = 1 - Math.random() * config.flickerIntensity;
     const effectiveIntensity = intensity * flicker;
 
-    // Layer 1: Outer glow
-    this.drawOuterGlow(ctx, size, config, effectiveIntensity);
-
-    // Layer 2: Main plume
-    this.drawPlume(ctx, size, config, effectiveIntensity);
-
-    // Layer 3: Core flame
+    // LOD 0+: Core flame (always drawn at quality 5+)
     this.drawCore(ctx, size, config, effectiveIntensity);
 
-    // Layer 4: Afterburner rings (tier 4+)
-    if (config.hasAfterburner && intensity > 0.6) {
+    // LOD 1+: Main plume (quality 20+)
+    if (lod >= 1) {
+      this.drawPlume(ctx, size, config, effectiveIntensity);
+    }
+
+    // LOD 2+: Outer glow (quality 50+)
+    if (lod >= 2) {
+      this.drawOuterGlow(ctx, size, config, effectiveIntensity);
+    }
+
+    // LOD 3+: Afterburner rings (quality 80+, tier 4+)
+    if (lod >= 3 && config.hasAfterburner && intensity > 0.6) {
       this.drawAfterburnerRings(ctx, size, config, effectiveIntensity);
     }
 
@@ -203,12 +219,22 @@ const ThrustRenderer = {
   },
 
   spawnParticles(position, velocity, angle, config, intensity, dt) {
+    // Check if thrust particles are enabled (quality 10+)
+    if (typeof GraphicsSettings !== 'undefined' &&
+        !GraphicsSettings.isFeatureEnabled('thrustParticles')) {
+      return;
+    }
+
     // Apply thrust trail length multiplier from graphics settings
     const trailMultiplier = typeof GraphicsSettings !== 'undefined'
-      ? (GraphicsSettings.get('thrustTrailLength') || 1.0)
+      ? (GraphicsSettings.getThrustConfig().trailLength || 1.0)
       : 1.0;
 
-    const spawnRate = config.particleCount * intensity * trailMultiplier;
+    // Scale particle count with quality
+    const particleMultiplier = typeof ParticleSystem !== 'undefined' && ParticleSystem.getParticleMultiplier
+      ? ParticleSystem.getParticleMultiplier()
+      : 1;
+    const spawnRate = config.particleCount * intensity * trailMultiplier * particleMultiplier;
     this.particleAccumulator += spawnRate * dt;
 
     while (this.particleAccumulator >= 1) {
@@ -493,14 +519,25 @@ const ThrustRenderer = {
   },
 
   spawnBoostParticles(position, velocity, angle, intensity, dt, isVoid = false) {
+    // Check if thrust particles are enabled at current quality level
+    if (typeof GraphicsSettings !== 'undefined' &&
+        !GraphicsSettings.isFeatureEnabled('thrustParticles')) {
+      return;
+    }
+
     const config = isVoid ? VOID_BOOST_CONFIG : BOOST_CONFIG;
 
     // Apply thrust trail length multiplier from graphics settings
     const trailMultiplier = typeof GraphicsSettings !== 'undefined'
-      ? (GraphicsSettings.get('thrustTrailLength') || 1.0)
+      ? (GraphicsSettings.getThrustConfig().trailLength || 1.0)
       : 1.0;
 
-    const spawnRate = 60 * config.particleMultiplier * intensity * trailMultiplier;
+    // Apply particle multiplier from quality settings
+    const particleMultiplier = typeof ParticleSystem !== 'undefined' && ParticleSystem.getParticleMultiplier
+      ? ParticleSystem.getParticleMultiplier()
+      : 1;
+
+    const spawnRate = 60 * config.particleMultiplier * intensity * trailMultiplier * particleMultiplier;
     this.particleAccumulator += spawnRate * dt;
 
     while (this.particleAccumulator >= 1) {

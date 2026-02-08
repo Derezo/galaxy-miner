@@ -189,9 +189,9 @@ const ShieldVisual = {
    * @param {number} tier - Shield tier (1-5)
    */
   addImpact(worldX, worldY, shipX, shipY, tier = 1) {
-    // Skip ripple effects if disabled in graphics settings
+    // Skip ripple effects if disabled in graphics settings (quality 35+)
     if (typeof GraphicsSettings !== 'undefined' &&
-        GraphicsSettings.get('shieldRipples') === false) {
+        !GraphicsSettings.isFeatureEnabled('shieldRipples')) {
       return;
     }
 

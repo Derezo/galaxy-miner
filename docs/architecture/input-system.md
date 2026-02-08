@@ -435,6 +435,6 @@ Mouse move events are not throttled but position is only read during game loop.
 
 ## Related Documentation
 
-- [Mobile System](/docs/systems/mobile.md) - Mobile controls overview
+- [Mobile System](/client/js/mobile/README.md) - Mobile controls overview
 - [Game Loop](/docs/architecture/game-loop.md) - How input integrates with update cycle
 - [Player Module](/client/js/player.js) - How input affects ship physics

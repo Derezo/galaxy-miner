@@ -506,17 +506,29 @@ function updateBases(deltaTime) {
         // Get base data for broadcast
         const baseObj = world.getObjectById(baseId);
         if (baseObj) {
-          // Broadcast base respawn to nearby players
-          broadcastNearBase(baseObj, 'base:respawn', {
+          // Get computed position for orbital bases
+          const computedPos = world.getObjectPosition(baseId);
+          const currentX = computedPos ? computedPos.x : baseObj.x;
+          const currentY = computedPos ? computedPos.y : baseObj.y;
+
+          // Broadcast base respawn to nearby players using computed position
+          broadcastNearBase({ ...baseObj, x: currentX, y: currentY }, 'base:respawn', {
             id: baseId,
-            x: baseObj.x,
-            y: baseObj.y,
+            x: currentX,
+            y: currentY,
             size: baseObj.size,
             type: baseObj.type,
             faction: baseObj.faction,
             name: baseObj.name,
             health: activeBase.health,
-            maxHealth: activeBase.maxHealth
+            maxHealth: activeBase.maxHealth,
+            // Include orbital parameters so client can track position
+            isOrbital: !!(baseObj.orbitRadius && baseObj.orbitSpeed),
+            orbitRadius: baseObj.orbitRadius,
+            orbitSpeed: baseObj.orbitSpeed,
+            orbitAngle: baseObj.orbitAngle,
+            starX: baseObj.starX,
+            starY: baseObj.starY
           });
         }
       }
@@ -670,7 +682,7 @@ function updateNPCs(deltaTime) {
           if (assimAction && assimAction.action === 'assimilate') {
             // Process the drone sacrifice
             logger.info(`[ASSIMILATE] Drone ${assimAction.droneId} attempting to assimilate base ${assimAction.baseId}`);
-            const result = npc.processDroneAssimilation(assimAction.droneId, assimAction.baseId);
+            const result = npc.attachDroneToBase(assimAction.droneId, assimAction.baseId);
             logger.info(`[ASSIMILATE] Result: success=${result?.success}, isComplete=${result?.isComplete}, hasConversion=${!!result?.conversion}`);
 
             if (result && socketModule) {
@@ -2327,6 +2339,12 @@ function playerAttackBase(attackerId, baseId, weaponType, weaponTier) {
     return null;
   }
 
+  // Get computed position for orbital bases (handles orbiting and binary star systems)
+  // This ensures visual effects appear at the correct location where the base is rendered
+  const computedPos = world.getObjectPosition(baseId);
+  const currentX = computedPos ? computedPos.x : baseObj.x;
+  const currentY = computedPos ? computedPos.y : baseObj.y;
+
   // Calculate damage using proper damage calculation
   const damage = combat.calculateDamage(weaponType, weaponTier, 1);
   const totalDamage = damage.shieldDamage + damage.hullDamage;
@@ -2347,10 +2365,11 @@ function playerAttackBase(attackerId, baseId, weaponType, weaponTier) {
       faction: baseObj.faction,
       type: 'base',
       creditReward: 0
-    }, { x: baseObj.x, y: baseObj.y }, baseLoot, null);
+    }, { x: currentX, y: currentY }, baseLoot, null);
 
     // Broadcast base destruction with team info and visual data
-    broadcastNearBase(baseObj, 'base:destroyed', {
+    // Use computed position for broadcasting range check and visual coordinates
+    broadcastNearBase({ ...baseObj, x: currentX, y: currentY }, 'base:destroyed', {
       id: baseId,
       destroyedBy: attackerId,
       participants: result.participants,
@@ -2361,8 +2380,8 @@ function playerAttackBase(attackerId, baseId, weaponType, weaponTier) {
       respawnTime: result.respawnTime,
       wreckageId: wreckage.id,
       // Visual data for destruction sequence
-      x: baseObj.x,
-      y: baseObj.y,
+      x: currentX,
+      y: currentY,
       baseType: baseObj.type,
       size: baseObj.size || 80,
       // Assimilation drones that died with the base (client should remove worm visuals)
@@ -2391,14 +2410,15 @@ function playerAttackBase(attackerId, baseId, weaponType, weaponTier) {
 
   // Broadcast base damage for feedback
   if (result) {
-    broadcastNearBase(baseObj, 'base:damaged', {
+    // Use computed position for broadcasting range check and visual coordinates
+    broadcastNearBase({ ...baseObj, x: currentX, y: currentY }, 'base:damaged', {
       baseId: baseId,
       attackerId: attackerId,
       damage: Math.round(totalDamage),
       health: result.health,
       maxHealth: result.maxHealth,
-      x: baseObj.x,
-      y: baseObj.y,
+      x: currentX,
+      y: currentY,
       faction: baseObj.faction,
       size: baseObj.size || 80
     });

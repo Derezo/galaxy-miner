@@ -1,6 +1,8 @@
 # Audio System Architecture
 
-Visual overview of the Galaxy Miner audio system.
+Visual overview of the Galaxy Miner audio system internals.
+
+For API reference, integration hooks, and usage examples, see [README.md](README.md).
 
 ## System Layers
 
@@ -169,26 +171,6 @@ Example:
     Final: 0.9 * 1.0 * 0.8 * 0.5 = 0.36
 ```
 
-## Priority System
-
-```
-Sound Queue (MAX_CONCURRENT = 32)
-
-Priority Levels:
-  CRITICAL (100) ─── Always plays (boss events, player death)
-  HIGH (75)     ──── Usually plays (weapons, impacts)
-  MEDIUM (50)   ───┬─ Plays if < 80% capacity
-  LOW (25)      ───┴─ Plays if < 60% capacity
-  MINIMAL (10)  ───── Rarely plays (background ambient)
-
-When at capacity:
-  1. Check incoming sound priority
-  2. If priority >= CRITICAL, stop oldest LOW/MINIMAL sound
-  3. If priority >= MEDIUM, check capacity
-  4. If capacity > 80%, reject
-  5. Otherwise, play sound
-```
-
 ## Spatial Audio Ranges
 
 ```
@@ -241,118 +223,4 @@ Management:
   updateLoopPosition('engine_3', x, y)
     ├─> Restart loop with new position
     └─> (Web Audio limitation: can't update position dynamically)
-```
-
-## File Organization
-
-```
-/client/js/audio/
-│
-├── AudioContext.js       ─── Web Audio API lifecycle
-├── SpatialAudio.js       ─── Distance/pan calculations
-├── SoundPool.js          ─── Buffer pooling & playback
-├── AudioManager.js       ─── Central API & orchestration
-│
-├── config/
-│   └── SoundConfig.js    ─── 80+ sound definitions
-│
-└── [docs]
-    ├── README.md         ─── API reference
-    ├── INTEGRATION.md    ─── Integration guide
-    ├── QUICKSTART.md     ─── 5-minute setup
-    └── ARCHITECTURE.md   ─── This file
-
-/client/assets/audio/
-│
-├── weapons/              ─── Player & NPC weapon sounds
-├── impacts/              ─── Shield & hull hit sounds
-├── destruction/          ─── Explosion & death sounds
-├── bosses/               ─── Boss-specific sounds
-├── mining/               ─── Mining drill & completion
-├── movement/             ─── Engine & boost sounds
-├── environment/          ─── Ambient environmental sounds
-├── ui/                   ─── Interface & notification sounds
-└── README.md             ─── Asset specifications
-```
-
-## Performance Characteristics
-
-```
-Memory Usage:
-  - Each AudioBuffer: ~100KB-500KB (varies by duration)
-  - Cached buffers: Persist until clearCache()
-  - Active sources: ~1KB each (up to 32)
-  - Total typical: 5-20MB
-
-CPU Usage:
-  - Audio decoding: 1-5ms per file (async)
-  - Spatial calculations: < 0.1ms per sound
-  - Audio graph: Handled by browser's audio thread
-  - Minimal impact on game loop
-
-Network:
-  - Lazy loading: Only fetch when first played
-  - Browser caching: Standard HTTP cache applies
-  - Typical sound: 50-200KB
-  - All sounds: ~10-30MB total
-
-Concurrency:
-  - Max 32 simultaneous sounds
-  - Priority culling prevents overload
-  - Spatial culling (1000 unit range)
-  - Automatic cleanup on sound end
-```
-
-## Browser Compatibility
-
-```
-Supported:
-  ✓ Chrome 35+ (full support)
-  ✓ Firefox 25+ (full support)
-  ✓ Safari 14.1+ (requires user interaction)
-  ✓ Edge 79+ (full support)
-  ✓ Opera 22+ (full support)
-
-Limitations:
-  ⚠ Safari/iOS: Requires user interaction before audio plays
-    → Auto-handled by AudioContextManager
-  ⚠ Mobile browsers: May limit concurrent sounds
-    → Priority system handles gracefully
-  ⚠ Some browsers: May suspend audio on tab switch
-    → Auto-resumes on tab focus
-
-Fallback:
-  ✗ No fallback for browsers without Web Audio API
-  ✗ Game will function but without sound
-  → Check AudioContextManager.isReady() for audio availability
-```
-
-## Extension Points
-
-Future enhancements can be added at these points:
-
-1. **Music System**
-   - Add MusicManager module
-   - Implement crossfading between tracks
-   - Dynamic music based on game state
-
-2. **Advanced Spatial Audio**
-   - Replace StereoPannerNode with PannerNode (3D positioning)
-   - Add reverb for environmental zones
-   - Implement Doppler effect for fast-moving objects
-
-3. **Audio Effects**
-   - Add ConvolverNode for reverb/echo
-   - Add BiquadFilterNode for filters
-   - Implement dynamic audio ducking
-
-4. **Adaptive Audio**
-   - Adjust volumes based on action intensity
-   - Layer sounds dynamically (combat layers)
-   - Procedural audio generation
-
-5. **Voice Chat**
-   - Integrate getUserMedia for microphone
-   - Add positional voice chat
-   - Implement push-to-talk
 ```

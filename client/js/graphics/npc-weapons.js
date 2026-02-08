@@ -164,6 +164,22 @@ const NPCWeaponEffects = {
     Logger.log('NPCWeaponEffects initialized');
   },
 
+  // Helper to scale particle counts based on quality settings
+  scaleCount(baseCount, floor = 1) {
+    if (typeof ParticleSystem !== 'undefined' && ParticleSystem.scaleCount) {
+      return ParticleSystem.scaleCount(baseCount, floor);
+    }
+    return Math.max(floor, baseCount);
+  },
+
+  // Get quality-adjusted spawn chance
+  getSpawnChance(baseChance) {
+    if (typeof ParticleSystem !== 'undefined' && ParticleSystem.getParticleMultiplier) {
+      return baseChance * ParticleSystem.getParticleMultiplier();
+    }
+    return baseChance;
+  },
+
   /**
    * Fire a weapon from an NPC
    * @param {object} source - Source position {x, y}
@@ -367,8 +383,8 @@ const NPCWeaponEffects = {
   },
 
   createVoidTearEffect(proj) {
-    // Crimson tendrils radiating outward
-    const tendrilCount = 8;
+    // Crimson tendrils radiating outward - scale with quality
+    const tendrilCount = this.scaleCount(8, 3);
     for (let i = 0; i < tendrilCount; i++) {
       const angle = (Math.PI * 2 * i) / tendrilCount + Math.random() * 0.4;
       const speed = 80 + Math.random() * 120;
@@ -387,8 +403,8 @@ const NPCWeaponEffects = {
       });
     }
 
-    // Dark core particles (sucked inward initially, then explode)
-    const coreCount = 6;
+    // Dark core particles (sucked inward initially, then explode) - scale with quality
+    const coreCount = this.scaleCount(6, 2);
     for (let i = 0; i < coreCount; i++) {
       const angle = (Math.PI * 2 * i) / coreCount + Math.random() * 0.5;
       const speed = 40 + Math.random() * 60;
@@ -407,8 +423,8 @@ const NPCWeaponEffects = {
       });
     }
 
-    // Red sparks
-    const sparkCount = 10;
+    // Red sparks - scale with quality
+    const sparkCount = this.scaleCount(10, 3);
     for (let i = 0; i < sparkCount; i++) {
       const angle = Math.random() * Math.PI * 2;
       const speed = 100 + Math.random() * 150;
@@ -959,8 +975,8 @@ const NPCWeaponEffects = {
     ctx.arc(0, 0, size * 2.5, 0, Math.PI * 2);
     ctx.fill();
 
-    // Dripping particles during flight
-    if (config.bubbling && typeof ParticleSystem !== 'undefined' && Math.random() < 0.15) {
+    // Dripping particles during flight - scale spawn chance with quality
+    if (config.bubbling && typeof ParticleSystem !== 'undefined' && Math.random() < this.getSpawnChance(0.15)) {
       const angle = Math.random() * Math.PI * 2;
       const speed = 20 + Math.random() * 40;
       ParticleSystem.spawn({
@@ -1213,8 +1229,8 @@ const NPCWeaponEffects = {
     ctx.lineTo(x2, y2);
     ctx.stroke();
 
-    // Spawn particles at impact point
-    if (config.particles && typeof ParticleSystem !== 'undefined' && Math.random() < 0.3) {
+    // Spawn particles at impact point - scale spawn chance with quality
+    if (config.particles && typeof ParticleSystem !== 'undefined' && Math.random() < this.getSpawnChance(0.3)) {
       ParticleSystem.spawn({
         x: x2 + (Math.random() - 0.5) * 10,
         y: y2 + (Math.random() - 0.5) * 10,
@@ -1346,9 +1362,10 @@ const NPCWeaponEffects = {
       webPoints: this.generateWebPattern(radius)
     });
 
-    // Spawn particles for impact
+    // Spawn particles for impact - scale count with quality
     if (typeof ParticleSystem !== 'undefined') {
-      for (let i = 0; i < 20; i++) {
+      const impactCount = this.scaleCount(20, 5);
+      for (let i = 0; i < impactCount; i++) {
         const angle = Math.random() * Math.PI * 2;
         const speed = 50 + Math.random() * 100;
         ParticleSystem.spawn({
@@ -1448,9 +1465,9 @@ const NPCWeaponEffects = {
     this.areaEffects = this.areaEffects.filter(effect => {
       const elapsed = now - effect.startTime;
 
-      // Spawn periodic particles for acid puddle
+      // Spawn periodic particles for acid puddle - scale spawn chance with quality
       if (effect.type === 'acid_puddle' && typeof ParticleSystem !== 'undefined') {
-        if (Math.random() < 0.1) {
+        if (Math.random() < this.getSpawnChance(0.1)) {
           const angle = Math.random() * Math.PI * 2;
           const dist = Math.random() * effect.radius * 0.8;
           ParticleSystem.spawn({
@@ -1532,9 +1549,10 @@ const NPCWeaponEffects = {
         ctx.stroke();
       }
 
-      // Sparks burst
+      // Sparks burst - scale count with quality
       if (progress < 0.3 && typeof ParticleSystem !== 'undefined') {
-        for (let i = 0; i < 3; i++) {
+        const sparkBurstCount = this.scaleCount(3, 1);
+        for (let i = 0; i < sparkBurstCount; i++) {
           const sparkAngle = Math.random() * Math.PI * 2;
           const sparkSpeed = 100 + Math.random() * 200;
           ParticleSystem.spawn(
@@ -1571,9 +1589,10 @@ const NPCWeaponEffects = {
       ctx.arc(0, 0, shockSize * 1.5, 0, Math.PI * 2);
       ctx.stroke();
 
-      // Debris particles
+      // Debris particles - scale count with quality
       if (progress < 0.2 && typeof ParticleSystem !== 'undefined') {
-        for (let i = 0; i < 5; i++) {
+        const debrisCount = this.scaleCount(5, 2);
+        for (let i = 0; i < debrisCount; i++) {
           const debrisAngle = Math.random() * Math.PI * 2;
           ParticleSystem.spawn(
             effect.x,

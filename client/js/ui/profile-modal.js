@@ -97,29 +97,74 @@ const ProfileModal = {
     const container = this.modal.querySelector('#profile-settings-content');
     if (!container) return;
 
-    // Get current graphics level
-    const currentLevel = typeof GraphicsSettings !== 'undefined'
-      ? GraphicsSettings.getLevel()
+    // Get current graphics quality and preset
+    const currentQuality = typeof GraphicsSettings !== 'undefined'
+      ? GraphicsSettings.getQuality()
+      : 80;
+    const currentPreset = typeof GraphicsSettings !== 'undefined'
+      ? GraphicsSettings.getPreset()
       : 'high';
+    const isAdvancedMode = typeof GraphicsSettings !== 'undefined'
+      ? GraphicsSettings.isAdvancedMode()
+      : false;
+
+    // Get presets for dropdown
+    const presets = typeof GraphicsSettings !== 'undefined'
+      ? GraphicsSettings.getPresets()
+      : {
+          ultraLow: { value: 0, label: 'Ultra Low' },
+          low: { value: 10, label: 'Low' },
+          medium: { value: 40, label: 'Medium' },
+          high: { value: 80, label: 'High' },
+          ultra: { value: 100, label: 'Ultra' }
+        };
 
     // Build graphics section HTML
     const graphicsHTML = `
       <div class="settings-panel">
         <div class="settings-section">
           <h3 class="settings-section-title">Graphics</h3>
-          <p class="settings-section-desc">Reduce visual effects for better performance on older devices</p>
+          <p class="settings-section-desc">Adjust visual quality for performance</p>
 
           <div class="graphics-quality-row">
-            <span class="graphics-label">Quality</span>
-            <select id="graphics-quality-select" class="graphics-select">
-              <option value="low" ${currentLevel === 'low' ? 'selected' : ''}>Low</option>
-              <option value="medium" ${currentLevel === 'medium' ? 'selected' : ''}>Medium</option>
-              <option value="high" ${currentLevel === 'high' ? 'selected' : ''}>High</option>
+            <span class="graphics-label">Quality Preset</span>
+            <select id="graphics-preset-select" class="graphics-select" aria-label="Graphics quality preset" ${isAdvancedMode ? 'disabled' : ''}>
+              ${Object.entries(presets).map(([key, preset]) =>
+                `<option value="${key}" ${currentPreset === key ? 'selected' : ''}>${preset.label}</option>`
+              ).join('')}
+              ${currentPreset === 'custom' ? `<option value="custom" selected>Custom (${currentQuality})</option>` : ''}
             </select>
           </div>
 
+          <div class="graphics-advanced-toggle">
+            <label class="graphics-toggle-label">
+              <input type="checkbox" id="graphics-advanced-checkbox" ${isAdvancedMode ? 'checked' : ''}>
+              <span class="graphics-toggle-text">Advanced Mode</span>
+            </label>
+          </div>
+
+          <div class="graphics-slider-section ${isAdvancedMode ? '' : 'hidden'}" id="graphics-slider-section">
+            <div class="graphics-slider-row">
+              <span class="graphics-slider-value" id="graphics-slider-value">${currentQuality}</span>
+              <input type="range" id="graphics-quality-slider" class="graphics-slider"
+                min="0" max="100" step="1" value="${currentQuality}"
+                aria-label="Graphics quality level" aria-valuemin="0" aria-valuemax="100">
+            </div>
+            <div class="graphics-slider-labels">
+              <span>Minimal</span>
+              <span>Low</span>
+              <span>Medium</span>
+              <span>High</span>
+              <span>Ultra</span>
+            </div>
+          </div>
+
           <div class="graphics-level-desc" id="graphics-level-desc">
-            ${this._getGraphicsLevelDescription(currentLevel)}
+            ${this._getGraphicsLevelDescription(currentQuality)}
+          </div>
+
+          <div class="graphics-stats" id="graphics-stats">
+            ${this._getGraphicsStats(currentQuality)}
           </div>
         </div>
       </div>
@@ -141,17 +186,55 @@ const ProfileModal = {
   },
 
   /**
-   * Get description text for a graphics level
-   * @param {string} level - 'low', 'medium', or 'high'
+   * Get description text for a quality level
+   * @param {number} quality - Quality level 0-100
    * @returns {string} Description HTML
    */
-  _getGraphicsLevelDescription(level) {
-    const descriptions = {
-      low: 'Minimal particles, no screen shake, no floating text. Best for older devices.',
-      medium: 'Balanced visuals with reduced particle counts. Good performance.',
-      high: 'Full visual effects including all particles and screen shake. Recommended.'
-    };
-    return `<span class="graphics-desc-text">${descriptions[level] || descriptions.high}</span>`;
+  _getGraphicsLevelDescription(quality) {
+    let description;
+
+    if (quality < 10) {
+      description = 'Minimal rendering - basic shapes only, no particles or effects. Best for very old devices.';
+    } else if (quality < 30) {
+      description = 'Low quality - reduced particles, no nebula, basic stars. Good for low-end devices.';
+    } else if (quality < 60) {
+      description = 'Medium quality - balanced visuals with moderate effects. Recommended for most devices.';
+    } else if (quality < 90) {
+      description = 'High quality - full visual effects including all particles and screen shake.';
+    } else {
+      description = 'Ultra quality - enhanced effects with extra particles and glow. Requires powerful hardware.';
+    }
+
+    return `<span class="graphics-desc-text">${description}</span>`;
+  },
+
+  /**
+   * Get graphics stats display
+   * @param {number} quality - Quality level 0-100
+   * @returns {string} Stats HTML
+   */
+  _getGraphicsStats(quality) {
+    if (typeof GraphicsSettings === 'undefined') return '';
+
+    const poolSize = GraphicsSettings.getPoolSize();
+    const multiplier = GraphicsSettings.getParticleMultiplier();
+    const lod = GraphicsSettings.getLOD();
+    const lodNames = ['Minimal', 'Low', 'Medium', 'High', 'Ultra'];
+
+    return `
+      <div class="graphics-stat-row">
+        <span class="graphics-stat-label">Particle Pool:</span>
+        <span class="graphics-stat-value">${poolSize}</span>
+      </div>
+      <div class="graphics-stat-row">
+        <span class="graphics-stat-label">Effect Multiplier:</span>
+        <span class="graphics-stat-value">${(multiplier * 100).toFixed(0)}%</span>
+      </div>
+      <div class="graphics-stat-row">
+        <span class="graphics-stat-label">Detail Level:</span>
+        <span class="graphics-stat-value">${lodNames[lod] || 'High'}</span>
+      </div>
+    `;
   },
 
   /**
@@ -159,21 +242,99 @@ const ProfileModal = {
    * @param {HTMLElement} container - Container element
    */
   _bindGraphicsEvents(container) {
-    const select = container.querySelector('#graphics-quality-select');
+    const presetSelect = container.querySelector('#graphics-preset-select');
+    const advancedCheckbox = container.querySelector('#graphics-advanced-checkbox');
+    const sliderSection = container.querySelector('#graphics-slider-section');
+    const slider = container.querySelector('#graphics-quality-slider');
+    const sliderValue = container.querySelector('#graphics-slider-value');
     const descContainer = container.querySelector('#graphics-level-desc');
+    const statsContainer = container.querySelector('#graphics-stats');
 
-    if (select) {
-      select.addEventListener('change', () => {
-        const level = select.value;
+    // Update UI helper
+    const updateUI = (quality) => {
+      if (descContainer) {
+        descContainer.innerHTML = this._getGraphicsLevelDescription(quality);
+      }
+      if (statsContainer) {
+        statsContainer.innerHTML = this._getGraphicsStats(quality);
+      }
+    };
 
-        // Update GraphicsSettings
+    // Preset dropdown change
+    if (presetSelect) {
+      presetSelect.addEventListener('change', () => {
+        const preset = presetSelect.value;
+        if (typeof GraphicsSettings !== 'undefined' && preset !== 'custom') {
+          GraphicsSettings.setPreset(preset);
+          const quality = GraphicsSettings.getQuality();
+          if (slider) slider.value = quality;
+          if (sliderValue) sliderValue.textContent = quality;
+          updateUI(quality);
+        }
+      });
+    }
+
+    // Advanced mode toggle
+    if (advancedCheckbox) {
+      advancedCheckbox.addEventListener('change', () => {
+        const isAdvanced = advancedCheckbox.checked;
+
         if (typeof GraphicsSettings !== 'undefined') {
-          GraphicsSettings.setLevel(level);
+          GraphicsSettings.setAdvancedMode(isAdvanced);
         }
 
-        // Update description
-        if (descContainer) {
-          descContainer.innerHTML = this._getGraphicsLevelDescription(level);
+        // Toggle slider visibility
+        if (sliderSection) {
+          sliderSection.classList.toggle('hidden', !isAdvanced);
+        }
+
+        // Enable/disable preset dropdown
+        if (presetSelect) {
+          presetSelect.disabled = isAdvanced;
+        }
+      });
+    }
+
+    // Slider change
+    if (slider) {
+      slider.addEventListener('input', () => {
+        const quality = parseInt(slider.value, 10);
+
+        // Update value display
+        if (sliderValue) {
+          sliderValue.textContent = quality;
+        }
+
+        // Update preset dropdown to show "Custom" if not matching a preset
+        if (presetSelect) {
+          const presetMatch = typeof GraphicsSettings !== 'undefined'
+            ? Object.entries(GraphicsSettings.getPresets()).find(([, p]) => p.value === quality)
+            : null;
+
+          if (presetMatch) {
+            presetSelect.value = presetMatch[0];
+          } else {
+            // Add or update custom option
+            let customOption = presetSelect.querySelector('option[value="custom"]');
+            if (!customOption) {
+              customOption = document.createElement('option');
+              customOption.value = 'custom';
+              presetSelect.appendChild(customOption);
+            }
+            customOption.textContent = `Custom (${quality})`;
+            presetSelect.value = 'custom';
+          }
+        }
+
+        // Update description (live preview)
+        updateUI(quality);
+      });
+
+      // Apply quality on release
+      slider.addEventListener('change', () => {
+        const quality = parseInt(slider.value, 10);
+        if (typeof GraphicsSettings !== 'undefined') {
+          GraphicsSettings.setQuality(quality);
         }
       });
     }

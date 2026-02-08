@@ -1,7 +1,7 @@
 # Galaxy Miner Development Roadmap
 
-**Last Updated:** December 17, 2025
-**Version:** 1.1
+**Last Updated:** February 7, 2026
+**Version:** 1.2
 
 This roadmap outlines the planned development direction for Galaxy Miner, organized by priority and implementation phases. Features are designed to enhance multiplayer social gameplay and expand content depth while maintaining the game's focus on emergent player-driven experiences.
 
@@ -26,87 +26,19 @@ These items address existing systems that are partially implemented or need imme
 
 **Status:** RESOLVED (December 2025)
 **Priority:** Critical
-**Estimated Effort:** 1-2 days
 
-**Resolution:** Implemented Option B (modular handlers). Network handlers are now organized in `/client/js/network/` with 88 handlers across 10 modules. See `/client/js/network/README.md` for documentation.
-
-**Original Description:**
-The client networking code had duplicate socket event handlers defined in two locations:
-- `/client/js/network.js` - Main network module (actively used)
-- `/client/js/network/npc.js` - Modular handler file (NOT being used)
-
-This caused a significant bug where `miningTargetPos` was being sent correctly by the server but silently dropped on the client because `network.js:276` builds its own `npcData` object and was missing the `miningTargetPos` field. The `network/npc.js` file had the correct implementation but wasn't being loaded.
-
-**Issues Caused:**
-- Rogue miner mining beams not rendering (took extensive debugging to identify)
-- Confusion about which handler is authoritative
-- Risk of similar bugs when adding new NPC properties
-
-**Resolution Options:**
-
-**Option A: Consolidate to network.js (Quick fix)**
-- Remove `/client/js/network/` directory entirely
-- Ensure all socket handlers are in `/client/js/network.js`
-- Simpler architecture, single source of truth
-
-**Option B: Migrate to modular handlers (Better long-term)**
-- Update `network.js` to import and register handlers from `/client/js/network/*.js`
-- Remove duplicate handler definitions from `network.js`
-- Each module handles its own events (npc.js, player.js, combat.js, etc.)
-- Better separation of concerns, easier to maintain
-
-**Recommended:** Option B - The modular structure is cleaner, but requires ensuring the module files are actually loaded and registered.
-
-**Files Affected:**
-- `/client/js/network.js` - Remove duplicate handlers or convert to import-based
-- `/client/js/network/npc.js` - Already has correct handler, needs to be loaded
-- `/client/index.html` - May need script imports for network modules
+Resolved by migrating to modular handlers (Option B). Network handlers are now organized in `/client/js/network/` with 88 handlers across 10 modules. The original issue was duplicate socket event handlers causing silent data loss (e.g., `miningTargetPos` dropped for rogue miner beams). See `/client/js/network/README.md` for architecture details.
 
 ---
 
 ### Fleet/Party System UI and Mechanics
 
-**Status:** Foundation exists (team damage tracking), needs UI and formal mechanics
+**Status:** IMPLEMENTED (January 2026)
 **Priority:** Critical
-**Estimated Effort:** 3-4 weeks
 
-**Description:**
-Implement a formal fleet/party system that allows players to group together for cooperative play. The damage contribution system in `loot.js` already tracks team participation, but lacks UI and structured team management.
+Fleet/party system allowing players to group for cooperative play. Includes fleet creation/invite/leave, roster UI with member health bars, fleet chat channel, shared radar markers, leader management (kick/promote), and auto-team damage distribution. Maximum fleet size: 4 players.
 
-**Implementation Details:**
-- Fleet creation and invite system (socket events: `fleet:create`, `fleet:invite`, `fleet:accept`, `fleet:leave`)
-- Fleet roster UI panel showing member names, ships, health bars, and positions
-- Fleet-only chat channel separate from global chat
-- Shared fleet marker on radar for easy member tracking
-- Auto-team damage distribution (already partially implemented)
-- Fleet leader designation with kick/promote capabilities
-- Maximum fleet size: 4 players (balanced for boss fights)
-
-**Database Changes:**
-```sql
-CREATE TABLE fleets (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  leader_id INTEGER NOT NULL REFERENCES users(id),
-  name TEXT,
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE TABLE fleet_members (
-  fleet_id INTEGER NOT NULL REFERENCES fleets(id) ON DELETE CASCADE,
-  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  joined_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  PRIMARY KEY(fleet_id, user_id)
-);
-```
-
-**New Socket Events:**
-- `fleet:create` - Create a new fleet
-- `fleet:invite` - Invite player to fleet
-- `fleet:accept` / `fleet:decline` - Respond to invitation
-- `fleet:leave` - Leave current fleet
-- `fleet:kick` - Leader removes member
-- `fleet:chat` - Fleet-only chat message
-- `fleet:update` - Broadcast fleet roster changes
+Implemented in January 2026. See `/server/socket/fleet.js` and `/client/js/ui/fleet-panel.js`.
 
 ---
 
@@ -151,36 +83,16 @@ Enable progression beyond tier 5 using rare upgrade components. Components drop 
 **Description:**
 Activate the relic system with specific gameplay effects. Relics are ultra-rare collectibles defined in `CONSTANTS.RELIC_TYPES` and stored in the `relics` database table. Currently, they are collectible but have no mechanical impact.
 
-**Implementation Details:**
+**Relic Effects (5 existing relics):**
+- **Ancient Star Map:** Reveals faction bases and wormholes within 5 sectors (passive)
+- **Void Crystal:** +10% damage against Void Entities and Swarm (passive)
+- **Swarm Hive Core:** Immunity to Swarm aggro (toggleable)
+- **Pirate Treasure:** Unlocks Pirate Reputation system (future expansion hook)
+- **Wormhole Gem:** Smooth wormhole transit without position snap (automatic)
 
-**Ancient Star Map:**
-- Effect: Reveals all faction bases and wormholes within 5 sectors on radar
-- Activation: Passive (always active when owned)
-- UI: Enhanced radar overlay showing hidden locations
-
-**Void Crystal:**
-- Effect: +10% damage against Void Entities and Swarm
-- Activation: Passive
-- Implementation: Damage modifier in `combat.js`
-
-**Swarm Hive Core:**
-- Effect: Immunity to Swarm aggro (Swarm NPCs ignore player)
-- Activation: Toggle on/off in Relics panel
-- Implementation: AI aggro checks skip player with active effect
-
-**Pirate Treasure:**
-- Effect: Unlocks "Pirate Reputation" system (future expansion hook)
-- Activation: Passive
-- Current: Placeholder for future faction reputation mechanics
-
-**Wormhole Gem:**
-- Effect: Allows instant wormhole transit without position snap (smooth travel)
-- Activation: Automatic when near wormhole
-- Implementation: Already partially implemented in `wormhole.js`, needs activation check
-
-**New UI:**
-- `RelicsPanel.js` - Gallery view of collected relics with activation toggles
-- Relic tooltip on radar for activated effects
+**Implementation:**
+- New `RelicsPanel.js` with gallery view and activation toggles
+- Effect hooks in `combat.js`, `wormhole.js`, and AI aggro checks
 - Active relic indicator in HUD
 
 ---
@@ -248,7 +160,6 @@ Dedicated chat channels for fleet members, separate from global chat. Reduces ch
 **Implementation:**
 - Extend `chat.js` (client) and socket chat handlers (server)
 - Filter chat messages by channel in `UIState`
-- New socket events: `fleet:chat:send`, `fleet:chat:message`
 
 ---
 
@@ -269,32 +180,10 @@ Persistent friend list with online status tracking, direct invites, and friend-s
 - Whisper/DM system for private messaging
 - Friend location indicator on radar (if in same sector)
 
-**Database Schema:**
-```sql
-CREATE TABLE friendships (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  friend_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  status TEXT NOT NULL DEFAULT 'pending', -- pending, accepted, blocked
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  UNIQUE(user_id, friend_id)
-);
-
-CREATE INDEX idx_friendships_user ON friendships(user_id);
-CREATE INDEX idx_friendships_status ON friendships(status);
-```
-
-**UI Components:**
-- `FriendsPanel.js` - Friend list with status indicators
-- Friend request notifications (toast notifications)
-- Online friends indicator in HUD
-
-**Socket Events:**
-- `friend:add` - Send friend request
-- `friend:accept` - Accept request
-- `friend:remove` - Unfriend
-- `friend:status` - Online/offline status updates
-- `friend:whisper` - Private message
+**Implementation:**
+- New `friendships` database table with status tracking
+- Friends panel UI with status indicators and request notifications
+- Socket events for add/accept/remove/status/whisper
 
 ---
 
@@ -307,57 +196,20 @@ CREATE INDEX idx_friendships_status ON friendships(status);
 **Description:**
 Procedurally generated cooperative objectives that reward fleet teamwork. Missions spawn dynamically based on fleet activity and provide structured goals beyond free-roam mining/combat.
 
-**Mission Types:**
-
-**Faction Base Assault:**
-- Objective: Destroy enemy faction base within time limit
-- Requirements: 2-4 players
-- Rewards: Bonus credits (split), guaranteed component drop, rare resources
-- Difficulty scales with fleet size and average ship tier
-
-**Mining Expedition:**
-- Objective: Collect specific rare resources from hazardous sectors
-- Requirements: 1-4 players
-- Hazards: High NPC density, environmental dangers (star proximity, comets)
-- Rewards: 2x resource multiplier, XP bonus (future expansion)
-
-**Convoy Escort:**
-- Objective: Escort NPC trader convoy across 3 sectors
-- Requirements: 2-4 players
-- Enemies: Waves of pirate ambushes
-- Rewards: High credits, reputation (future), rare loot
-
-**Queen Hunt:**
-- Objective: Locate and defeat Swarm Queen
-- Requirements: 3-4 players recommended
-- Challenge: Multi-phase boss fight with mechanics (already implemented)
-- Rewards: Guaranteed relic drop, ultrarare components, 5000 credits split
-
-**Rescue Operation:**
-- Objective: Retrieve stranded NPC from dangerous location
-- Requirements: 1-2 players
-- Mechanics: Tow/escort mechanics (tractor beam extended use)
-- Rewards: Faction reputation, unique ship cosmetics
+**Mission Types (5 planned):**
+- **Faction Base Assault** (2-4 players): Destroy enemy base within time limit; rewards credits, components, rare resources
+- **Mining Expedition** (1-4 players): Collect rare resources from hazardous sectors with 2x yield multiplier
+- **Convoy Escort** (2-4 players): Escort NPC trader convoy across 3 sectors through pirate ambushes
+- **Queen Hunt** (3-4 players): Locate and defeat Swarm Queen; guaranteed relic and component drops
+- **Rescue Operation** (1-2 players): Retrieve stranded NPC using tractor beam mechanics
 
 **Implementation:**
 - Extend `/server/game/events.js` into full mission system
 - Mission board UI panel (similar to marketplace)
-- Mission state tracking in fleet data
+- Mission state tracking in fleet data with `active_missions` database table
 - Dynamic mission spawning based on server population and activity
 - Mission progress HUD overlay
 - Completion notification with loot distribution
-
-**Database Schema:**
-```sql
-CREATE TABLE active_missions (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  fleet_id INTEGER REFERENCES fleets(id) ON DELETE CASCADE,
-  mission_type TEXT NOT NULL,
-  objective_data TEXT NOT NULL, -- JSON blob
-  start_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  expires_at TIMESTAMP NOT NULL
-);
-```
 
 ---
 
@@ -379,8 +231,7 @@ Instant resource/credit transfers between fleet members without marketplace fees
 - Confirmation dialog for large transfers (>500 credits or >50 resources)
 
 **Implementation:**
-- New socket events: `fleet:transfer:request`, `fleet:transfer:confirm`
-- Transfer validation in server-side fleet module
+- Fleet transfer socket events with server-side validation
 - Update `inventory.js` handlers to support fleet transfers
 - Transfer animation/notification in UI
 
@@ -462,51 +313,15 @@ Mysterious end-game faction encountered in deep space (far from stars). Ancient,
 **Description:**
 Extend ship component progression from tier 5 to tier 10 using component crafting. Provides long-term progression goals for veteran players.
 
-**Upgrade Requirements:**
+**Upgrade Requirements (scaling costs):**
+- Tiers 6-8: 20K-100K credits, 3-8 components, increasing rare/ultra-rare resources
+- Tier 9: 200K credits, 12 components, requires 1x Ancient Cipher
+- Tier 10: 500K credits, 20 components, requires 3x Ancient Cipher + 1x unique relic
 
-**Tier 6:**
-- Cost: 20,000 credits
-- Components: 3x specific component type
-- Resources: 50x rare, 20x ultra-rare
-
-**Tier 7:**
-- Cost: 50,000 credits
-- Components: 5x specific component type
-- Resources: 80x rare, 40x ultra-rare
-
-**Tier 8:**
-- Cost: 100,000 credits
-- Components: 8x specific component type
-- Resources: 120x rare, 60x ultra-rare
-
-**Tier 9:**
-- Cost: 200,000 credits
-- Components: 12x specific component type
-- Resources: 200x rare, 100x ultra-rare
-- Special: Requires 1x Ancient Cipher (Forgotten Ancients content)
-
-**Tier 10:**
-- Cost: 500,000 credits
-- Components: 20x specific component type
-- Resources: 500x rare, 200x ultra-rare
-- Special: Requires 3x Ancient Cipher + 1x unique relic
-
-**Tier 10 Component Effects:**
-
-**Engine Tier 10:**
-- Speed: 450 units/sec (from 330 at T5)
-- Thrust boost duration: 3 seconds (from 2s at T5)
-- New: Afterburner cooldown reduced to 3 seconds
-
-**Weapon Tier 10:**
-- Damage: 60 (from 30 at T5)
-- Range: 600 units (from 400 at T5)
-- New: "Overcharge" mode - hold fire button for 2s to fire mega-shot (3x damage, 15s cooldown)
-
-**Shield Tier 10:**
-- Capacity: 2000 HP (from 800 at T5)
-- Recharge: 12 HP/sec (from 7 at T5)
-- New: "Shield Burst" - active ability that damages nearby enemies on activation (30s cooldown)
+**Tier 10 Capstone Effects:**
+- **Engine T10:** 450 units/sec speed, 3s boost duration, reduced afterburner cooldown
+- **Weapon T10:** 60 damage, 600 range, new "Overcharge" mega-shot ability (3x damage, 15s cooldown)
+- **Shield T10:** 2000 HP capacity, 12 HP/sec recharge, new "Shield Burst" AoE ability (30s cooldown)
 
 **Implementation:**
 - Extend `UPGRADE_REQUIREMENTS` in `constants.js` for tiers 6-10
@@ -526,47 +341,17 @@ Extend ship component progression from tier 5 to tier 10 using component craftin
 **Description:**
 Expand the relic system with 10 additional unique relics, each with specific gameplay effects. Creates collectible goals and horizontal progression.
 
-**New Relics:**
-
-**Time-Worn Compass (Rare):**
-- Effect: Always shows direction to nearest wormhole on radar
-- Drop: Random from any wreckage in deep space
-
-**Stellar Catalyst (Ultra-Rare):**
-- Effect: Reduces star gravity by 50%, immune to star heat damage
-- Drop: Pirate Dreadnought, Void Phantom
-
-**Mining Savant's Toolkit (Rare):**
-- Effect: 25% chance to double mining yield
-- Drop: Rogue Miner bosses
-
-**Void Beacon (Ultra-Rare):**
-- Effect: Reveals all Void Rifts within 10 sectors, +20% damage to Void Entities
-- Drop: Void Phantom, Ancient Overseer
-
-**Pirate's Signet Ring (Rare):**
-- Effect: Pirates ignore player if not attacked first
-- Drop: Pirate Captain, Pirate Dreadnought
-
-**Quantum Harmonizer (Ultra-Rare):**
-- Effect: Wormhole transit has no cooldown (instant re-entry)
-- Drop: Ancient Overseer (5% chance)
-
-**Swarm Pheromone Emitter (Rare):**
-- Effect: Tamed Swarm Drone follows player, provides weak combat support
-- Drop: Swarm Queen (guaranteed)
-
-**Shield Resonance Core (Rare):**
-- Effect: Shield regenerates even while taking damage (50% normal rate)
-- Drop: Void Entities, Ancient Sentinels
-
-**Turbo Injector Module (Rare):**
-- Effect: Boost cooldown reduced by 50%
-- Drop: Pirate ships, Nomad Hauler
-
-**Ancient Data Chip (Ultra-Rare):**
-- Effect: Unlocks lore entries in "Codex" panel (future expansion)
-- Drop: Ancient Overseer, Ancient Monolith scan
+**New Relics (10 planned):**
+- **Time-Worn Compass** (Rare): Shows direction to nearest wormhole
+- **Stellar Catalyst** (Ultra-Rare): -50% star gravity, immune to star heat
+- **Mining Savant's Toolkit** (Rare): 25% chance to double mining yield
+- **Void Beacon** (Ultra-Rare): Reveals Void Rifts within 10 sectors, +20% Void damage
+- **Pirate's Signet Ring** (Rare): Pirates ignore player unless attacked
+- **Quantum Harmonizer** (Ultra-Rare): No wormhole transit cooldown
+- **Swarm Pheromone Emitter** (Rare): Tamed Swarm Drone companion
+- **Shield Resonance Core** (Rare): Shield regenerates during damage (50% rate)
+- **Turbo Injector Module** (Rare): -50% boost cooldown
+- **Ancient Data Chip** (Ultra-Rare): Unlocks lore entries in Codex panel
 
 **Implementation:**
 - Add to `CONSTANTS.RELIC_TYPES`
@@ -585,58 +370,20 @@ Expand the relic system with 10 additional unique relics, each with specific gam
 **Description:**
 Introduce multiple ship hull types with different stat distributions and playstyles. Players select hull type at account creation or purchase additional hulls with credits.
 
-**Hull Types:**
-
-**Interceptor (Speed Specialist):**
-- Base speed: +30%
-- Hull HP: -20%
-- Cargo capacity: -30%
-- Best for: PvP, scouting, hit-and-run tactics
-
-**Hauler (Cargo Specialist):**
-- Cargo capacity: +100%
-- Speed: -20%
-- Mining yield: +25%
-- Best for: Resource gathering, trading
-
-**Battlecruiser (Tank Specialist):**
-- Hull HP: +50%
-- Shield HP: +40%
-- Speed: -30%
-- Best for: Boss fights, tanking damage
-
-**Mining Barge (Mining Specialist):**
-- Mining speed: +50%
-- Mining range: +30 units
-- Cargo capacity: +50%
-- Weapon damage: -30%
-- Best for: Dedicated miners
-
-**Balanced (Default):**
-- No bonuses or penalties
-- Current default ship stats
+**Hull Types (5 planned):**
+- **Interceptor:** +30% speed, -20% HP, -30% cargo (PvP/scouting)
+- **Hauler:** +100% cargo, +25% mining yield, -20% speed (trading/gathering)
+- **Battlecruiser:** +50% HP, +40% shields, -30% speed (tanking)
+- **Mining Barge:** +50% mining speed/cargo, -30% weapon damage (dedicated mining)
+- **Balanced:** Default stats, no bonuses or penalties
 
 **Implementation:**
-- New database field: `ships.hull_type` (default: 'balanced')
+- New `hull_type` field on ships table and `owned_hulls` table for purchased hulls
 - Hull selection UI on account creation
 - "Shipyard" panel for purchasing additional hulls (100,000 credits each)
 - Hull-specific ship graphics in `/client/js/graphics/ships.js`
 - Hull indicator icon in HUD
 - Active hull can be swapped at spawn points (wormholes, future stations)
-
-**Database Schema:**
-```sql
--- Add hull_type column to ships table
-ALTER TABLE ships ADD COLUMN hull_type TEXT DEFAULT 'balanced';
-
--- New table for owned hulls
-CREATE TABLE owned_hulls (
-  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  hull_type TEXT NOT NULL,
-  purchased_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  PRIMARY KEY(user_id, hull_type)
-);
-```
 
 ---
 
@@ -649,50 +396,17 @@ CREATE TABLE owned_hulls (
 Cosmetic customization options for ship appearance. Provides personalization and long-term goals without affecting gameplay balance.
 
 **Customization Options:**
-
-**Ship Decals/Emblems:**
-- Unlockable emblems displayed on ship hull
-- Examples: Skull, Star, Flame, Gear, Lightning Bolt, etc.
-- Unlocked via achievements, relic collection, missions
-- 30+ decals planned
-
-**Engine Trail Colors:**
-- Custom thrust trail color (currently matches ship color)
-- RGB color picker or preset palette
-- Unlocked via credits or rare drops (5000 credits per color unlock)
-
-**Shield Visual Themes:**
-- Alternative shield visuals beyond default hexagon
-- Themes: Crystalline, Plasma, Quantum, Void
-- Unlocked via achievements or purchases
-
-**Ship Skins (Advanced):**
-- Full ship retexture (different color schemes)
-- Premium skins: Stealth Black, Chrome, Neon, Prismatic
-- Future monetization option (cosmetic-only)
+- **Ship Decals/Emblems:** 30+ unlockable emblems via achievements, relics, and missions
+- **Engine Trail Colors:** Custom thrust trail colors via RGB picker or presets (5000 credits each)
+- **Shield Visual Themes:** Alternative shield visuals (Crystalline, Plasma, Quantum, Void)
+- **Ship Skins:** Full ship retextures (Stealth Black, Chrome, Neon, Prismatic); future monetization option
 
 **Implementation:**
 - New UI panel: `CustomizationPanel.js` (extends `ShipCustomizationPanel.js`)
-- Database table for unlocked cosmetics
+- New `unlocked_cosmetics` table and active cosmetic fields on ships table
 - Cosmetic rendering in ship graphics modules
 - Decal overlay system in `/client/js/graphics/ships.js`
 - "Fashion Hunter" achievement for unlocking 50% of cosmetics
-
-**Database Schema:**
-```sql
-CREATE TABLE unlocked_cosmetics (
-  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  cosmetic_type TEXT NOT NULL, -- 'decal', 'trail', 'shield_theme', 'skin'
-  cosmetic_id TEXT NOT NULL,
-  unlocked_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  PRIMARY KEY(user_id, cosmetic_type, cosmetic_id)
-);
-
-ALTER TABLE ships ADD COLUMN active_decal TEXT;
-ALTER TABLE ships ADD COLUMN active_trail TEXT;
-ALTER TABLE ships ADD COLUMN active_shield_theme TEXT;
-ALTER TABLE ships ADD COLUMN active_skin TEXT;
-```
 
 ---
 
@@ -709,54 +423,17 @@ Enhance player identity and account management.
 Expand player profiles with customizable elements, bio text, and achievement displays. Makes player identity more visible in social interactions.
 
 **Profile Elements:**
-
-**Display Name:**
-- Separate from username (login)
-- Can include spaces and special characters
-- 20 character limit
-- Profanity filter applied
-
-**Bio/Tagline:**
-- Short bio text (200 characters)
-- Displayed in profile modal and fleet roster
-
-**Selected Title:**
-- Unlockable titles displayed before/after name
-- Examples: "Captain", "Elite Miner", "Swarm Slayer", "Relic Hunter"
-- Earned via achievements
-
-**Featured Achievement:**
-- Pin one achievement to profile for display
-- Shows in player info tooltip on radar
-
-**Play Statistics:**
-- Total playtime
-- Total credits earned
-- NPCs destroyed
-- Resources mined
-- Wormholes traversed
+- **Display Name:** Separate from login username, 20 char limit, profanity filtered
+- **Bio/Tagline:** Short text (200 chars), shown in profile modal and fleet roster
+- **Selected Title:** Achievement-based unlockable titles (e.g., "Captain", "Swarm Slayer")
+- **Featured Achievement:** Pin one achievement for display in player tooltips
+- **Play Statistics:** Playtime, credits earned, NPCs destroyed, resources mined, wormholes traversed
 
 **Implementation:**
 - Extend `profile-modal.js` with edit mode
-- New database fields in `users` or separate `profiles` table
+- New `profiles` table with display name, bio, title, stats fields
 - Title system tied to achievement completion
 - Profile data sent to clients on player connection (for tooltips)
-
-**Database Schema:**
-```sql
-CREATE TABLE profiles (
-  user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
-  display_name TEXT,
-  bio TEXT,
-  active_title TEXT,
-  featured_achievement TEXT,
-  total_playtime INTEGER DEFAULT 0,
-  total_credits_earned INTEGER DEFAULT 0,
-  npcs_destroyed INTEGER DEFAULT 0,
-  resources_mined INTEGER DEFAULT 0,
-  wormholes_traversed INTEGER DEFAULT 0
-);
-```
 
 ---
 
@@ -769,68 +446,20 @@ CREATE TABLE profiles (
 **Description:**
 Comprehensive achievement system with 50+ achievements across various categories. Achievements unlock titles, cosmetics, and provide long-term goals.
 
-**Achievement Categories:**
-
-**Combat Achievements:**
-- "First Blood" - Destroy first NPC
-- "Pirate Bane" - Destroy 100 pirate NPCs
-- "Queen Slayer" - Defeat Swarm Queen
-- "Untouchable" - Destroy 10 NPCs without taking damage
-- "Dreadnought Hunter" - Defeat 10 boss NPCs
-
-**Mining Achievements:**
-- "Prospector" - Mine 1,000 resources
-- "Tycoon" - Mine 100,000 resources
-- "Rare Find" - Mine 100 rare-tier resources
-- "Exotic Collector" - Mine 50 ultra-rare resources
-
-**Exploration Achievements:**
-- "Wormhole Jumper" - Traverse 10 wormholes
-- "Star Gazer" - Visit 50 different star systems
-- "Deep Space Pioneer" - Reach 10 sectors from origin
-- "Nomad" - Travel 100,000 units total
-
-**Social Achievements:**
-- "Teammate" - Join first fleet
-- "Squad Leader" - Lead a fleet of 4 players
-- "Merchant" - Complete 50 marketplace transactions
-- "Wealthy Benefactor" - Gift 10,000 credits to fleet members
-
-**Collection Achievements:**
-- "Relic Hunter" - Collect 5 unique relics
-- "Ancient Secrets" - Collect all Ancient faction relics
-- "Completionist" - Collect all 15 relics
-
-**Progression Achievements:**
-- "Upgraded" - Reach tier 2 in any component
-- "Elite" - Reach tier 5 in all components
-- "Master Engineer" - Reach tier 10 in all components
-- "Millionaire" - Accumulate 1,000,000 credits
+**Achievement Categories (50+ achievements across 6 categories):**
+- **Combat:** NPC kills, boss defeats, skill-based (e.g., "Untouchable", "Queen Slayer")
+- **Mining:** Resource milestones from 1K to 100K, rare/ultra-rare tiers
+- **Exploration:** Wormhole traversals, star system visits, distance traveled
+- **Social:** Fleet participation, marketplace transactions, gifting
+- **Collection:** Relic milestones (5, all Ancient, all 15)
+- **Progression:** Upgrade tier milestones (T2, T5, T10), credit accumulation
 
 **Implementation:**
 - New module: `/server/game/achievements.js`
 - Achievement progress tracking via event hooks
-- Database table: `achievement_progress`, `unlocked_achievements`
+- Database tables: `achievement_progress`, `unlocked_achievements`
 - Achievement notification toast on unlock
 - Achievement panel UI showing progress bars
-- Steam-style achievement popup animation
-
-**Database Schema:**
-```sql
-CREATE TABLE achievement_progress (
-  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  achievement_id TEXT NOT NULL,
-  current_value INTEGER DEFAULT 0,
-  PRIMARY KEY(user_id, achievement_id)
-);
-
-CREATE TABLE unlocked_achievements (
-  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  achievement_id TEXT NOT NULL,
-  unlocked_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  PRIMARY KEY(user_id, achievement_id)
-);
-```
 
 ---
 
@@ -842,54 +471,18 @@ CREATE TABLE unlocked_achievements (
 **Description:**
 Persistent statistics tracking for player actions. Powers achievements and provides interesting data for player profiles.
 
-**Tracked Statistics:**
-- Total playtime (seconds)
-- Credits earned (lifetime)
-- Credits spent (lifetime)
-- NPCs destroyed (by faction)
-- Damage dealt (total)
-- Damage taken (total)
-- Deaths (total)
-- Resources mined (by type)
-- Resources sold (by type)
-- Wormholes traversed
-- Sectors explored (unique)
-- Fleet missions completed
-- Relics found
-- Bosses defeated
-- Distance traveled
-- Longest survival streak (time without death)
+**Tracked Statistics (16 metrics):**
+- Combat: NPCs destroyed (by faction), damage dealt/taken, deaths, bosses defeated
+- Economy: Credits earned/spent, resources mined/sold (by type)
+- Exploration: Playtime, wormholes traversed, sectors explored, distance traveled
+- Progression: Fleet missions completed, relics found, longest survival streak
 
 **Implementation:**
+- New `statistics` table tracking all metrics with JSON blobs for per-type/per-faction breakdowns
 - Statistics updated in real-time during gameplay
 - Periodic database flush (every 60 seconds)
 - Statistics panel in profile modal
 - Leaderboards for competitive stats (future expansion)
-
-**Database Schema:**
-```sql
-CREATE TABLE statistics (
-  user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
-  playtime_seconds INTEGER DEFAULT 0,
-  credits_earned INTEGER DEFAULT 0,
-  credits_spent INTEGER DEFAULT 0,
-  npcs_destroyed INTEGER DEFAULT 0,
-  npcs_destroyed_by_faction TEXT, -- JSON blob
-  damage_dealt INTEGER DEFAULT 0,
-  damage_taken INTEGER DEFAULT 0,
-  deaths INTEGER DEFAULT 0,
-  resources_mined INTEGER DEFAULT 0,
-  resources_mined_by_type TEXT, -- JSON blob
-  wormholes_traversed INTEGER DEFAULT 0,
-  sectors_explored INTEGER DEFAULT 0,
-  missions_completed INTEGER DEFAULT 0,
-  relics_found INTEGER DEFAULT 0,
-  bosses_defeated INTEGER DEFAULT 0,
-  distance_traveled REAL DEFAULT 0,
-  longest_survival_streak INTEGER DEFAULT 0,
-  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-```
 
 ---
 
@@ -912,19 +505,10 @@ Persist client-side settings (audio volume, UI preferences, keybinds) to server 
 
 **Implementation:**
 - New API endpoint: `GET/POST /api/settings`
-- Settings stored in database as JSON blob
+- New `user_settings` table storing settings as JSON blob
 - Client loads settings on login
 - Auto-save on settings change (debounced 2 seconds)
 - Local fallback if server settings unavailable
-
-**Database Schema:**
-```sql
-CREATE TABLE user_settings (
-  user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
-  settings_json TEXT NOT NULL, -- JSON blob
-  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-```
 
 ---
 
@@ -936,48 +520,14 @@ Expand platform support and improve accessibility for diverse players.
 
 **Status:** IMPLEMENTED (December 2025)
 **Priority:** High
-**Estimated Effort:** 3-4 weeks
 
-**Description:**
-Full mobile device support with touch-friendly UI and controls implemented.
-
-**Implemented Features:**
-
-**Virtual Joystick:** `/client/js/mobile/virtual-joystick.js`
-- Left 40% of screen: Floating movement joystick
-- 15% deadzone, analog thrust/rotation output
-- Appears at touch point, disappears on release
-
-**Action Buttons:** `/client/js/mobile/mobile-hud.js`
-- Fire button (80px, red, continuous fire while held)
-- Context action button (64px, dynamic label: Mine/Collect/Wormhole/Plunder)
-- Menu button (48px, opens terminal)
-
-**Auto-Fire System:** `/client/js/mobile/auto-fire.js`
-- Automatic firing when aimed at enemies within 30°
-- Respects weapon cooldown and tier
-- Disabled during manual fire button hold
-
-**Device Detection:** `/client/js/mobile/device-detect.js`
-- User agent + touch capability detection
-- Body classes: `is-mobile`, `is-touch`, `is-landscape`, `is-portrait`
-- Touch behavior prevention (double-tap zoom, pull-to-refresh)
-
-**UI Adjustments:** `/client/css/mobile.css`
-- Minimum 44px touch targets
-- Full-screen panel takeover on mobile
-- Safe area insets for notch support
-- Portrait mode rotation prompt
-- CSS media queries for responsive sizing
-
-**Documentation:** `/docs/systems/mobile.md`, `/client/js/mobile/README.md`
+Full mobile device support with touch-friendly UI and controls. Includes virtual joystick, action buttons (fire, context action, menu), auto-fire system, device detection with responsive CSS, and safe area/notch support. See `/client/js/mobile/README.md` for details.
 
 **Remaining Items:**
-- [ ] Mobile settings panel (joystick size, sensitivity)
-- [ ] First-launch tutorial overlay
-- [ ] Gesture support (swipe, pinch, long-press)
-- [ ] Haptic feedback
-- [ ] Portrait mode gameplay option
+- Mobile settings panel (joystick size, sensitivity)
+- Gesture support (swipe, pinch, long-press)
+- Haptic feedback
+- Portrait mode gameplay option
 
 ---
 
@@ -1019,29 +569,13 @@ Adaptive UI layout for various screen sizes, from mobile phones to ultrawide mon
 **Description:**
 Optional virtual joystick for desktop players who prefer gamepad-style controls. Also enables gamepad API support for physical controllers.
 
-**Virtual Joystick Features:**
-- Toggle in settings: "Enable Virtual Joystick"
-- Keyboard/mouse input still available
-- Customizable joystick position and size
-- Deadzone configuration
-- Button remapping
+**Features:**
+- Toggle in settings with customizable position, size, and deadzone
+- Keyboard/mouse input remains available alongside virtual controls
+- Gamepad API support with standard Xbox/PlayStation controller mapping
+- Button remapping and on-screen prompts when gamepad detected
 
-**Gamepad API Support:**
-- Automatic detection of connected gamepads
-- Standard Xbox/PlayStation controller layout
-- Left stick: Movement
-- Right stick: Aim (adjusts rotation)
-- Right trigger: Fire
-- Left trigger: Mining
-- A button: Boost
-- B button: Cancel/close UI
-- Start: Open terminal
-
-**Implementation:**
-- Virtual joystick library (e.g., nipplejs)
-- Gamepad API integration in `input.js`
-- Gamepad settings panel
-- On-screen button prompts when gamepad detected
+**Implementation:** Virtual joystick library (e.g., nipplejs), gamepad API integration in `input.js`, gamepad settings panel
 
 ---
 
@@ -1054,33 +588,12 @@ Optional virtual joystick for desktop players who prefer gamepad-style controls.
 Accessibility improvements for screen reader users and players with visual impairments. While Galaxy Miner is inherently visual, core features can be made accessible.
 
 **Accessibility Features:**
+- **ARIA Labels:** All UI buttons, panels, and form inputs labeled; dynamic content changes announced
+- **Keyboard Navigation:** Full keyboard nav for all panels, tab order optimization, visible focus indicators
+- **Audio Cues:** Distinct sounds for UI interactions and important events; optional TTS for chat
+- **High Contrast Mode:** Alternative color scheme, reduced transparency, larger text option
 
-**ARIA Labels:**
-- All UI buttons and panels labeled
-- Form inputs have descriptive labels
-- Dynamic content changes announced
-
-**Keyboard Navigation:**
-- Full keyboard navigation for all UI panels
-- Tab order optimization
-- Visible focus indicators
-- Keyboard shortcuts documented
-
-**Audio Cues:**
-- Distinct sound effects for UI interactions
-- Audio notifications for important events (low health, incoming NPC)
-- Text-to-speech for chat messages (optional)
-
-**High Contrast Mode:**
-- Alternative color scheme with higher contrast
-- Reduced transparency
-- Larger UI text option
-
-**Implementation:**
-- ARIA role attributes in all UI components
-- Keyboard navigation enhancements in `input.js`
-- High contrast stylesheet
-- Screen reader testing with NVDA/JAWS
+**Implementation:** ARIA role attributes across all UI components, keyboard enhancements in `input.js`, high contrast stylesheet, screen reader testing with NVDA/JAWS
 
 ---
 
@@ -1263,34 +776,37 @@ Market prices fluctuate based on supply and demand. Creates dynamic trading oppo
 
 ## Development Priorities Summary
 
+**Completed:**
+- ~~Fleet/Party System UI and Mechanics~~ -- IMPLEMENTED (January 2026)
+- ~~Touch-Optimized Controls (Mobile Support)~~ -- IMPLEMENTED (December 2025)
+- ~~Duplicate Network Handler Definitions~~ -- RESOLVED (December 2025)
+
 **Immediate (Next 1-2 Months):**
-1. Fleet/Party System UI and Mechanics
-2. Component Crafting System (Tier 6+ Upgrades)
-3. Relic Activation Effects
+1. Component Crafting System (Tier 6+ Upgrades)
+2. Relic Activation Effects
 
 **High Priority (3-6 Months):**
-4. Fleet Formation System with Shared Buffs
-5. Team Chat Channels
-6. New Faction: Nomad Traders
-7. Additional Upgrade Tiers (6-10)
-8. Ship Hull Variants
-9. Touch-Optimized Controls (Mobile Support)
+3. Fleet Formation System with Shared Buffs
+4. Team Chat Channels
+5. New Faction: Nomad Traders
+6. Additional Upgrade Tiers (6-10)
+7. Ship Hull Variants
 
 **Medium Priority (6-12 Months):**
-10. Friend List and Invite System
-11. Cooperative Mission System
-12. New Faction: Forgotten Ancients
-13. Unique Relic Abilities (Expanded)
-14. Extended Profile Customization
-15. Achievement/Badge System
-16. Statistics Tracking
-17. Responsive UI Scaling
+8. Friend List and Invite System
+9. Cooperative Mission System
+10. New Faction: Forgotten Ancients
+11. Unique Relic Abilities (Expanded)
+12. Extended Profile Customization
+13. Achievement/Badge System
+14. Statistics Tracking
+15. Responsive UI Scaling
 
 **Low Priority (12+ Months):**
-18. Visual Customization System
-19. Settings Sync Across Sessions
-20. Virtual Joystick Option
-21. Screen Reader Support
+16. Visual Customization System
+17. Settings Sync Across Sessions
+18. Virtual Joystick Option
+19. Screen Reader Support
 
 **Future Considerations (No Timeline):**
 - Player-Owned Structures
@@ -1304,6 +820,13 @@ Market prices fluctuate based on supply and demand. Creates dynamic trading oppo
 ---
 
 ## Version History
+
+**v1.2 (February 7, 2026):**
+- Validated roadmap against current implementation
+- Marked Fleet/Party System as IMPLEMENTED
+- Condensed RESOLVED and IMPLEMENTED sections
+- Removed embedded schemas and code examples from future items
+- Documentation consolidation pass completed (see docs/archive/)
 
 **v1.0 (December 9, 2025):**
 - Initial roadmap creation based on codebase analysis and user priorities

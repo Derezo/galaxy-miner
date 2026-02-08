@@ -26,6 +26,7 @@ const DebugSettings = {
       loot: false,
       relics: false,
       teams: false,
+      graveyard: false,  // Graveyard zone base filtering
       // Faction-specific (AI, mining beam, etc.)
       pirates: false,
       scavengers: false,

@@ -195,11 +195,11 @@ const DeathEffects = {
     const config = effect.config;
     const isInward = config.inward;
 
-    // Apply death effect multiplier from graphics settings
-    const deathMultiplier = typeof GraphicsSettings !== 'undefined'
-      ? (GraphicsSettings.get('deathEffectMultiplier') || 1.0)
+    // Apply quality-based particle multiplier
+    const qualityMultiplier = typeof ParticleSystem !== 'undefined' && ParticleSystem.getParticleMultiplier
+      ? ParticleSystem.getParticleMultiplier()
       : 1.0;
-    const particleCount = Math.max(5, Math.round(config.particles * deathMultiplier));
+    const particleCount = Math.max(5, Math.round(config.particles * qualityMultiplier));
 
     for (let i = 0; i < particleCount; i++) {
       const angle = (Math.PI * 2 * i) / particleCount + Math.random() * 0.5;
@@ -226,11 +226,11 @@ const DeathEffects = {
   generateDebris(effect) {
     const config = effect.config;
 
-    // Apply death effect multiplier from graphics settings
-    const deathMultiplier = typeof GraphicsSettings !== 'undefined'
-      ? (GraphicsSettings.get('deathEffectMultiplier') || 1.0)
+    // Apply quality-based particle multiplier
+    const qualityMultiplier = typeof ParticleSystem !== 'undefined' && ParticleSystem.getParticleMultiplier
+      ? ParticleSystem.getParticleMultiplier()
       : 1.0;
-    const debrisCount = Math.max(2, Math.round(config.debrisCount * deathMultiplier));
+    const debrisCount = Math.max(2, Math.round(config.debrisCount * qualityMultiplier));
 
     for (let i = 0; i < debrisCount; i++) {
       const angle = (Math.PI * 2 * i) / debrisCount + Math.random() * 0.3;
@@ -254,11 +254,11 @@ const DeathEffects = {
   generateSparks(effect) {
     const config = effect.config;
 
-    // Apply death effect multiplier from graphics settings
-    const deathMultiplier = typeof GraphicsSettings !== 'undefined'
-      ? (GraphicsSettings.get('deathEffectMultiplier') || 1.0)
+    // Apply quality-based particle multiplier
+    const qualityMultiplier = typeof ParticleSystem !== 'undefined' && ParticleSystem.getParticleMultiplier
+      ? ParticleSystem.getParticleMultiplier()
       : 1.0;
-    const sparkCount = Math.max(3, Math.round((config.sparkCount || 10) * deathMultiplier));
+    const sparkCount = Math.max(3, Math.round((config.sparkCount || 10) * qualityMultiplier));
 
     for (let i = 0; i < sparkCount; i++) {
       const angle = Math.random() * Math.PI * 2;
@@ -432,8 +432,9 @@ const DeathEffects = {
                 type: 'smoke',
                 gravity: -8
               });
-              // Occasional spark
-              if (Math.random() < 0.3) {
+              // Occasional spark - scale spawn chance with quality
+              const sparkChance = ParticleSystem.getParticleMultiplier ? 0.3 * ParticleSystem.getParticleMultiplier() : 0.3;
+              if (Math.random() < sparkChance) {
                 ParticleSystem.spawn({
                   x: m.x,
                   y: m.y,
@@ -693,8 +694,11 @@ const DeathEffects = {
     ctx.fill();
     ctx.restore();
 
-    // Optional steam/smoke particles during warning
-    if (Math.random() < 0.1 && typeof ParticleSystem !== 'undefined') {
+    // Optional steam/smoke particles during warning - scale spawn chance with quality
+    const steamChance = typeof ParticleSystem !== 'undefined' && ParticleSystem.getParticleMultiplier
+      ? 0.1 * ParticleSystem.getParticleMultiplier()
+      : 0.1;
+    if (Math.random() < steamChance && typeof ParticleSystem !== 'undefined') {
       const offsetX = (Math.random() - 0.5) * 30;
       const offsetY = (Math.random() - 0.5) * 30;
 
@@ -1866,8 +1870,11 @@ const DeathEffects = {
     // Core explodes outward at end
     effect.coreSize = 10 + phaseProgress * 100;
 
-    // Final burst of particles
-    if (phaseProgress > 0.5 && Math.random() < 0.8) {
+    // Final burst of particles - scale spawn chance with quality
+    const burstChance = typeof ParticleSystem !== 'undefined' && ParticleSystem.getParticleMultiplier
+      ? Math.min(1, 0.8 * ParticleSystem.getParticleMultiplier())
+      : 0.8;
+    if (phaseProgress > 0.5 && Math.random() < burstChance) {
       const burstAngle = Math.random() * Math.PI * 2;
       const burstSpeed = 200 + Math.random() * 300;
 

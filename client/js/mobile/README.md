@@ -453,3 +453,34 @@ Settings are automatically applied to:
 - `VirtualJoystick.config.deadzone`
 - `AutoFire.enabled`
 - `AutoFire.aimTolerance`
+
+---
+
+## Platform Support
+
+| Platform | Browser | Status |
+|----------|---------|--------|
+| iOS 15+ | Safari | Supported |
+| Android 10+ | Chrome | Supported |
+| iPadOS | Safari | Supported |
+| Android Tablets | Chrome | Supported |
+
+**Requirements:** Touch screen with multi-touch, landscape orientation, modern browser with ES6 and WebSocket support.
+
+---
+
+## Performance Notes
+
+- **Rendering**: Canvas DPR capped at 2.0 on mobile; 60 FPS target maintained
+- **Audio**: Spatial audio disabled on mobile (mono assumed); sound pool limited to 32 concurrent sounds
+- **Network**: Same update frequency as desktop; proximity-based updates reduce bandwidth
+
+---
+
+## Known Limitations
+
+1. **No portrait gameplay** -- landscape required
+2. **No reverse thrust** -- mobile joystick doesn't support backward movement
+3. **No double-tap boost** -- boost via max joystick thrust only
+4. **No gesture support in gameplay** -- pinch/swipe not wired to game actions yet
+5. **No haptic feedback** -- Vibration API not used

@@ -24,115 +24,119 @@ function register(socket, deps) {
 
   // Skull and Bones: Plunder faction base
   socket.on('relic:plunder', (data) => {
-    const authenticatedUserId = getAuthenticatedUserId();
-    if (!authenticatedUserId) return;
-    const { baseId } = data;
+    try {
+      const authenticatedUserId = getAuthenticatedUserId();
+      if (!authenticatedUserId) return;
+      const { baseId } = data;
 
-    logger.log('[Plunder] Plunder request from user', authenticatedUserId, 'for base', baseId);
+      logger.log('[Plunder] Plunder request from user', authenticatedUserId, 'for base', baseId);
 
-    // Validate relic ownership
-    const hasRelic = statements.hasRelic.get(authenticatedUserId, 'SKULL_AND_BONES');
-    if (!hasRelic) {
-      socket.emit('relic:plunderFailed', { reason: 'Missing Skull and Bones relic' });
-      return;
-    }
-
-    // Get player position
-    const player = connectedPlayers.get(socket.id);
-    if (!player || !player.position) {
-      socket.emit('relic:plunderFailed', { reason: 'Player not found' });
-      return;
-    }
-
-    // Get base and validate
-    const base = npc.getActiveBase(baseId);
-    if (!base || base.destroyed) {
-      socket.emit('relic:plunderFailed', { reason: 'Base not found' });
-      return;
-    }
-
-    // Get computed position for orbital bases
-    const computedPos = world.getObjectPosition(baseId);
-    const baseX = computedPos ? computedPos.x : base.x;
-    const baseY = computedPos ? computedPos.y : base.y;
-
-    // Calculate distance and validate range with tolerance
-    const dx = baseX - player.position.x;
-    const dy = baseY - player.position.y;
-    const dist = Math.sqrt(dx * dx + dy * dy);
-    const plunderRange = Constants.RELIC_TYPES?.SKULL_AND_BONES?.plunderRange || 200;
-    const baseSize = base.size || 100;
-    const tolerance = config.ORBITAL_POSITION_TOLERANCE || 1.15;
-
-    if (dist > (plunderRange + baseSize) * tolerance) {
-      socket.emit('relic:plunderFailed', { reason: 'Too far from base' });
-      return;
-    }
-
-    // Calculate plunder rewards based on base type
-    const rewards = calculatePlunderRewards(base);
-
-    // Apply rewards to player
-    if (rewards.credits > 0) {
-      const ship = statements.getShipByUserId.get(authenticatedUserId);
-      const currentCredits = getSafeCredits(ship);
-      safeUpdateCredits(currentCredits + rewards.credits, authenticatedUserId);
-      logger.log('[Plunder] Added', rewards.credits, 'credits to user', authenticatedUserId);
-    }
-
-    // Add resources to inventory
-    if (rewards.resources && rewards.resources.length > 0) {
-      for (const item of rewards.resources) {
-        safeUpsertInventory(authenticatedUserId, item.resource, item.quantity);
-        logger.log('[Plunder] Added', item.quantity, item.resource, 'to user', authenticatedUserId);
+      // Validate relic ownership
+      const hasRelic = statements.hasRelic.get(authenticatedUserId, 'SKULL_AND_BONES');
+      if (!hasRelic) {
+        socket.emit('relic:plunderFailed', { reason: 'Missing Skull and Bones relic' });
+        return;
       }
-    }
 
-    // Clear base resources after plundering
-    clearBaseResources(base);
-
-    // Trigger aggro for same-faction NPCs within range (use computed position)
-    const aggroRange = Constants.RELIC_TYPES?.SKULL_AND_BONES?.aggroRange || 600;
-    const nearbyNPCs = npc.getNPCsInRange({ x: baseX, y: baseY }, aggroRange);
-
-    for (const npcEntity of nearbyNPCs) {
-      if (npcEntity.faction === base.faction) {
-        npcEntity.targetPlayer = authenticatedUserId;
-        npcEntity.state = 'combat';
-        logger.log('[Plunder] NPC', npcEntity.id, 'now hostile to player');
+      // Get player position
+      const player = connectedPlayers.get(socket.id);
+      if (!player || !player.position) {
+        socket.emit('relic:plunderFailed', { reason: 'Player not found' });
+        return;
       }
+
+      // Get base and validate
+      const base = npc.getActiveBase(baseId);
+      if (!base || base.destroyed) {
+        socket.emit('relic:plunderFailed', { reason: 'Base not found' });
+        return;
+      }
+
+      // Get computed position for orbital bases
+      const computedPos = world.getObjectPosition(baseId);
+      const baseX = computedPos ? computedPos.x : base.x;
+      const baseY = computedPos ? computedPos.y : base.y;
+
+      // Calculate distance and validate range with tolerance
+      const dx = baseX - player.position.x;
+      const dy = baseY - player.position.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      const plunderRange = Constants.RELIC_TYPES?.SKULL_AND_BONES?.plunderRange || 200;
+      const baseSize = base.size || 100;
+      const tolerance = config.ORBITAL_POSITION_TOLERANCE || 1.15;
+
+      if (dist > (plunderRange + baseSize) * tolerance) {
+        socket.emit('relic:plunderFailed', { reason: 'Too far from base' });
+        return;
+      }
+
+      // Calculate plunder rewards based on base type
+      const rewards = calculatePlunderRewards(base);
+
+      // Apply rewards to player
+      if (rewards.credits > 0) {
+        const ship = statements.getShipByUserId.get(authenticatedUserId);
+        const currentCredits = getSafeCredits(ship);
+        safeUpdateCredits(currentCredits + rewards.credits, authenticatedUserId);
+        logger.log('[Plunder] Added', rewards.credits, 'credits to user', authenticatedUserId);
+      }
+
+      // Add resources to inventory
+      if (rewards.resources && rewards.resources.length > 0) {
+        for (const item of rewards.resources) {
+          safeUpsertInventory(authenticatedUserId, item.resource, item.quantity);
+          logger.log('[Plunder] Added', item.quantity, item.resource, 'to user', authenticatedUserId);
+        }
+      }
+
+      // Clear base resources after plundering
+      clearBaseResources(base);
+
+      // Trigger aggro for same-faction NPCs within range (use computed position)
+      const aggroRange = Constants.RELIC_TYPES?.SKULL_AND_BONES?.aggroRange || 600;
+      const nearbyNPCs = npc.getNPCsInRange({ x: baseX, y: baseY }, aggroRange);
+
+      for (const npcEntity of nearbyNPCs) {
+        if (npcEntity.faction === base.faction) {
+          npcEntity.targetPlayer = authenticatedUserId;
+          npcEntity.state = 'combat';
+          logger.log('[Plunder] NPC', npcEntity.id, 'now hostile to player');
+        }
+      }
+
+      // Build loot array for client
+      const lootItems = rewards.resources.map(r => ({
+        type: 'resource',
+        resource: r.resource,
+        quantity: r.quantity
+      }));
+
+      // Send success to plundering player (use computed position)
+      socket.emit('relic:plunderSuccess', {
+        baseId,
+        credits: rewards.credits,
+        loot: lootItems,
+        position: { x: baseX, y: baseY }
+      });
+
+      // Send inventory update for server sync
+      const inventory = statements.getInventory.all(authenticatedUserId);
+      const updatedShip = statements.getShipByUserId.get(authenticatedUserId);
+      socket.emit('inventory:update', {
+        inventory,
+        credits: getSafeCredits(updatedShip)
+      });
+
+      // Broadcast visual effect to all nearby players (use computed position)
+      io.emit('base:plundered', {
+        baseId,
+        position: { x: baseX, y: baseY }
+      });
+
+      logger.log('[Plunder] Plunder complete - credits:', rewards.credits, 'items:', lootItems.length);
+    } catch (err) {
+      logger.error(`[HANDLER] relic:plunder error:`, err);
     }
-
-    // Build loot array for client
-    const lootItems = rewards.resources.map(r => ({
-      type: 'resource',
-      resource: r.resource,
-      quantity: r.quantity
-    }));
-
-    // Send success to plundering player (use computed position)
-    socket.emit('relic:plunderSuccess', {
-      baseId,
-      credits: rewards.credits,
-      loot: lootItems,
-      position: { x: baseX, y: baseY }
-    });
-
-    // Send inventory update for server sync
-    const inventory = statements.getInventory.all(authenticatedUserId);
-    const updatedShip = statements.getShipByUserId.get(authenticatedUserId);
-    socket.emit('inventory:update', {
-      inventory,
-      credits: getSafeCredits(updatedShip)
-    });
-
-    // Broadcast visual effect to all nearby players (use computed position)
-    io.emit('base:plundered', {
-      baseId,
-      position: { x: baseX, y: baseY }
-    });
-
-    logger.log('[Plunder] Plunder complete - credits:', rewards.credits, 'items:', lootItems.length);
   });
 }
 

@@ -22,9 +22,11 @@ const CelestialRenderer = {
   update(dt) {
     this.animationTime += dt;
 
-    // Update asteroid rotations
-    for (const [id, rotation] of this.asteroidRotations) {
-      rotation.angle += rotation.speed * dt;
+    // Update asteroid rotations (only if quality is high enough)
+    if (this.isRotationEnabled()) {
+      for (const [id, rotation] of this.asteroidRotations) {
+        rotation.angle += rotation.speed * dt;
+      }
     }
   },
 
@@ -51,12 +53,34 @@ const CelestialRenderer = {
     };
   },
 
-  // Get LOD level based on screen size
+  // Get LOD level based on screen size and quality settings
+  // Returns 'minimal', 'low', 'medium', 'high' or 'ultra'
   getLODLevel(screenSize) {
-    if (screenSize < 10) return 'minimal';
-    if (screenSize < 25) return 'low';
-    if (screenSize < 50) return 'medium';
-    return 'high';
+    // Screen size based LOD
+    let sizeLOD;
+    if (screenSize < 10) sizeLOD = 0;      // minimal
+    else if (screenSize < 25) sizeLOD = 1; // low
+    else if (screenSize < 50) sizeLOD = 2; // medium
+    else sizeLOD = 3;                       // high
+
+    // Get quality LOD cap (0-4)
+    const qualityLOD = typeof GraphicsSettings !== 'undefined'
+      ? GraphicsSettings.getLOD()
+      : 3;
+
+    // Clamp to the lower of the two
+    const effectiveLOD = Math.min(sizeLOD, qualityLOD);
+
+    // Map numeric LOD back to string names
+    const lodNames = ['minimal', 'low', 'medium', 'high', 'ultra'];
+    return lodNames[effectiveLOD] || 'high';
+  },
+
+  // Check if asteroid rotation is enabled based on quality
+  isRotationEnabled() {
+    if (typeof GraphicsSettings === 'undefined') return true;
+    // Disable rotation at very low quality (below 15)
+    return GraphicsSettings.getQuality() >= 15;
   },
 
   // ==================== PLANETS ====================
@@ -120,8 +144,10 @@ const CelestialRenderer = {
       this.drawTerminator(ctx, size);
     }
 
-    // Add atmosphere halo if applicable
-    if (typeConfig.hasAtmosphere || planet.hasAtmosphere) {
+    // Add atmosphere halo if applicable (quality 25+ threshold)
+    const atmosphereEnabled = typeof GraphicsSettings === 'undefined' ||
+      GraphicsSettings.isFeatureEnabled('planetAtmosphere');
+    if (atmosphereEnabled && (typeConfig.hasAtmosphere || planet.hasAtmosphere)) {
       this.drawAtmosphereHalo(ctx, size, colors[0]);
     }
 

@@ -79,6 +79,19 @@ const HitEffectRenderer = {
   },
 
   /**
+   * Scale a particle count with quality settings
+   * @param {number} count - Base particle count
+   * @param {number} floor - Minimum count
+   * @returns {number} Scaled particle count
+   */
+  scaleCount(count, floor = 1) {
+    if (typeof ParticleSystem !== 'undefined' && ParticleSystem.scaleCount) {
+      return ParticleSystem.scaleCount(count, floor);
+    }
+    return count;
+  },
+
+  /**
    * Create hit effect at position
    * @param {number} x - World X position
    * @param {number} y - World Y position
@@ -90,7 +103,8 @@ const HitEffectRenderer = {
     const config = this.TIER_CONFIG[tier] || this.TIER_CONFIG[1];
 
     const baseParticleCount = isShieldHit ? 12 : 8;
-    const particleCount = Math.floor(baseParticleCount * config.particleMultiplier);
+    const tierScaled = Math.floor(baseParticleCount * config.particleMultiplier);
+    const particleCount = this.scaleCount(tierScaled, 2);
 
     // Main burst of particles
     ParticleSystem.spawnBurst({
@@ -156,7 +170,8 @@ const HitEffectRenderer = {
    * Add expanding ring particles
    */
   addImpactRings(x, y, color, count, sizeMultiplier) {
-    for (let ring = 0; ring < count; ring++) {
+    const scaledCount = this.scaleCount(count, 1);
+    for (let ring = 0; ring < scaledCount; ring++) {
       const delay = ring * 50; // Stagger rings
       const ringParticles = 12;
       const startSize = 8 + ring * 4;
@@ -184,8 +199,9 @@ const HitEffectRenderer = {
    */
   addDebrisParticles(x, y, count) {
     const debrisColors = ['#666666', '#888888', '#555555', '#777777'];
+    const scaledCount = this.scaleCount(count, 1);
 
-    for (let i = 0; i < count; i++) {
+    for (let i = 0; i < scaledCount; i++) {
       const angle = Math.random() * Math.PI * 2;
       const speed = 80 + Math.random() * 120;
 
@@ -212,7 +228,8 @@ const HitEffectRenderer = {
    * Add flame particles for heavy impacts
    */
   addFlameParticles(x, y, count) {
-    for (let i = 0; i < count; i++) {
+    const scaledCount = this.scaleCount(count, 1);
+    for (let i = 0; i < scaledCount; i++) {
       const angle = Math.random() * Math.PI * 2;
       const speed = 30 + Math.random() * 50;
 
@@ -238,6 +255,7 @@ const HitEffectRenderer = {
    */
   addElectricalDischarge(x, y, arcCount) {
     const teslaColors = this.COLORS.tesla;
+    const scaledArcCount = this.scaleCount(arcCount, 2);
 
     // Central bright flash
     ParticleSystem.spawn({
@@ -255,8 +273,8 @@ const HitEffectRenderer = {
     });
 
     // Electrical arc particles shooting outward
-    for (let i = 0; i < arcCount; i++) {
-      const angle = (i / arcCount) * Math.PI * 2 + (Math.random() - 0.5) * 0.3;
+    for (let i = 0; i < scaledArcCount; i++) {
+      const angle = (i / scaledArcCount) * Math.PI * 2 + (Math.random() - 0.5) * 0.3;
       const speed = 150 + Math.random() * 100;
 
       // Main arc spark
@@ -308,7 +326,7 @@ const HitEffectRenderer = {
     });
 
     // Small crackling sparks around impact point
-    const sparkCount = arcCount * 2;
+    const sparkCount = this.scaleCount(scaledArcCount * 2, 2);
     for (let i = 0; i < sparkCount; i++) {
       const angle = Math.random() * Math.PI * 2;
       const dist = 5 + Math.random() * 15;
@@ -349,7 +367,8 @@ const HitEffectRenderer = {
     });
 
     // Energy pulse particles moving outward
-    const pulseCount = isElectrical ? 20 : 16;
+    const basePulseCount = isElectrical ? 20 : 16;
+    const pulseCount = this.scaleCount(basePulseCount, 4);
     for (let i = 0; i < pulseCount; i++) {
       const angle = (i / pulseCount) * Math.PI * 2;
       const speed = isElectrical ? 250 : 200;
@@ -378,8 +397,14 @@ const HitEffectRenderer = {
    * @param {number} y - World Y position
    */
   addShieldRipple(x, y) {
+    // Check if shield ripples are enabled in graphics settings
+    if (typeof GraphicsSettings !== 'undefined' &&
+        !GraphicsSettings.isFeatureEnabled('shieldRipples')) {
+      return;
+    }
+
     // Ring of particles moving outward
-    const particleCount = 16;
+    const particleCount = this.scaleCount(16, 4);
     for (let i = 0; i < particleCount; i++) {
       const angle = (i / particleCount) * Math.PI * 2;
       const speed = 150;
@@ -414,7 +439,7 @@ const HitEffectRenderer = {
       decay: 1,
       drag: 0.93,
       type: 'glow'
-    }, 15, {
+    }, this.scaleCount(15, 4), {
       vx: 400,
       vy: 400,
       life: 300,
@@ -431,7 +456,7 @@ const HitEffectRenderer = {
       decay: 1,
       drag: 0.90,
       type: 'spark'
-    }, 10, {
+    }, this.scaleCount(10, 3), {
       vx: 500,
       vy: 500,
       life: 200
@@ -451,7 +476,8 @@ const HitEffectRenderer = {
 
     // Calculate effect intensity based on pierce damage
     const intensity = Math.min(1, pierceDamage / 20);
-    const particleCount = Math.floor(6 + intensity * 8);
+    const baseCount = Math.floor(6 + intensity * 8);
+    const particleCount = this.scaleCount(baseCount, 2);
 
     // Red/orange "crack" particles shooting through shield
     for (let i = 0; i < particleCount; i++) {
@@ -475,7 +501,7 @@ const HitEffectRenderer = {
     }
 
     // Shield "crack" visual - jagged line particles
-    const crackCount = 3 + Math.floor(intensity * 4);
+    const crackCount = this.scaleCount(3 + Math.floor(intensity * 4), 1);
     for (let i = 0; i < crackCount; i++) {
       const crackAngle = (i / crackCount) * Math.PI * 2 + Math.random() * 0.5;
       const crackLen = 15 + Math.random() * 25;
@@ -521,7 +547,8 @@ const HitEffectRenderer = {
     });
 
     // Small orange sparks indicating hull taking damage
-    for (let i = 0; i < 5; i++) {
+    const smallSparkCount = this.scaleCount(5, 1);
+    for (let i = 0; i < smallSparkCount; i++) {
       const sparkAngle = Math.random() * Math.PI * 2;
       const sparkSpeed = 60 + Math.random() * 60;
 
@@ -557,7 +584,8 @@ const HitEffectRenderer = {
     const behindY = y - Math.sin(rotation) * size * 0.8;
 
     // Main flame burst particles
-    for (let i = 0; i < 8; i++) {
+    const flameCount = this.scaleCount(8, 2);
+    for (let i = 0; i < flameCount; i++) {
       const spreadAngle = rotation + Math.PI + (Math.random() - 0.5) * 0.6;
       const speed = 150 + Math.random() * 100;
 
@@ -578,7 +606,8 @@ const HitEffectRenderer = {
     }
 
     // Bright white-hot core
-    for (let i = 0; i < 4; i++) {
+    const coreCount = this.scaleCount(4, 1);
+    for (let i = 0; i < coreCount; i++) {
       const coreAngle = rotation + Math.PI + (Math.random() - 0.5) * 0.3;
       const coreSpeed = 100 + Math.random() * 50;
 
@@ -598,7 +627,8 @@ const HitEffectRenderer = {
     }
 
     // Smoke trail
-    for (let i = 0; i < 3; i++) {
+    const smokeCount = this.scaleCount(3, 1);
+    for (let i = 0; i < smokeCount; i++) {
       const smokeAngle = rotation + Math.PI + (Math.random() - 0.5) * 0.8;
       const smokeSpeed = 80 + Math.random() * 40;
 
@@ -635,7 +665,7 @@ const FloatingTextSystem = {
   add(x, y, text, options = {}) {
     // Check if floating text is enabled in graphics settings
     if (typeof GraphicsSettings !== 'undefined' &&
-        GraphicsSettings.get('floatingText') === false) {
+        GraphicsSettings.isFeatureEnabled('floatingText') === false) {
       return; // Skip floating text on low graphics
     }
 

@@ -190,13 +190,25 @@ function generateSectorFromStarSystem(sectorX, sectorY) {
 
     // Add bases from this system that are in this sector
     // Include starX/starY for position computation in binary systems
-    // Check if this sector is in the Graveyard safe zone
+    // Check if this sector is in the Graveyard safe zone (with 1 sector buffer for hostile bases)
     const inGraveyard = isGraveyardSector(sectorX, sectorY);
     const graveyardConfig = config.GRAVEYARD_ZONE;
+    // Extended zone: block hostile bases 1 sector beyond graveyard to prevent edge spawns
+    const inGraveyardBuffer = graveyardConfig &&
+      sectorX >= graveyardConfig.MIN_SECTOR_X - 1 && sectorX <= graveyardConfig.MAX_SECTOR_X + 1 &&
+      sectorY >= graveyardConfig.MIN_SECTOR_Y - 1 && sectorY <= graveyardConfig.MAX_SECTOR_Y + 1;
+
+    // Pre-calculate buffer zone world coordinates for orbital check
+    const sectorSize = config.SECTOR_SIZE || 1000;
+    const bufferMinX = (graveyardConfig?.MIN_SECTOR_X - 1) * sectorSize;
+    const bufferMaxX = (graveyardConfig?.MAX_SECTOR_X + 2) * sectorSize;
+    const bufferMinY = (graveyardConfig?.MIN_SECTOR_Y - 1) * sectorSize;
+    const bufferMaxY = (graveyardConfig?.MAX_SECTOR_Y + 2) * sectorSize;
 
     for (const base of system.bases) {
-      // Skip hostile faction bases in Graveyard zone
-      if (inGraveyard && graveyardConfig?.BLOCKED_FACTIONS?.includes(base.faction)) {
+      // Skip hostile faction bases in Graveyard zone and buffer zone
+      if (inGraveyardBuffer && graveyardConfig?.BLOCKED_FACTIONS?.includes(base.faction)) {
+        logger.category('graveyard', `Blocking ${base.type} (faction: ${base.faction}) in sector (${sectorX},${sectorY}) - buffer zone`);
         continue;
       }
 
@@ -210,10 +222,27 @@ function generateSectorFromStarSystem(sectorX, sectorY) {
       const starY = system.primaryStar.y;
 
       if (base.orbitRadius && base.orbitSpeed) {
+        // For orbital hostile bases, check if orbit could cross INTO buffer zone
+        // If so, block entirely to prevent visibility from within graveyard
+        if (graveyardConfig?.BLOCKED_FACTIONS?.includes(base.faction)) {
+          const maxReach = base.orbitRadius + (base.size || 100);
+          const orbitCouldCrossBuffer =
+            starX + maxReach >= bufferMinX && starX - maxReach < bufferMaxX &&
+            starY + maxReach >= bufferMinY && starY - maxReach < bufferMaxY;
+          if (orbitCouldCrossBuffer) {
+            logger.category('graveyard', `Blocking orbital ${base.type} (faction: ${base.faction}) - orbit crosses buffer zone`);
+            continue;
+          }
+        }
+
         // Orbital base - check if orbit crosses sector
         const maxReach = base.orbitRadius + (base.size || 100);
         if (starX + maxReach >= sectorMinX && starX - maxReach < sectorMaxX &&
             starY + maxReach >= sectorMinY && starY - maxReach < sectorMaxY) {
+          // Debug: log bases added near graveyard
+          if (Math.abs(sectorX) <= 3 && Math.abs(sectorY) <= 3) {
+            logger.category('graveyard', `Adding orbital ${base.type} (faction: ${base.faction}, id: ${base.id}) to sector (${sectorX},${sectorY})`);
+          }
           sector.bases.push({
             ...base,
             starX: starX,
@@ -223,6 +252,10 @@ function generateSectorFromStarSystem(sectorX, sectorY) {
         }
       } else if (isInSector(base.x, base.y)) {
         // Static base - just check if in sector
+        // Debug: log bases added near graveyard
+        if (Math.abs(sectorX) <= 3 && Math.abs(sectorY) <= 3) {
+          logger.category('graveyard', `Adding static ${base.type} (faction: ${base.faction}, id: ${base.id}) to sector (${sectorX},${sectorY})`);
+        }
         sector.bases.push({
           ...base,
           starX: starX,
@@ -299,13 +332,16 @@ function generateDeepSpaceContent(sector, sectorX, sectorY, rng) {
   const sectorMinX = sectorX * config.SECTOR_SIZE;
   const sectorMinY = sectorY * config.SECTOR_SIZE;
 
-  // Check if this sector is in the Graveyard safe zone
-  const inGraveyard = isGraveyardSector(sectorX, sectorY);
+  // Check if this sector is in the Graveyard safe zone (with buffer)
   const graveyardConfig = config.GRAVEYARD_ZONE;
+  // Extended zone: block hostile bases 1 sector beyond graveyard to prevent edge spawns
+  const inGraveyardBuffer = graveyardConfig &&
+    sectorX >= graveyardConfig.MIN_SECTOR_X - 1 && sectorX <= graveyardConfig.MAX_SECTOR_X + 1 &&
+    sectorY >= graveyardConfig.MIN_SECTOR_Y - 1 && sectorY <= graveyardConfig.MAX_SECTOR_Y + 1;
 
-  // Void rifts prefer deep space (blocked in Graveyard)
+  // Void rifts prefer deep space (blocked in Graveyard and buffer zone)
   const voidRift = config.SPAWN_HUB_TYPES?.void_rift;
-  const voidBlocked = inGraveyard && graveyardConfig?.BLOCKED_FACTIONS?.includes('void');
+  const voidBlocked = inGraveyardBuffer && graveyardConfig?.BLOCKED_FACTIONS?.includes('void');
   if (voidRift && !voidBlocked && rng() < voidRift.spawnChance * 3) {
     const size = voidRift.size || 120;
     const x = sectorMinX + size + rng() * (config.SECTOR_SIZE - size * 2);
@@ -456,6 +492,40 @@ function generateGraveyardBases(sector, sectorX, sectorY, rng) {
       }
     }
   }
+}
+
+// Look up a graveyard base by its ID
+// Format: graveyard_{baseType}_{index} (e.g., graveyard_mining_claim_0)
+function getGraveyardBaseById(objectId, debug = false) {
+  if (debug) {
+    logger.log('[World] Looking up graveyard base:', objectId);
+  }
+
+  // Ensure graveyard bases have been generated
+  // This happens when any graveyard sector is first accessed
+  if (!graveyardBasesGenerated) {
+    // Trigger generation by accessing a graveyard sector
+    const graveyardConfig = config.GRAVEYARD_ZONE;
+    if (graveyardConfig) {
+      generateSector(graveyardConfig.MIN_SECTOR_X, graveyardConfig.MIN_SECTOR_Y);
+    }
+  }
+
+  // Search through all cached graveyard bases
+  for (const [sectorKey, bases] of graveyardBasesCache) {
+    const found = bases.find(b => b.id === objectId);
+    if (found) {
+      if (debug) {
+        logger.log('[World] Found graveyard base in sector:', sectorKey);
+      }
+      return found;
+    }
+  }
+
+  if (debug) {
+    logger.log('[World] Graveyard base not found:', objectId);
+  }
+  return null;
 }
 
 // Legacy sector generation (fallback)
@@ -638,16 +708,18 @@ function generateSectorLegacy(sectorX, sectorY) {
   }
 
   // Generate faction bases (deterministic based on sector coordinates)
-  // Check if this sector is in the Graveyard safe zone
-  const inGraveyard = isGraveyardSector(sectorX, sectorY);
+  // Check if this sector is in the Graveyard safe zone (with buffer)
   const graveyardConfig = config.GRAVEYARD_ZONE;
+  const inGraveyardBuffer = graveyardConfig &&
+    sectorX >= graveyardConfig.MIN_SECTOR_X - 1 && sectorX <= graveyardConfig.MAX_SECTOR_X + 1 &&
+    sectorY >= graveyardConfig.MIN_SECTOR_Y - 1 && sectorY <= graveyardConfig.MAX_SECTOR_Y + 1;
 
   const spawnHubTypes = Object.values(config.SPAWN_HUB_TYPES || {});
   for (const hubType of spawnHubTypes) {
     if (!hubType.spawnChance) continue;
 
-    // Skip hostile faction bases in Graveyard zone
-    if (inGraveyard && graveyardConfig?.BLOCKED_FACTIONS?.includes(hubType.faction)) {
+    // Skip hostile faction bases in Graveyard zone and buffer zone
+    if (inGraveyardBuffer && graveyardConfig?.BLOCKED_FACTIONS?.includes(hubType.faction)) {
       continue;
     }
 
@@ -728,6 +800,12 @@ function getObjectById(objectId, debug = false) {
   // Check for StarSystem ID format: ss_{superX}_{superY}_{systemIndex}_{type}_{objectIndex}
   if (objectId.startsWith('ss_')) {
     return getStarSystemObjectById(objectId, debug);
+  }
+
+  // Check for graveyard base format: graveyard_{baseType}_{index}
+  // e.g., graveyard_mining_claim_0, graveyard_scavenger_yard_1
+  if (objectId.startsWith('graveyard_')) {
+    return getGraveyardBaseById(objectId, debug);
   }
 
   // Legacy format: {sectorX}_{sectorY}_{type}_{index}
@@ -963,7 +1041,7 @@ function getObjectPosition(objectId, time) {
   time = time || Physics.getPhysicsTime();
   const orbitTime = Physics.getOrbitTime();
 
-  // Parse object type from ID - handle both legacy and StarSystem formats
+  // Parse object type from ID - handle different formats
   const parts = objectId.split('_');
   let type, sector;
 
@@ -975,6 +1053,14 @@ function getObjectPosition(objectId, time) {
     const objY = object.starY !== undefined ? object.starY : (object.y || 0);
     const sectorX = Math.floor(objX / config.SECTOR_SIZE);
     const sectorY = Math.floor(objY / config.SECTOR_SIZE);
+    sector = generateSector(sectorX, sectorY);
+  } else if (objectId.startsWith('graveyard_')) {
+    // Graveyard base format: graveyard_{baseType}_{index}
+    // These are static bases, just return their position
+    type = 'base';
+    // Get sector from object position
+    const sectorX = Math.floor(object.x / config.SECTOR_SIZE);
+    const sectorY = Math.floor(object.y / config.SECTOR_SIZE);
     sector = generateSector(sectorX, sectorY);
   } else {
     // Legacy format: {sectorX}_{sectorY}_{type}_{index}

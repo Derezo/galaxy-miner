@@ -2,6 +2,8 @@
 
 Sequence diagrams showing the complete message flow for each game feature.
 
+For the primary event reference (all events, payloads, and handler mappings), see [Socket Events API](../api/socket-events.md).
+
 ## Table of Contents
 - [Authentication Flow](#authentication-flow)
 - [Player Movement Flow](#player-movement-flow)

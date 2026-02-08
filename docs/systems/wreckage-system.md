@@ -1,4 +1,6 @@
-# Wreckage System Deep Dive
+# Wreckage System
+
+The wreckage system handles loot drops when entities (NPCs, players, bases) are destroyed. Wreckage spawns at the death location containing credits, resources, buffs, components, and relics. Players collect wreckage via a timed progress bar or instantly with the Scrap Siphon relic. Scavenger NPCs also compete for wreckage and will become enraged if players steal their targets. Wreckage despawns after 60 seconds if uncollected.
 
 ## Table of Contents
 1. [Data Structures](#data-structures)

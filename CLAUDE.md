@@ -48,6 +48,7 @@ Real-time bidirectional via Socket.io. Event namespaces:
 - `loot:*` - Wreckage spawn, collect
 - `market:*` - Marketplace operations
 - `ship:*` - Upgrades, customization
+- `fleet:*` - Fleet management
 - `chat:*` / `emote:*` - Communication
 - `world:*` - Asteroid depletion broadcasts
 
@@ -63,26 +64,22 @@ Updates only broadcast to players within radar range (base 500 units, scales wit
 ### NPC AI System
 Modular AI in `/server/game/ai/` with faction-specific strategies. Each faction has spawn hubs (bases) that continuously spawn NPCs. The Swarm faction has unique mechanics: queen spawning, base assimilation, egg hatching.
 
-### Graveyard System
-Player death creates derelict wreckage that persists and can be looted. Features atmosphere effects, respawn UI, and siphon collection mechanics. Server tracks derelicts in `/server/game/derelict.js`.
-
 ## Key Entry Points
 
 | Server | Client |
 |--------|--------|
-| `/server/socket.js` - All event handlers | `/client/js/network.js` - Socket.io client |
+| `/server/socket.js` - Socket handler orchestrator (delegates to `/server/socket/` modules) | `/client/js/network.js` - Socket.io client |
 | `/server/game/engine.js` - Game tick loop | `/client/js/game.js` - Client loop |
 | `/server/game/combat.js` - Combat system | `/client/js/renderer.js` - Canvas rendering |
 | `/server/auth.js` - Authentication | `/client/js/player.js` - Local player state |
 
 ## Subsystem Documentation
 
-Each major subsystem has its own README:
+Detailed docs in `/docs/README.md` (full index). Client subsystem READMEs:
 - `/client/js/ui/README.md` - Component-based UI system
 - `/client/js/audio/README.md` - Web Audio API spatial audio
 - `/client/js/mobile/README.md` - Touch controls
 - `/client/js/network/README.md` - Socket event handlers
-- `/docs/README.md` - Full documentation index
 
 ## Database
 
@@ -90,7 +87,7 @@ Each major subsystem has its own README:
 - Schema: `/server/schema.sql` (auto-applied on startup)
 - Reset: Delete `data/*.db*` files and restart server
 
-Tables: `users`, `ships`, `inventory`, `marketplace`, `world_changes`, `chat_messages`, `components`, `relics`, `active_buffs`
+Tables: `users`, `ships`, `inventory`, `marketplace`, `world_changes`, `chat_messages`, `components`, `relics`, `active_buffs`, `fleets`, `fleet_members`, `fleet_invites`
 
 ## Testing
 
@@ -116,6 +113,8 @@ Environment variables in `.env` (copy from `.env.example`):
 | `TOKEN_EXPIRY_MS` | 86400000 | Token lifetime (24h) |
 | `POSITION_SAVE_INTERVAL_MS` | 5000 | DB save frequency |
 
+**Security**: Production secrets go in `.env.production` (gitignored by `.env.*` pattern). Never commit secrets to the repository. The deploy script copies `.env.production` to the remote server as `.env`.
+
 ## Node Version
 
-Requires Node.js >=18.0.0 (18.11+ for `--watch` flag)
+Requires Node.js >=18.0.0 (18.11+ for `--watch` flag). See `.nvmrc`.

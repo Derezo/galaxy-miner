@@ -235,7 +235,7 @@ const Renderer = {
   triggerScreenShake(intensity, duration) {
     // Apply screen shake multiplier from graphics settings
     const shakeMultiplier = typeof GraphicsSettings !== 'undefined'
-      ? (GraphicsSettings.get('screenShakeMultiplier') || 1.0)
+      ? (GraphicsSettings.getScreenShakeMultiplier() || 1.0)
       : 1.0;
 
     this.screenShake.intensity = intensity * shakeMultiplier;
@@ -250,7 +250,7 @@ const Renderer = {
   setScreenShake(intensity) {
     // Apply screen shake multiplier from graphics settings
     const shakeMultiplier = typeof GraphicsSettings !== 'undefined'
-      ? (GraphicsSettings.get('screenShakeMultiplier') || 1.0)
+      ? (GraphicsSettings.getScreenShakeMultiplier() || 1.0)
       : 1.0;
 
     this.screenShake.intensity = intensity * shakeMultiplier;
@@ -696,24 +696,17 @@ const Renderer = {
     const ctx = this.ctx;
     const size = star.size || 400;
 
-    // Draw corona glow effect first (background layer)
-    if (typeof StarEffects !== "undefined") {
+    // Get LOD level for quality-based rendering
+    const lod = typeof GraphicsSettings !== 'undefined' ? GraphicsSettings.getLOD() : 3;
+
+    // Draw corona glow effect first (background layer) - only at LOD 2+
+    if (lod >= 2 && typeof StarEffects !== "undefined") {
       StarEffects.drawCoronaGlow(ctx, screen.x, screen.y, star);
     }
 
-    // Animated surface turbulence
+    // Animated surface turbulence (only at LOD 2+)
     const time = Date.now() * 0.001;
-    const turbulence = 0.95 + Math.sin(time * 3 + star.x * 0.01) * 0.05;
-
-    // Main star body with multi-layer gradient
-    const gradient = ctx.createRadialGradient(
-      screen.x,
-      screen.y,
-      0,
-      screen.x,
-      screen.y,
-      size * turbulence
-    );
+    const turbulence = lod >= 2 ? (0.95 + Math.sin(time * 3 + star.x * 0.01) * 0.05) : 1;
 
     // Get star colors based on type
     const colorSchemes = {
@@ -725,56 +718,80 @@ const Renderer = {
     };
     const scheme = colorSchemes[star.color] || colorSchemes["#ffff00"];
 
-    gradient.addColorStop(0, scheme.core);
-    gradient.addColorStop(0.25, scheme.mid);
-    gradient.addColorStop(0.7, star.color);
-    gradient.addColorStop(0.9, scheme.outer + "aa");
-    gradient.addColorStop(1, "transparent");
-
-    ctx.fillStyle = gradient;
-    ctx.beginPath();
-    ctx.arc(screen.x, screen.y, size * turbulence, 0, Math.PI * 2);
-    ctx.fill();
-
-    // Animated dark spots on surface (sunspots)
-    ctx.save();
-    ctx.globalAlpha = 0.15;
-    ctx.fillStyle = "#000000";
-    for (let i = 0; i < 3; i++) {
-      const spotAngle = time * 0.2 + i * 2;
-      const spotDist = size * 0.4 * (0.5 + Math.sin(time * 0.5 + i) * 0.3);
-      const spotX = screen.x + Math.cos(spotAngle) * spotDist;
-      const spotY = screen.y + Math.sin(spotAngle) * spotDist;
-      const spotSize = size * 0.08 * (0.5 + Math.sin(time + i * 1.5) * 0.5);
-
+    if (lod === 0) {
+      // LOD 0 (Minimal): Solid color circle only
+      ctx.fillStyle = star.color || "#ffff00";
       ctx.beginPath();
-      ctx.arc(spotX, spotY, spotSize, 0, Math.PI * 2);
+      ctx.arc(screen.x, screen.y, size, 0, Math.PI * 2);
+      ctx.fill();
+    } else if (lod === 1) {
+      // LOD 1 (Low): Simple 2-stop gradient, no glow
+      const gradient = ctx.createRadialGradient(
+        screen.x, screen.y, 0,
+        screen.x, screen.y, size
+      );
+      gradient.addColorStop(0, scheme.core);
+      gradient.addColorStop(1, star.color);
+
+      ctx.fillStyle = gradient;
+      ctx.beginPath();
+      ctx.arc(screen.x, screen.y, size, 0, Math.PI * 2);
+      ctx.fill();
+    } else {
+      // LOD 2+ (Medium/High/Ultra): Full multi-layer gradient
+      const gradient = ctx.createRadialGradient(
+        screen.x, screen.y, 0,
+        screen.x, screen.y, size * turbulence
+      );
+
+      gradient.addColorStop(0, scheme.core);
+      gradient.addColorStop(0.25, scheme.mid);
+      gradient.addColorStop(0.7, star.color);
+      gradient.addColorStop(0.9, scheme.outer + "aa");
+      gradient.addColorStop(1, "transparent");
+
+      ctx.fillStyle = gradient;
+      ctx.beginPath();
+      ctx.arc(screen.x, screen.y, size * turbulence, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Animated dark spots on surface (sunspots) - LOD 2+ only
+      ctx.save();
+      ctx.globalAlpha = 0.15;
+      ctx.fillStyle = "#000000";
+      const spotCount = lod >= 3 ? 3 : 2; // Fewer spots at medium quality
+      for (let i = 0; i < spotCount; i++) {
+        const spotAngle = time * 0.2 + i * 2;
+        const spotDist = size * 0.4 * (0.5 + Math.sin(time * 0.5 + i) * 0.3);
+        const spotX = screen.x + Math.cos(spotAngle) * spotDist;
+        const spotY = screen.y + Math.sin(spotAngle) * spotDist;
+        const spotSize = size * 0.08 * (0.5 + Math.sin(time + i * 1.5) * 0.5);
+
+        ctx.beginPath();
+        ctx.arc(spotX, spotY, spotSize, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.restore();
+
+      // Bright white core - LOD 2+ only
+      const coreGradient = ctx.createRadialGradient(
+        screen.x, screen.y, 0,
+        screen.x, screen.y, size * 0.3
+      );
+      coreGradient.addColorStop(0, "#ffffff");
+      coreGradient.addColorStop(0.5, "#ffffee");
+      coreGradient.addColorStop(1, "transparent");
+
+      ctx.fillStyle = coreGradient;
+      ctx.beginPath();
+      ctx.arc(screen.x, screen.y, size * 0.3, 0, Math.PI * 2);
       ctx.fill();
     }
-    ctx.restore();
 
-    // Bright white core
-    const coreGradient = ctx.createRadialGradient(
-      screen.x,
-      screen.y,
-      0,
-      screen.x,
-      screen.y,
-      size * 0.3
-    );
-    coreGradient.addColorStop(0, "#ffffff");
-    coreGradient.addColorStop(0.5, "#ffffee");
-    coreGradient.addColorStop(1, "transparent");
-
-    ctx.fillStyle = coreGradient;
-    ctx.beginPath();
-    ctx.arc(screen.x, screen.y, size * 0.3, 0, Math.PI * 2);
-    ctx.fill();
-
-    // Draw danger zone indicator (subtle ring at warm zone boundary)
+    // Draw danger zone indicator (subtle ring at warm zone boundary) - all LODs
     const zones = CONSTANTS.STAR_ZONES || { CORONA: 1.5, WARM: 1.3 };
     ctx.save();
-    ctx.globalAlpha = 0.1 + Math.sin(time * 2) * 0.05;
+    ctx.globalAlpha = lod >= 2 ? (0.1 + Math.sin(time * 2) * 0.05) : 0.1;
     ctx.strokeStyle = "#ff6600";
     ctx.lineWidth = 2;
     ctx.setLineDash([10, 20]);
@@ -1029,8 +1046,8 @@ const Renderer = {
   },
 
   /**
-   * Legacy fallback for base drawing (only used if FactionBases module is unavailable)
-   * @deprecated Use FactionBases module for rendering
+   * Fallback for base drawing (used when FactionBases module is unavailable)
+   * @fallback Prefer FactionBases module for rendering when loaded
    */
   drawBase(base) {
     const screen = this.worldToScreen(base.x, base.y);

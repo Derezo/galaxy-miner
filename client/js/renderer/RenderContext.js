@@ -143,7 +143,7 @@ const RenderContext = {
   triggerScreenShake(intensity, duration) {
     // Apply screen shake multiplier from graphics settings
     const shakeMultiplier = typeof GraphicsSettings !== 'undefined'
-      ? (GraphicsSettings.get('screenShakeMultiplier') || 1.0)
+      ? (GraphicsSettings.getScreenShakeMultiplier() || 1.0)
       : 1.0;
 
     this.screenShake.intensity = intensity * shakeMultiplier;
@@ -157,7 +157,7 @@ const RenderContext = {
    */
   setScreenShake(intensity) {
     const shakeMultiplier = typeof GraphicsSettings !== 'undefined'
-      ? (GraphicsSettings.get('screenShakeMultiplier') || 1.0)
+      ? (GraphicsSettings.getScreenShakeMultiplier() || 1.0)
       : 1.0;
 
     this.screenShake.intensity = intensity * shakeMultiplier;

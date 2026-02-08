@@ -168,15 +168,53 @@ const World = {
 
       // Add bases from this system that are in this sector
       // Include starX/starY for position computation in binary systems
+      // Check if this sector is in the Graveyard safe zone (with 1 sector buffer for hostile bases)
+      const graveyardConfig = CONSTANTS.GRAVEYARD_ZONE;
+      // Extended zone: block hostile bases 1 sector beyond graveyard to prevent edge spawns
+      const inGraveyardBuffer = graveyardConfig &&
+        sectorX >= graveyardConfig.MIN_SECTOR_X - 1 && sectorX <= graveyardConfig.MAX_SECTOR_X + 1 &&
+        sectorY >= graveyardConfig.MIN_SECTOR_Y - 1 && sectorY <= graveyardConfig.MAX_SECTOR_Y + 1;
+
+      // Pre-calculate buffer zone world coordinates for orbital check
+      const sectorSize = CONSTANTS.SECTOR_SIZE || 1000;
+      const bufferMinX = (graveyardConfig?.MIN_SECTOR_X - 1) * sectorSize;
+      const bufferMaxX = (graveyardConfig?.MAX_SECTOR_X + 2) * sectorSize;
+      const bufferMinY = (graveyardConfig?.MIN_SECTOR_Y - 1) * sectorSize;
+      const bufferMaxY = (graveyardConfig?.MAX_SECTOR_Y + 2) * sectorSize;
+
       for (const base of system.bases) {
+        // Skip hostile faction bases in Graveyard zone and buffer zone (must match server filtering)
+        if (inGraveyardBuffer && graveyardConfig.BLOCKED_FACTIONS &&
+            graveyardConfig.BLOCKED_FACTIONS.includes(base.faction)) {
+          Logger.category('graveyard', `Blocking ${base.type} (faction: ${base.faction}) in sector (${sectorX},${sectorY})`);
+          continue;
+        }
+
         const starX = system.primaryStar.x;
         const starY = system.primaryStar.y;
 
         if (base.orbitRadius && base.orbitSpeed) {
+          // For orbital hostile bases, check if orbit could cross INTO buffer zone
+          // If so, block entirely to prevent visibility from within graveyard
+          if (graveyardConfig?.BLOCKED_FACTIONS?.includes(base.faction)) {
+            const maxReach = base.orbitRadius + (base.size || 100);
+            const orbitCouldCrossBuffer =
+              starX + maxReach >= bufferMinX && starX - maxReach < bufferMaxX &&
+              starY + maxReach >= bufferMinY && starY - maxReach < bufferMaxY;
+            if (orbitCouldCrossBuffer) {
+              Logger.category('graveyard', `Blocking orbital ${base.type} (faction: ${base.faction}) - orbit crosses buffer zone`);
+              continue;
+            }
+          }
+
           // Orbital base - check if orbit crosses sector
           const maxReach = base.orbitRadius + (base.size || 100);
           if (starX + maxReach >= sectorMinX && starX - maxReach < sectorMaxX &&
               starY + maxReach >= sectorMinY && starY - maxReach < sectorMaxY) {
+            // Debug: log bases added near graveyard
+            if (Math.abs(sectorX) <= 3 && Math.abs(sectorY) <= 3) {
+              Logger.category('graveyard', `Adding orbital ${base.type} (faction: ${base.faction}, id: ${base.id}) to sector (${sectorX},${sectorY})`);
+            }
             sector.bases.push({
               ...base,
               starX: starX,
@@ -186,6 +224,10 @@ const World = {
           }
         } else if (isInSector(base.x, base.y)) {
           // Static base - just check if in sector
+          // Debug: log bases added near graveyard
+          if (Math.abs(sectorX) <= 3 && Math.abs(sectorY) <= 3) {
+            Logger.category('graveyard', `Adding static ${base.type} (faction: ${base.faction}, id: ${base.id}) to sector (${sectorX},${sectorY})`);
+          }
           sector.bases.push({
             ...base,
             starX: starX,
@@ -258,9 +300,17 @@ const World = {
     const sectorMinX = sectorX * CONSTANTS.SECTOR_SIZE;
     const sectorMinY = sectorY * CONSTANTS.SECTOR_SIZE;
 
-    // Void rifts prefer deep space
+    // Check if this sector is in the Graveyard safe zone (with buffer)
+    const graveyardConfig = CONSTANTS.GRAVEYARD_ZONE;
+    // Extended zone: block hostile bases 1 sector beyond graveyard to prevent edge spawns
+    const inGraveyardBuffer = graveyardConfig &&
+      sectorX >= graveyardConfig.MIN_SECTOR_X - 1 && sectorX <= graveyardConfig.MAX_SECTOR_X + 1 &&
+      sectorY >= graveyardConfig.MIN_SECTOR_Y - 1 && sectorY <= graveyardConfig.MAX_SECTOR_Y + 1;
+
+    // Void rifts prefer deep space (blocked in Graveyard and buffer zone)
     const voidRift = CONSTANTS.SPAWN_HUB_TYPES?.void_rift;
-    if (voidRift && rng() < voidRift.spawnChance * 3) { // Higher chance in void
+    const voidBlocked = inGraveyardBuffer && graveyardConfig?.BLOCKED_FACTIONS?.includes('void');
+    if (voidRift && !voidBlocked && rng() < voidRift.spawnChance * 3) { // Higher chance in void
       const size = voidRift.size || 120;
       const x = sectorMinX + size + rng() * (CONSTANTS.SECTOR_SIZE - size * 2);
       const y = sectorMinY + size + rng() * (CONSTANTS.SECTOR_SIZE - size * 2);
@@ -509,9 +559,20 @@ const World = {
     }
 
     // Generate faction bases (deterministic based on sector coordinates)
+    // Check if this sector is in the Graveyard safe zone (with buffer)
+    const graveyardConfig = CONSTANTS.GRAVEYARD_ZONE;
+    const inGraveyardBuffer = graveyardConfig &&
+      sectorX >= graveyardConfig.MIN_SECTOR_X - 1 && sectorX <= graveyardConfig.MAX_SECTOR_X + 1 &&
+      sectorY >= graveyardConfig.MIN_SECTOR_Y - 1 && sectorY <= graveyardConfig.MAX_SECTOR_Y + 1;
+
     const spawnHubTypes = Object.values(CONSTANTS.SPAWN_HUB_TYPES || {});
     for (const hubType of spawnHubTypes) {
       if (!hubType.spawnChance) continue;
+
+      // Skip hostile faction bases in Graveyard zone and buffer zone
+      if (inGraveyardBuffer && graveyardConfig?.BLOCKED_FACTIONS?.includes(hubType.faction)) {
+        continue;
+      }
 
       // Roll for this base type in this sector
       if (rng() < hubType.spawnChance) {

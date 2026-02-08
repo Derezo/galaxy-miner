@@ -8,6 +8,15 @@
  * Rogue Miners: Industrial, bulky, orange/yellow
  */
 
+// Quality-based LOD helper for NPC ships
+const getNpcShipLOD = () => {
+  const quality = typeof GraphicsSettings !== 'undefined' ? GraphicsSettings.getQuality() : 80;
+  if (quality < 15) return 0;
+  if (quality < 40) return 1;
+  if (quality < 80) return 2;
+  return 3;
+};
+
 const NPCShipGeometry = {
   SIZE: 20,
 
@@ -841,8 +850,9 @@ const NPCShipGeometry = {
     ctx.rotate(rotation);
     ctx.scale(scale, scale);
 
-    // Draw glow for larger variants
-    if (variantNum >= 3) {
+    // Draw glow for larger variants (gate at LOD >= 2)
+    const lod = getNpcShipLOD();
+    if (lod >= 2 && variantNum >= 3) {
       const glowRadius = this.SIZE * (1.5 + variantNum * 0.3);
       const gradient = ctx.createRadialGradient(0, 0, this.SIZE * 0.3, 0, 0, glowRadius);
       gradient.addColorStop(0, colors.glow);
@@ -1518,9 +1528,11 @@ const NPCShipGeometry = {
       ctx.stroke();
     }
 
-    // Drill teeth (sharper, industrial)
-    for (let i = 0; i < 8; i++) {
-      const angle = (i / 8) * Math.PI * 2;
+    // Drill teeth (sharper, industrial) - scale count with quality
+    const drillLod = getNpcShipLOD();
+    const drillTeethCount = drillLod === 0 ? 3 : (drillLod === 1 ? 5 : 8);
+    for (let i = 0; i < drillTeethCount; i++) {
+      const angle = (i / drillTeethCount) * Math.PI * 2;
       const x = Math.cos(angle) * SIZE * 0.15;
       const y = Math.sin(angle) * SIZE * 0.15;
       ctx.fillStyle = '#aaaaaa';
@@ -1591,10 +1603,12 @@ const NPCShipGeometry = {
     ctx.quadraticCurveTo(SIZE * 0.05, -SIZE * 0.75, SIZE * 0.15, -SIZE * 0.8);
     ctx.stroke();
 
-    // Rivets around hull
+    // Rivets around hull - scale count with quality
+    const rivetLod = getNpcShipLOD();
+    const rivetCount = rivetLod === 0 ? 4 : (rivetLod === 1 ? 8 : 12);
     ctx.fillStyle = '#333333';
-    for (let i = 0; i < 12; i++) {
-      const angle = (i / 12) * Math.PI * 2;
+    for (let i = 0; i < rivetCount; i++) {
+      const angle = (i / rivetCount) * Math.PI * 2;
       const dist = SIZE * 0.5;
       const x = Math.cos(angle) * dist;
       const y = Math.sin(angle) * dist;
@@ -1987,11 +2001,13 @@ const NPCShipGeometry = {
     ctx.lineWidth = 2;
     ctx.stroke();
 
-    // Organic vein patterns on egg
+    // Organic vein patterns on egg - scale count with quality
+    const veinLod = getNpcShipLOD();
+    const veinCount = veinLod === 0 ? 2 : (veinLod === 1 ? 3 : 5);
     ctx.strokeStyle = `rgba(153, 0, 0, ${0.5 + pulsePhase * 0.3})`;
     ctx.lineWidth = 1;
-    for (let i = 0; i < 5; i++) {
-      const angle = (i / 5) * Math.PI * 2 + (time || 0) * 0.0005;
+    for (let i = 0; i < veinCount; i++) {
+      const angle = (i / veinCount) * Math.PI * 2 + (time || 0) * 0.0005;
       ctx.beginPath();
       ctx.moveTo(0, 0);
       const endX = Math.cos(angle) * eggWidth * 0.9;
@@ -2498,8 +2514,11 @@ const NPCShipGeometry = {
 
     ctx.globalAlpha = 1;
 
-    // Energy particles along beam length
-    const particleCount = 5;
+    // Energy particles along beam length - scale with quality
+    const baseParticleCount = 5;
+    const particleCount = typeof ParticleSystem !== 'undefined' && ParticleSystem.scaleCount
+      ? ParticleSystem.scaleCount(baseParticleCount, 2)
+      : baseParticleCount;
     for (let i = 0; i < particleCount; i++) {
       // Animate particles flowing from source to target
       const baseT = (i / particleCount);
@@ -2540,8 +2559,9 @@ const NPCShipGeometry = {
     ctx.arc(targetScreen.x, targetScreen.y, terminusRadius, 0, Math.PI * 2);
     ctx.fill();
 
-    // Particle sparks at terminus (more sparks)
-    const sparkCount = 5;
+    // Particle sparks at terminus - scale count with quality
+    const sparkLod = getNpcShipLOD();
+    const sparkCount = sparkLod === 0 ? 1 : (sparkLod === 1 ? 3 : 5);
     ctx.fillStyle = `rgba(255, 200, 50, ${intensity})`;
     for (let i = 0; i < sparkCount; i++) {
       const angle = time * 0.003 + (i * Math.PI * 2 / sparkCount);
@@ -2665,8 +2685,9 @@ const NPCShipGeometry = {
       ctx.shadowBlur = 0;
     }
 
-    // Leviathan special: multiple energy vortexes
-    if (variantNum === 4) {
+    // Leviathan special: multiple energy vortexes (gate at LOD >= 2)
+    const vortexLod = getNpcShipLOD();
+    if (vortexLod >= 2 && variantNum === 4) {
       const vortexPulse = (Math.sin(currentTime * 0.003) + 1) / 2;
 
       // Side vortexes
@@ -2713,8 +2734,9 @@ const NPCShipGeometry = {
       ctx.fill();
     }
 
-    // Phantom (variant 3): shimmering phase effect
-    if (variantNum === 3) {
+    // Phantom (variant 3): shimmering phase effect (gate at LOD >= 1)
+    const phantomLod = getNpcShipLOD();
+    if (phantomLod >= 1 && variantNum === 3) {
       const phasePulse = Math.sin(currentTime * 0.008);
       ctx.globalAlpha = 0.1 + phasePulse * 0.1;
 
@@ -2736,6 +2758,10 @@ const NPCShipGeometry = {
    * Integrates with VoidParticles from void-effects.js if available
    */
   drawVoidParticles(ctx, screenPos, scale, npc, rotation, time) {
+    // Skip at very low quality
+    const voidLod = getNpcShipLOD();
+    if (voidLod === 0) return;
+
     // Use VoidParticles system if available
     if (typeof VoidParticles !== 'undefined' && npc.id) {
       // Initialize particles if not already
@@ -2758,8 +2784,11 @@ const NPCShipGeometry = {
     const currentTime = time || Date.now();
     const variantNum = this.getVariant(npc.type);
 
-    // Particle count based on variant
-    const particleCount = Math.max(2, Math.floor((variantNum + 2) * 1.5));
+    // Particle count based on variant - scale with quality
+    const baseParticleCount = Math.max(2, Math.floor((variantNum + 2) * 1.5));
+    const particleCount = typeof ParticleSystem !== 'undefined' && ParticleSystem.scaleCount
+      ? ParticleSystem.scaleCount(baseParticleCount, 2)
+      : baseParticleCount;
 
     ctx.save();
 
@@ -2771,13 +2800,16 @@ const NPCShipGeometry = {
       const px = screenPos.x + Math.cos(angle) * radius;
       const py = screenPos.y + Math.sin(angle) * radius;
 
-      // Dark particle with subtle glow
-      const gradient = ctx.createRadialGradient(px, py, 0, px, py, 4);
-      gradient.addColorStop(0, '#660099');
-      gradient.addColorStop(0.6, 'rgba(102, 0, 153, 0.5)');
-      gradient.addColorStop(1, 'transparent');
-
-      ctx.fillStyle = gradient;
+      // Dark particle with subtle glow - simplify gradient at low LOD
+      if (voidLod >= 2) {
+        const gradient = ctx.createRadialGradient(px, py, 0, px, py, 4);
+        gradient.addColorStop(0, '#660099');
+        gradient.addColorStop(0.6, 'rgba(102, 0, 153, 0.5)');
+        gradient.addColorStop(1, 'transparent');
+        ctx.fillStyle = gradient;
+      } else {
+        ctx.fillStyle = '#660099';
+      }
       ctx.beginPath();
       ctx.arc(px, py, 4, 0, Math.PI * 2);
       ctx.fill();

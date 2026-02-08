@@ -244,7 +244,12 @@ const TractorBeamRenderer = {
 
   spawnParticles(targetPos, sourcePos, color, config, progress, dt) {
     const speedMultiplier = 1 + progress * 2;
-    const spawnRate = config.particleCount * (0.5 + progress * 0.5);
+
+    // Scale spawn rate with quality
+    const qualityMultiplier = typeof ParticleSystem !== 'undefined' && ParticleSystem.getParticleMultiplier
+      ? ParticleSystem.getParticleMultiplier()
+      : 1;
+    const spawnRate = config.particleCount * (0.5 + progress * 0.5) * qualityMultiplier;
 
     this.particleAccumulator += spawnRate * dt;
 

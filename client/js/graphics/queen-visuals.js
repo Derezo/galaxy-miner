@@ -626,10 +626,11 @@ const QueenVisuals = {
       targetColor: phaseConfig?.color?.primary || '#8b0000'
     });
 
-    // Spawn particles if particle system available
+    // Spawn particles if particle system available - scale count with quality
     if (typeof ParticleSystem !== 'undefined') {
-      for (let i = 0; i < 40; i++) {
-        const angle = (i / 40) * Math.PI * 2;
+      const particleCount = ParticleSystem.scaleCount ? ParticleSystem.scaleCount(40, 10) : 40;
+      for (let i = 0; i < particleCount; i++) {
+        const angle = (i / particleCount) * Math.PI * 2;
         ParticleSystem.spawn({
           x: x,
           y: y,

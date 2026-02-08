@@ -1152,9 +1152,10 @@ const ConsumeTendrilEffect = {
       ctx.fill();
     }
 
-    // Particle burst
+    // Particle burst - scale spawn chance with quality
     if (progress > 0.2 && typeof ParticleSystem !== 'undefined') {
-      const particleChance = 0.3 * (1 - progress);
+      const qualityMultiplier = ParticleSystem.getParticleMultiplier ? ParticleSystem.getParticleMultiplier() : 1;
+      const particleChance = 0.3 * (1 - progress) * qualityMultiplier;
       if (Math.random() < particleChance) {
         const angle = Math.random() * Math.PI * 2;
         const speed = 50 + Math.random() * 100;
@@ -1222,8 +1223,9 @@ const VoidEffects = {
       }, 1500);
     }
 
-    // Spawn particle burst at each rift
+    // Spawn particle burst at each rift - scale count with quality
     if (typeof ParticleSystem !== 'undefined') {
+      const burstCount = ParticleSystem.scaleCount ? ParticleSystem.scaleCount(8, 3) : 8;
       for (const pos of riftPositions) {
         ParticleSystem.spawnBurst({
           x: pos.x,
@@ -1235,7 +1237,7 @@ const VoidEffects = {
           type: 'glow',
           decay: 1,
           drag: 0.95
-        }, 8, {
+        }, burstCount, {
           vx: 100,
           vy: 100,
           life: 200
@@ -1264,10 +1266,11 @@ const VoidEffects = {
       RiftPortal.setState(riftId, 'close');
     }, 800);
 
-    // Void particle implosion
+    // Void particle implosion - scale count with quality
     if (typeof ParticleSystem !== 'undefined') {
-      for (let i = 0; i < 12; i++) {
-        const angle = (i / 12) * Math.PI * 2;
+      const implosionCount = ParticleSystem.scaleCount ? ParticleSystem.scaleCount(12, 4) : 12;
+      for (let i = 0; i < implosionCount; i++) {
+        const angle = (i / implosionCount) * Math.PI * 2;
         const startDist = 50 + Math.random() * 30;
 
         ParticleSystem.spawn({

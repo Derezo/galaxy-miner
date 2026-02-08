@@ -9,6 +9,15 @@
  * mining_claim: Industrial platform with asteroid
  */
 
+// Quality-based LOD helper for faction bases
+const getFactionBaseLOD = () => {
+  const quality = typeof GraphicsSettings !== 'undefined' ? GraphicsSettings.getQuality() : 80;
+  if (quality < 15) return 0;
+  if (quality < 40) return 1;
+  if (quality < 80) return 2;
+  return 3;
+};
+
 const FactionBases = {
   // Animation state
   animationTime: 0,
@@ -279,7 +288,14 @@ const FactionBases = {
    */
   spawnEnvironmentParticles(base, config) {
     if (typeof ParticleSystem === 'undefined') return;
-    if (Math.random() > 0.3) return; // Only spawn sometimes
+
+    // Get quality multiplier for spawn chance scaling
+    const qualityMultiplier = ParticleSystem.getParticleMultiplier
+      ? ParticleSystem.getParticleMultiplier()
+      : 1;
+
+    // Scale spawn chance with quality (base 30% chance)
+    if (Math.random() > 0.3 * qualityMultiplier) return;
 
     const size = config.size;
 
@@ -305,11 +321,12 @@ const FactionBases = {
         break;
 
       case 'scavenger_yard':
-        // Cutting sparks
+        // Cutting sparks - scale count with quality
         if (Math.random() > 0.7) {
           const sparkX = base.x + (Math.random() - 0.5) * size;
           const sparkY = base.y + (Math.random() - 0.5) * size;
-          for (let i = 0; i < 3; i++) {
+          const sparkCount = ParticleSystem.scaleCount ? ParticleSystem.scaleCount(3, 1) : 3;
+          for (let i = 0; i < sparkCount; i++) {
             const angle = Math.random() * Math.PI * 2;
             ParticleSystem.spawn({
               x: sparkX,
@@ -1267,19 +1284,24 @@ const FactionBases = {
   drawSwarmHive(ctx, config) {
     const time = this.animationTime;
     const size = config.size;
+    const lod = getFactionBaseLOD();
+    const quality = typeof GraphicsSettings !== 'undefined' ? GraphicsSettings.getQuality() : 80;
 
-    // Organic outer glow
-    const gradient = ctx.createRadialGradient(0, 0, size * 0.3, 0, 0, size * 1.4);
-    gradient.addColorStop(0, config.color + '60');
-    gradient.addColorStop(0.5, config.glowColor);
-    gradient.addColorStop(1, 'transparent');
-    ctx.fillStyle = gradient;
-    ctx.beginPath();
-    ctx.arc(0, 0, size * 1.4, 0, Math.PI * 2);
-    ctx.fill();
+    // Organic outer glow - skip at very low quality
+    if (lod >= 1) {
+      const gradient = ctx.createRadialGradient(0, 0, size * 0.3, 0, 0, size * 1.4);
+      gradient.addColorStop(0, config.color + '60');
+      gradient.addColorStop(0.5, config.glowColor);
+      gradient.addColorStop(1, 'transparent');
+      ctx.fillStyle = gradient;
+      ctx.beginPath();
+      ctx.arc(0, 0, size * 1.4, 0, Math.PI * 2);
+      ctx.fill();
+    }
 
-    // Spawn pods (bulging sacs around the edge)
-    for (let i = 0; i < 5; i++) {
+    // Spawn pods (bulging sacs around the edge) - reduce count at low quality
+    const podCount = lod === 0 ? 2 : (lod === 1 ? 3 : 5);
+    for (let i = 0; i < podCount; i++) {
       const podAngle = (Math.PI * 2 * i) / 5 + time * 0.1;
       const podDist = size * 0.55;
       const podX = Math.cos(podAngle) * podDist;
@@ -1315,12 +1337,13 @@ const FactionBases = {
       }
     }
 
-    // Organic mass - bulbous shape
+    // Organic mass - bulbous shape (vertex count scales with quality)
+    const hiveVertices = lod === 0 ? 8 : (lod === 1 ? 16 : (lod === 2 ? 24 : 36));
     ctx.fillStyle = config.secondaryColor;
     ctx.beginPath();
-    for (let i = 0; i < 36; i++) {
-      const angle = (Math.PI * 2 * i) / 36;
-      const wobble = Math.sin(angle * 5 + time) * size * 0.1;
+    for (let i = 0; i < hiveVertices; i++) {
+      const angle = (Math.PI * 2 * i) / hiveVertices;
+      const wobble = lod >= 2 ? Math.sin(angle * 5 + time) * size * 0.1 : 0;  // No wobble at low LOD
       const r = size * 0.5 + wobble;
       if (i === 0) {
         ctx.moveTo(Math.cos(angle) * r, Math.sin(angle) * r);
@@ -1331,9 +1354,10 @@ const FactionBases = {
     ctx.closePath();
     ctx.fill();
 
-    // Blood flow veins (animated pulse traveling along vein)
+    // Blood flow veins (animated pulse traveling along vein) - reduce at low quality
+    const veinCount = lod === 0 ? 2 : (lod === 1 ? 4 : 6);
     ctx.lineWidth = 3;
-    for (let i = 0; i < 6; i++) {
+    for (let i = 0; i < veinCount; i++) {
       const baseAngle = (Math.PI * 2 * i) / 6;
 
       // Vein base
@@ -1394,9 +1418,18 @@ const FactionBases = {
   drawVoidRift(ctx, config) {
     const time = this.animationTime;
     const size = config.size;
+    const lod = getFactionBaseLOD();
+    const quality = typeof GraphicsSettings !== 'undefined' ? GraphicsSettings.getQuality() : 80;
+
+    // Scale ring count and vertex count based on quality
+    // Quality 0 = 1 ring × 6 vertices = 6 ops
+    // Quality 80 = 3 rings × 18 vertices = 54 ops
+    // Quality 100 = 4 rings × 24 vertices = 96 ops
+    const maxRing = lod === 0 ? 0 : (lod === 1 ? 1 : (lod === 2 ? 2 : 3));
+    const vertexCount = lod === 0 ? 6 : (lod === 1 ? 12 : (lod === 2 ? 18 : 24));
 
     // Swirling dark aura
-    for (let ring = 3; ring >= 0; ring--) {
+    for (let ring = maxRing; ring >= 0; ring--) {
       const ringSize = size * (1.2 - ring * 0.15);
       const rotation = time * (0.5 + ring * 0.2) * ((ring % 2) ? 1 : -1);
 
@@ -1411,9 +1444,9 @@ const FactionBases = {
 
       ctx.fillStyle = gradient;
       ctx.beginPath();
-      for (let i = 0; i < 24; i++) {
-        const angle = (Math.PI * 2 * i) / 24;
-        const distort = Math.sin(angle * 3 + time * 2 + ring) * ringSize * 0.15;
+      for (let i = 0; i < vertexCount; i++) {
+        const angle = (Math.PI * 2 * i) / vertexCount;
+        const distort = lod >= 2 ? Math.sin(angle * 3 + time * 2 + ring) * ringSize * 0.15 : 0;
         const r = ringSize + distort;
         if (i === 0) {
           ctx.moveTo(Math.cos(angle) * r, Math.sin(angle) * r);

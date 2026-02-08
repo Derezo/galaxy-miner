@@ -3,6 +3,15 @@
  * Renders weapon effects with 5 tier types
  */
 
+// Quality-based LOD helper for weapons
+const getWeaponLOD = () => {
+  const quality = typeof GraphicsSettings !== 'undefined' ? GraphicsSettings.getQuality() : 80;
+  if (quality < 15) return 0;  // minimal - basic shapes only
+  if (quality < 40) return 1;  // low - simple gradients
+  if (quality < 80) return 2;  // medium - standard rendering
+  return 3;                     // high - full effects
+};
+
 const WEAPON_CONFIG = {
   1: {
     type: 'burst',
@@ -300,19 +309,36 @@ const WeaponRenderer = {
   drawLaserBeam(ctx, config) {
     const length = config.length;
     const width = config.width;
+    const lod = getWeaponLOD();
 
-    const glowGradient = ctx.createLinearGradient(-length, 0, 0, 0);
-    glowGradient.addColorStop(0, 'transparent');
-    glowGradient.addColorStop(0.3, config.color.glow);
-    glowGradient.addColorStop(1, config.color.glow);
+    // LOD 0: Minimal - solid line only
+    if (lod === 0) {
+      ctx.strokeStyle = config.color.primary;
+      ctx.lineWidth = width;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(-length, 0);
+      ctx.lineTo(0, 0);
+      ctx.stroke();
+      return;
+    }
 
-    ctx.strokeStyle = glowGradient;
-    ctx.lineWidth = width * 3;
-    ctx.lineCap = 'round';
-    ctx.beginPath();
-    ctx.moveTo(-length, 0);
-    ctx.lineTo(0, 0);
-    ctx.stroke();
+    // LOD 1+: Gradient beam (skip glow at LOD 1)
+    if (lod >= 2) {
+      // Full glow effect at LOD 2+
+      const glowGradient = ctx.createLinearGradient(-length, 0, 0, 0);
+      glowGradient.addColorStop(0, 'transparent');
+      glowGradient.addColorStop(0.3, config.color.glow);
+      glowGradient.addColorStop(1, config.color.glow);
+
+      ctx.strokeStyle = glowGradient;
+      ctx.lineWidth = width * 3;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(-length, 0);
+      ctx.lineTo(0, 0);
+      ctx.stroke();
+    }
 
     const beamGradient = ctx.createLinearGradient(-length, 0, 0, 0);
     beamGradient.addColorStop(0, 'transparent');
@@ -321,6 +347,7 @@ const WeaponRenderer = {
 
     ctx.strokeStyle = beamGradient;
     ctx.lineWidth = width;
+    ctx.lineCap = 'round';
     ctx.beginPath();
     ctx.moveTo(-length, 0);
     ctx.lineTo(0, 0);
@@ -329,8 +356,20 @@ const WeaponRenderer = {
 
   drawPulseOrb(ctx, config) {
     const size = config.size;
+    const lod = getWeaponLOD();
+
+    // LOD 0: Simple solid circle
+    if (lod === 0) {
+      ctx.fillStyle = config.color.primary;
+      ctx.beginPath();
+      ctx.arc(0, 0, size, 0, Math.PI * 2);
+      ctx.fill();
+      return;
+    }
+
     const pulse = 1 + Math.sin(Date.now() * 0.02) * 0.2;
 
+    // LOD 1+: Gradient orb
     const glowGradient = ctx.createRadialGradient(0, 0, 0, 0, 0, size * 2 * pulse);
     glowGradient.addColorStop(0, config.color.primary);
     glowGradient.addColorStop(0.5, config.color.glow);
@@ -341,16 +380,39 @@ const WeaponRenderer = {
     ctx.arc(0, 0, size * 2 * pulse, 0, Math.PI * 2);
     ctx.fill();
 
-    ctx.fillStyle = config.color.secondary;
-    ctx.beginPath();
-    ctx.arc(0, 0, size * 0.5, 0, Math.PI * 2);
-    ctx.fill();
+    // LOD 2+: Core highlight
+    if (lod >= 2) {
+      ctx.fillStyle = config.color.secondary;
+      ctx.beginPath();
+      ctx.arc(0, 0, size * 0.5, 0, Math.PI * 2);
+      ctx.fill();
+    }
   },
 
   drawPlasmaBolt(ctx, config) {
     const size = config.size;
+    const lod = getWeaponLOD();
+
+    // LOD 0: Simple solid circle with short trail
+    if (lod === 0) {
+      ctx.fillStyle = config.color.primary;
+      ctx.beginPath();
+      ctx.arc(0, 0, size, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.strokeStyle = config.color.primary;
+      ctx.lineWidth = config.trailWidth || 4;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(-size * 2, 0);
+      ctx.lineTo(0, 0);
+      ctx.stroke();
+      return;
+    }
+
     const pulse = 1 + Math.sin(Date.now() * 0.03) * 0.15;
 
+    // LOD 1+: Gradient plasma
     const plasmaGradient = ctx.createRadialGradient(0, 0, 0, 0, 0, size * 2.5 * pulse);
     plasmaGradient.addColorStop(0, config.color.secondary);
     plasmaGradient.addColorStop(0.3, config.color.primary);
@@ -362,28 +424,53 @@ const WeaponRenderer = {
     ctx.arc(0, 0, size * 2.5 * pulse, 0, Math.PI * 2);
     ctx.fill();
 
-    const trailGradient = ctx.createLinearGradient(-size * 4, 0, 0, 0);
-    trailGradient.addColorStop(0, 'transparent');
-    trailGradient.addColorStop(0.5, config.color.glow);
-    trailGradient.addColorStop(1, config.color.primary);
+    // LOD 2+: Full trail gradient
+    if (lod >= 2) {
+      const trailGradient = ctx.createLinearGradient(-size * 4, 0, 0, 0);
+      trailGradient.addColorStop(0, 'transparent');
+      trailGradient.addColorStop(0.5, config.color.glow);
+      trailGradient.addColorStop(1, config.color.primary);
 
-    ctx.strokeStyle = trailGradient;
-    ctx.lineWidth = config.trailWidth || 6;
-    ctx.lineCap = 'round';
-    ctx.beginPath();
-    ctx.moveTo(-size * 4, 0);
-    ctx.lineTo(0, 0);
-    ctx.stroke();
+      ctx.strokeStyle = trailGradient;
+      ctx.lineWidth = config.trailWidth || 6;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(-size * 4, 0);
+      ctx.lineTo(0, 0);
+      ctx.stroke();
+    }
 
-    ctx.fillStyle = config.color.secondary;
-    ctx.beginPath();
-    ctx.arc(0, 0, size * 0.4, 0, Math.PI * 2);
-    ctx.fill();
+    // LOD 2+: Core highlight
+    if (lod >= 2) {
+      ctx.fillStyle = config.color.secondary;
+      ctx.beginPath();
+      ctx.arc(0, 0, size * 0.4, 0, Math.PI * 2);
+      ctx.fill();
+    }
   },
 
   drawTeslaBolt(ctx, config) {
     const size = config.size;
     const time = Date.now();
+    const lod = getWeaponLOD();
+
+    // LOD 0: Simple glowing circle with minimal effects
+    if (lod === 0) {
+      ctx.fillStyle = config.color.primary;
+      ctx.beginPath();
+      ctx.arc(0, 0, size, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Single lightning arc
+      ctx.strokeStyle = config.color.core || '#ffffff';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(0, 0);
+      ctx.lineTo(size, 0);
+      ctx.stroke();
+      return;
+    }
+
     const pulse = 1 + Math.sin(time * 0.04) * 0.2;
 
     // Outer glow layer
@@ -399,8 +486,8 @@ const WeaponRenderer = {
     ctx.arc(0, 0, size * 2.5 * pulse, 0, Math.PI * 2);
     ctx.fill();
 
-    // Crackling surface lightning
-    const arcCount = 6;
+    // Crackling surface lightning - scaled by LOD (1/3/6 arcs)
+    const arcCount = lod === 1 ? 2 : (lod === 2 ? 4 : 6);
     ctx.strokeStyle = config.color.core || '#ffffff';
     ctx.lineWidth = 1.5;
     ctx.lineCap = 'round';
@@ -429,24 +516,26 @@ const WeaponRenderer = {
       ctx.stroke();
     }
 
-    // Orbiting spark particles
-    const sparkCount = 4;
-    for (let i = 0; i < sparkCount; i++) {
-      const orbitAngle = time * 0.015 + (i / sparkCount) * Math.PI * 2;
-      const orbitRadius = size * (1.2 + Math.sin(time * 0.02 + i) * 0.3);
-      const sparkX = Math.cos(orbitAngle) * orbitRadius;
-      const sparkY = Math.sin(orbitAngle) * orbitRadius;
-      const sparkSize = 2 + Math.random() * 2;
+    // Orbiting spark particles - only at LOD 2+, scaled count
+    if (lod >= 2) {
+      const sparkCount = lod === 2 ? 2 : 4;
+      for (let i = 0; i < sparkCount; i++) {
+        const orbitAngle = time * 0.015 + (i / sparkCount) * Math.PI * 2;
+        const orbitRadius = size * (1.2 + Math.sin(time * 0.02 + i) * 0.3);
+        const sparkX = Math.cos(orbitAngle) * orbitRadius;
+        const sparkY = Math.sin(orbitAngle) * orbitRadius;
+        const sparkSize = 2 + Math.random() * 2;
 
-      const sparkGradient = ctx.createRadialGradient(sparkX, sparkY, 0, sparkX, sparkY, sparkSize * 2);
-      sparkGradient.addColorStop(0, config.color.core || '#ffffff');
-      sparkGradient.addColorStop(0.5, config.color.primary);
-      sparkGradient.addColorStop(1, 'transparent');
+        const sparkGradient = ctx.createRadialGradient(sparkX, sparkY, 0, sparkX, sparkY, sparkSize * 2);
+        sparkGradient.addColorStop(0, config.color.core || '#ffffff');
+        sparkGradient.addColorStop(0.5, config.color.primary);
+        sparkGradient.addColorStop(1, 'transparent');
 
-      ctx.fillStyle = sparkGradient;
-      ctx.beginPath();
-      ctx.arc(sparkX, sparkY, sparkSize * 2, 0, Math.PI * 2);
-      ctx.fill();
+        ctx.fillStyle = sparkGradient;
+        ctx.beginPath();
+        ctx.arc(sparkX, sparkY, sparkSize * 2, 0, Math.PI * 2);
+        ctx.fill();
+      }
     }
 
     // Bright core
@@ -460,20 +549,22 @@ const WeaponRenderer = {
     ctx.arc(0, 0, size * 0.5, 0, Math.PI * 2);
     ctx.fill();
 
-    // Energy trail
-    const trailGradient = ctx.createLinearGradient(-size * 4, 0, 0, 0);
-    trailGradient.addColorStop(0, 'transparent');
-    trailGradient.addColorStop(0.4, config.color.glow);
-    trailGradient.addColorStop(0.8, config.color.primary);
-    trailGradient.addColorStop(1, config.color.secondary);
+    // Energy trail - only at LOD 2+
+    if (lod >= 2) {
+      const trailGradient = ctx.createLinearGradient(-size * 4, 0, 0, 0);
+      trailGradient.addColorStop(0, 'transparent');
+      trailGradient.addColorStop(0.4, config.color.glow);
+      trailGradient.addColorStop(0.8, config.color.primary);
+      trailGradient.addColorStop(1, config.color.secondary);
 
-    ctx.strokeStyle = trailGradient;
-    ctx.lineWidth = config.trailWidth || 6;
-    ctx.lineCap = 'round';
-    ctx.beginPath();
-    ctx.moveTo(-size * 4, 0);
-    ctx.lineTo(-size * 0.5, 0);
-    ctx.stroke();
+      ctx.strokeStyle = trailGradient;
+      ctx.lineWidth = config.trailWidth || 6;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(-size * 4, 0);
+      ctx.lineTo(-size * 0.5, 0);
+      ctx.stroke();
+    }
   },
 
   drawBeam(ctx, beam, camera) {
@@ -522,6 +613,10 @@ const WeaponRenderer = {
   },
 
   drawMuzzleFlash(ctx, flash, camera) {
+    // Gate muzzle flash at quality 20+
+    const quality = typeof GraphicsSettings !== 'undefined' ? GraphicsSettings.getQuality() : 80;
+    if (quality < 20) return;
+
     const screenX = flash.x - camera.x;
     const screenY = flash.y - camera.y;
     const elapsed = Date.now() - flash.startTime;
@@ -535,6 +630,15 @@ const WeaponRenderer = {
     ctx.translate(screenX, screenY);
     ctx.rotate(flash.rotation);
     ctx.globalAlpha = alpha;
+
+    const lod = getWeaponLOD();
+
+    // At LOD 1, only draw simple flash for all types
+    if (lod <= 1) {
+      this.drawSimpleMuzzleFlash(ctx, size, flash);
+      ctx.restore();
+      return;
+    }
 
     switch (flash.type) {
       case 'dual':
@@ -804,11 +908,21 @@ const WeaponRenderer = {
   },
 
   spawnTrailParticle(proj, dt) {
+    // Check if weapon trails are enabled in graphics settings
+    if (typeof GraphicsSettings !== 'undefined' &&
+        !GraphicsSettings.isFeatureEnabled('weaponTrails')) {
+      return;
+    }
+
     const config = proj.config;
     const trailConfig = config.trail || { frequency: 0.3, size: 1.5, length: 30 };
 
-    // Tier-based spawn frequency
-    if (Math.random() > trailConfig.frequency) return;
+    // Tier-based spawn frequency, scaled by quality
+    const qualityMultiplier = typeof ParticleSystem !== 'undefined' && ParticleSystem.getParticleMultiplier
+      ? ParticleSystem.getParticleMultiplier()
+      : 1;
+    const effectiveFrequency = trailConfig.frequency * Math.max(0.3, qualityMultiplier);
+    if (Math.random() > effectiveFrequency) return;
 
     const trailType = trailConfig.type || 'trail';
 
@@ -865,7 +979,10 @@ const WeaponRenderer = {
 
       case 'wisps':
         // Multiple energy wisps orbiting the projectile
-        const wispCount = trailConfig.wispCount || 2;
+        const baseWispCount = trailConfig.wispCount || 2;
+        const wispCount = typeof ParticleSystem !== 'undefined' && ParticleSystem.scaleCount
+          ? ParticleSystem.scaleCount(baseWispCount, 1)
+          : baseWispCount;
         for (let i = 0; i < wispCount; i++) {
           const angle = Date.now() * 0.01 + (i / wispCount) * Math.PI * 2;
           const orbitRadius = 8 + Math.random() * 4;
@@ -887,7 +1004,10 @@ const WeaponRenderer = {
 
       case 'electrical':
         // Electrical spark particles for Tesla cannon
-        const sparkCount = trailConfig.sparkCount || 4;
+        const baseSparkCount = trailConfig.sparkCount || 4;
+        const sparkCount = typeof ParticleSystem !== 'undefined' && ParticleSystem.scaleCount
+          ? ParticleSystem.scaleCount(baseSparkCount, 1)
+          : baseSparkCount;
         for (let i = 0; i < sparkCount; i++) {
           const angle = Math.random() * Math.PI * 2;
           const speed = 40 + Math.random() * 60;

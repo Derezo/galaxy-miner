@@ -132,4 +132,4 @@ Galaxy Miner uses a token-based authentication system built on:
 
 - [Socket.io Events - Authentication](../api/socket-events.md#authentication-events)
 - [Database Schema](database-schema.md)
-- [Networking System](networking.md)
+- [Socket Event Flows](../network/EVENT_FLOWS.md)

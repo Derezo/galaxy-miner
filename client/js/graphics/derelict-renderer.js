@@ -103,7 +103,11 @@ const DerelictRenderer = {
    */
   initOrbitingDebris(derelict) {
     const debris = [];
-    const count = derelict.orbitingDebrisCount || 15;
+    // Scale debris count: 0 at quality 0, 15 at quality 80, 30 at quality 100
+    const baseCount = derelict.orbitingDebrisCount || 15;
+    const count = typeof ParticleSystem !== 'undefined'
+      ? ParticleSystem.scaleCount(baseCount, 0)  // 0 floor = no debris at quality 0
+      : baseCount;
 
     for (let i = 0; i < count; i++) {
       // Deterministic initial positions based on derelict ID
@@ -258,17 +262,24 @@ const DerelictRenderer = {
     const shipType = this.SHIP_TYPES[derelict.shipType] || this.SHIP_TYPES[1];
     const time = this.animationTime;
 
-    // Outer glow (alien residue) - reduced 10% for performance
-    const glowSize = size * 0.99;
-    const glowGradient = ctx.createRadialGradient(0, 0, size * 0.3, 0, 0, glowSize);
-    glowGradient.addColorStop(0, 'transparent');
-    const glowRgb = this.COLORS.alienGlowDimRGB;
-    glowGradient.addColorStop(0.6, `rgba(${glowRgb.r}, ${glowRgb.g}, ${glowRgb.b}, 0.13)`);
-    glowGradient.addColorStop(1, 'transparent');
-    ctx.fillStyle = glowGradient;
-    ctx.beginPath();
-    ctx.arc(0, 0, glowSize, 0, Math.PI * 2);
-    ctx.fill();
+    // Outer glow (alien residue) - scaled with quality setting
+    const quality = typeof GraphicsSettings !== 'undefined' ? GraphicsSettings.getQuality() : 80;
+
+    // Skip aura entirely at very low quality
+    if (quality >= 10) {
+      const glowSize = size * 0.99;
+      const glowGradient = ctx.createRadialGradient(0, 0, size * 0.3, 0, 0, glowSize);
+      glowGradient.addColorStop(0, 'transparent');
+      const glowRgb = this.COLORS.alienGlowDimRGB;
+      // Scale aura opacity: 0.05 at quality 10, 0.13 at quality 80, 0.20 at quality 100
+      const auraOpacity = (0.05 + (quality / 100) * 0.15).toFixed(2);
+      glowGradient.addColorStop(0.6, `rgba(${glowRgb.r}, ${glowRgb.g}, ${glowRgb.b}, ${auraOpacity})`);
+      glowGradient.addColorStop(1, 'transparent');
+      ctx.fillStyle = glowGradient;
+      ctx.beginPath();
+      ctx.arc(0, 0, glowSize, 0, Math.PI * 2);
+      ctx.fill();
+    }
 
     // Main hull shape - elongated with asymmetric damage
     ctx.save();
@@ -612,6 +623,10 @@ const DerelictRenderer = {
    * Draw pulsing alien glow spots at damage areas
    */
   drawAlienGlowSpots(ctx, derelict, hullLength, hullWidth, time) {
+    // Gate glow spots at quality 25+
+    const quality = typeof GraphicsSettings !== 'undefined' ? GraphicsSettings.getQuality() : 80;
+    if (quality < 25) return;
+
     const pulseIntensity = 0.3 + Math.sin(time * 2 + this.hashString(derelict.id) * 0.1) * 0.2;
 
     // Glow spot at major breach
@@ -644,6 +659,10 @@ const DerelictRenderer = {
    * Draw orbiting debris around derelict
    */
   drawOrbitingDebris(ctx, derelict, screenX, screenY) {
+    // Skip debris drawing at very low quality
+    const quality = typeof GraphicsSettings !== 'undefined' ? GraphicsSettings.getQuality() : 80;
+    if (quality < 5) return;
+
     const debris = this.orbitingDebris.get(derelict.id);
     if (!debris) return;
 

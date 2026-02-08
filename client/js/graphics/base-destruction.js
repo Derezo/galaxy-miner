@@ -275,12 +275,23 @@ const BaseDestructionSequence = {
   },
 
   /**
+   * Scale a count with the particle multiplier
+   */
+  scaleCount(baseCount, floor = 1) {
+    if (typeof ParticleSystem !== 'undefined' && ParticleSystem.scaleCount) {
+      return ParticleSystem.scaleCount(baseCount, floor);
+    }
+    return Math.max(floor, baseCount);
+  },
+
+  /**
    * Generate main destruction particles (phase 3)
    */
   generateDestructionParticles(seq) {
     const config = seq.config;
-    const count = config.particles.min +
+    const baseCount = config.particles.min +
       Math.random() * (config.particles.max - config.particles.min);
+    const count = this.scaleCount(baseCount, 10);
 
     for (let i = 0; i < count; i++) {
       const angle = (Math.PI * 2 * i) / count + Math.random() * 0.3;
@@ -311,8 +322,9 @@ const BaseDestructionSequence = {
     const config = seq.config;
     if (!config.debris.count) return;
 
-    for (let i = 0; i < config.debris.count; i++) {
-      const angle = (Math.PI * 2 * i) / config.debris.count + Math.random() * 0.5;
+    const debrisCount = this.scaleCount(config.debris.count, 2);
+    for (let i = 0; i < debrisCount; i++) {
+      const angle = (Math.PI * 2 * i) / debrisCount + Math.random() * 0.5;
       const speed = 80 + Math.random() * 120;
       const size = 8 + Math.random() * 15;
 

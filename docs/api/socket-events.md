@@ -3645,3 +3645,100 @@ Several events have rate limiting:
 
 #### v1.0 (2025-12-09)
 - Initial documentation
+
+---
+
+## Event Metrics
+
+| Metric | Count |
+|--------|-------|
+| Total Events | ~93 |
+| Client-to-Server Events | ~28 |
+| Server-to-Client Events | ~65 |
+| Event Categories | 22 |
+| Client Handler Modules | 10 |
+| Server Handler Modules | 9 |
+
+---
+
+## Naming Inconsistencies (Accepted)
+
+These naming deviations from the `category:action` convention are documented and intentionally not fixed:
+
+| Issue | Notes |
+|-------|-------|
+| `respawn:select` uses `respawn:` instead of `player:` | Distinct namespace for respawn flow |
+| `upgrade:success/error` uses `upgrade:` instead of `ship:` | Legacy naming, widely referenced |
+| `rogueMiner:foremanSpawn` uses camelCase category | Faction-specific convention |
+
+---
+
+## Audit Tools
+
+- Run `npm run audit:network` to check for event mismatches between client and server handler registrations.
+- Run `npm run audit:handlers` to check for duplicate socket handler registrations.
+- Run `npm test -- tests/unit/network/event-contracts.test.js` to verify event contracts.
+
+---
+
+## Resolved Issues (Historical)
+
+Issues discovered during the network event audit that have since been fixed:
+
+| Issue | Status |
+|-------|--------|
+| `combat:event` placeholder handler | Removed legacy handler |
+| `comet:warning` missing handler | Handler added |
+| `comet:collision` missing handler | Handler added |
+| `ship:data` missing handler | Handler added |
+| `loot:nearby` missing handler | Handler added |
+| `wormhole:progress` name mismatch (was `transitProgress`) | Fixed to match server emit |
+| `combat:baseHit` missing handler | Handler added |
+| `respawn:error` missing handler | Handler added |
+| `player:health` missing handler | Handler added |
+| `npc:death` missing handler | Handler added |
+| `swarm:queenDeathRage` missing handler | Handler added |
+| `player:respawned` name mismatch | Changed to `player:respawn` |
+| `combat:playerHit` dead code | Removed unused handler |
+| `buff:expired` dead code | Removed (handled client-side) |
+| Duplicate handler registrations in `network.js` | Removed duplicates, using modular handlers |
+
+---
+
+## Handler Module Mapping
+
+### Server Handlers (`/server/handlers/`)
+
+| Module | Events Handled |
+|--------|----------------|
+| auth.js | auth:login, auth:register, auth:token, auth:logout |
+| player.js | player:input, ping |
+| combat.js | combat:fire |
+| mining.js | mining:start, mining:cancel |
+| marketplace.js | market:list, market:buy, market:cancel, market:getListings, market:getMyListings |
+| ship.js | ship:upgrade, ship:getData, ship:setColor |
+| loot.js | loot:startCollect, loot:cancelCollect, loot:getNearby, wreckage:multiCollect |
+| wormhole.js | wormhole:enter, wormhole:selectDestination, wormhole:cancel, wormhole:getProgress, wormhole:getNearestPosition |
+
+### Client Handlers (`/client/js/network/`)
+
+| Module | Events Handled |
+|--------|----------------|
+| auth.js | auth:success, auth:error |
+| player.js | player:update, player:leave, player:colorChanged, player:damaged, player:death, player:respawn, player:debuff, player:dot, respawn:error, player:health |
+| combat.js | combat:hit, combat:fire, combat:npcFire, combat:npcHit, combat:chainLightning, combat:teslaCoil, star:damage, star:zone, combat:baseHit |
+| mining.js | mining:started, mining:complete, mining:cancelled, mining:error, mining:playerStarted, mining:playerStopped, world:update, inventory:update |
+| marketplace.js | market:update, market:listings, market:myListings, market:listed, market:bought, market:cancelled, market:error, market:sold |
+| ship.js | ship:colorChanged, ship:colorError, ship:profileChanged, ship:profileError, upgrade:success, upgrade:error, error:generic, ship:data |
+| loot.js | wreckage:spawn, wreckage:despawn, wreckage:collected, loot:started, loot:progress, loot:complete, loot:cancelled, loot:error, loot:multiStarted, loot:multiComplete, team:creditReward, team:lootShare, buff:applied, relic:collected, loot:nearby |
+| wormhole.js | wormhole:entered, wormhole:transitStarted, wormhole:progress, wormhole:exitComplete, wormhole:cancelled, wormhole:error, wormhole:nearestPosition |
+| chat.js | chat:message, emote:broadcast, pong |
+| npc.js | npc:spawn, npc:update, npc:action, npc:destroyed, npc:queenSpawn, npc:death, swarm:\*, queen:\*, formation:\*, base:\*, rogueMiner:\*, comet:warning, comet:collision |
+
+### Main Network File (`/client/js/network.js`)
+
+Contains additional handlers for faction-specific events not in modular files:
+- npc:invulnerable
+- pirate:intel, pirate:boostDive, pirate:stealSuccess, pirate:dreadnoughtEnraged, pirate:captainHeal
+- scavenger:rage, scavenger:rageClear, scavenger:haulerSpawn, scavenger:haulerGrow, scavenger:barnacleKingSpawn, scavenger:haulerTransform, scavenger:scrapPileUpdate, scavenger:drillCharge
+- relic:plunderSuccess, relic:plunderFailed

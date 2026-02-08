@@ -16,7 +16,6 @@ Welcome to the Galaxy Miner technical documentation. This documentation provides
 ### Core Systems
 - [Authentication](systems/authentication.md) - User authentication and session management
 - [Database Schema](systems/database-schema.md) - SQLite database structure
-- [Networking](systems/networking.md) - Client-server communication protocol
 - [Resources](systems/resources.md) - Resource types, values, and generation
 
 ### Architecture
@@ -34,13 +33,20 @@ Welcome to the Galaxy Miner technical documentation. This documentation provides
 ### Advanced Features
 - [Wormhole Transit](systems/wormhole-transit.md) - Instant travel system
 - [Team Multiplayer](systems/team-multiplayer.md) - Team formation and features
+- [Wreckage System](systems/wreckage-system.md) - Player death wreckage and loot collection
 
 ### UI & Client
 - [UI System](systems/ui-system.md) - Component-based UI architecture
-- [Mobile Support](systems/mobile.md) - Touch controls and responsive design
+- [Mobile Support](../client/js/mobile/README.md) - Touch controls and responsive design
+
+### Network
+- [Socket Event Flows](network/EVENT_FLOWS.md) - Sequence diagrams for key event flows
 
 ### Development
 - [Testing Guide](development/testing.md) - Test patterns and utilities
+
+### Archive
+- [Archived Documents](archive/) - Completed plans and outdated migration guides
 
 ## Documentation Standards
 

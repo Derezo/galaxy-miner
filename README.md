@@ -165,6 +165,64 @@ Galaxy Miner uses a client-server architecture with real-time communication:
 - **Client Prediction**: Local player movement predicted on client, validated by server
 - **State Synchronization**: Server is source of truth, clients reconcile on mismatch
 
+### Development Workflow
+
+#### Environment Setup
+
+```bash
+# Install Node.js 18+ (nvm recommended)
+nvm use                  # Uses .nvmrc (Node 18)
+npm install              # Install all dependencies
+cp .env.example .env     # Create local config (defaults are fine for dev)
+npm run dev              # Start with auto-reload on file changes
+```
+
+The server starts at `http://localhost:3388`. No build step is needed -- client files are served directly.
+
+#### Database Reset
+
+The SQLite database is auto-created on first startup. To wipe all data and start fresh:
+
+```bash
+rm -f data/galaxy-miner.db*
+npm run dev
+```
+
+The procedural world regenerates identically from the seed. Only player accounts and inventory are lost.
+
+#### Running Tests
+
+```bash
+npm test                 # Run full test suite (vitest)
+npm run test:watch       # Watch mode for TDD
+npm run test:coverage    # Coverage report with v8
+
+# Run a specific test file
+npx vitest run tests/unit/server/auth.test.js
+
+# Run tests matching a description
+npx vitest run -t "username validation"
+```
+
+Tests use in-memory SQLite databases for isolation. Test utilities are in `/tests/setup.js`.
+
+#### Debug Mode
+
+Set `DEBUG=true` in `.env` (the default for development) to enable all logging categories. When `DEBUG=false` (production), only `logger.error()` and `logger.network()` output remains active.
+
+#### Audit Scripts
+
+```bash
+npm run audit:network    # Check socket event handler consistency (client vs server)
+npm run audit:handlers   # Detect duplicate socket handler registrations
+```
+
+These are useful after modifying socket event handlers to ensure client and server stay in sync.
+
+#### Deployment
+
+Production deployment is handled by `scripts/deploy-production.sh`, which packages the project, transfers it via SCP, and manages PM2/Nginx/SSL on the remote VPS. See [Deployment Guide](/docs/deployment.md) for full details.
+
 ## Documentation
 
 Comprehensive documentation is available in the `/docs/` directory:

@@ -2,6 +2,8 @@
 
 Client-side audio engine for Galaxy Miner using Web Audio API.
 
+For visual architecture diagrams and data flow details, see [ARCHITECTURE.md](ARCHITECTURE.md).
+
 ## Architecture
 
 The audio system is composed of modular components following the game's IIFE singleton pattern:
@@ -144,9 +146,11 @@ weapons/weapon_player_t3_03.wav  (variation 2)
 
 The system automatically prevents consecutive identical variations.
 
-## Integration Examples
+## Game Integration Hooks
 
-### Weapon Fire (Client Prediction)
+This section documents how to wire audio into each game system.
+
+### Weapon Fire (client-side prediction)
 
 ```javascript
 // In Input.js or network event handler
@@ -156,7 +160,7 @@ function onWeaponFire() {
 }
 ```
 
-### Combat Hit Effects
+### Combat Hits
 
 ```javascript
 // In Network.js 'combat:hit' handler
@@ -165,69 +169,203 @@ socket.on('combat:hit', (data) => {
     const tier = Player.ship.shieldTier;
     const soundId = data.hitShield ? `hit_shield_${tier}` : `hit_hull_${tier}`;
     AudioManager.play(soundId);
+
+    if (!data.hitShield && Player.shield === 0) {
+      AudioManager.play('shield_down');
+    }
   }
 });
 ```
 
-### NPC Death
+### NPC and Player Deaths
 
 ```javascript
-// In Network.js 'npc:death' handler
 socket.on('npc:death', (data) => {
   const faction = data.faction.toLowerCase();
   AudioManager.playAt(`death_${faction}`, data.x, data.y);
+});
+
+socket.on('player:death', (data) => {
+  if (data.playerId === Player.id) {
+    AudioManager.play('death_player');
+  }
 });
 ```
 
 ### Mining
 
 ```javascript
-// Start drilling
 function startMining() {
   const tier = Player.ship.miningTier;
   AudioManager.startLoop(`mining_drill_${tier}`);
 }
 
-// Complete mining
 function completeMining(resource) {
   AudioManager.stopLoop(`mining_drill_${Player.ship.miningTier}`);
-
   const soundId = resource.rarity >= 3 ? 'mining_rare' : 'mining_complete';
   AudioManager.play(soundId);
+}
+
+function cancelMining() {
+  AudioManager.stopLoop(`mining_drill_${Player.ship.miningTier}`);
 }
 ```
 
 ### Engine Sounds
 
 ```javascript
-// In Player.js update()
+// In Player.update(dt)
 function updateEngineSound() {
-  const isMoving = Player.velocity.x !== 0 || Player.velocity.y !== 0;
+  const isMoving = Math.abs(Player.velocity.x) > 0.1 || Math.abs(Player.velocity.y) > 0.1;
   const tier = Player.ship.engineTier;
   const soundId = `engine_${tier}`;
 
-  if (isMoving && !AudioManager.isLoopActive(soundId)) {
-    AudioManager.startLoop(soundId);
-  } else if (!isMoving) {
-    AudioManager.stopLoop(soundId);
+  if (isMoving) {
+    if (Player._currentEngineLoop !== soundId) {
+      if (Player._currentEngineLoop) {
+        AudioManager.stopLoop(Player._currentEngineLoop);
+      }
+      AudioManager.startLoop(soundId);
+      Player._currentEngineLoop = soundId;
+    }
+  } else {
+    if (Player._currentEngineLoop) {
+      AudioManager.stopLoop(Player._currentEngineLoop);
+      Player._currentEngineLoop = null;
+    }
   }
+}
+```
+
+### Boost
+
+```javascript
+function activateBoost() {
+  AudioManager.play('boost_activate');
+}
+
+function deactivateBoost() {
+  AudioManager.play('boost_deactivate');
 }
 ```
 
 ### UI Sounds
 
 ```javascript
-// In UI event handlers
-button.addEventListener('click', () => {
-  AudioManager.play('ui_click');
-  // ... handle click
+// Terminal panel open/close
+AudioManager.play('ui_open_panel');
+AudioManager.play('ui_close_panel');
+
+// Tab switch or button click
+AudioManager.play('ui_click');
+
+// Chat
+AudioManager.play('chat_receive');  // Incoming message from others
+AudioManager.play('chat_send');     // Sending a message
+```
+
+### Notifications
+
+```javascript
+AudioManager.play('notification_success');
+AudioManager.play('notification_error');
+AudioManager.play('notification_warning');
+AudioManager.play('notification_info');
+```
+
+### Upgrades and Marketplace
+
+```javascript
+// Upgrades
+AudioManager.play('upgrade_success');
+AudioManager.play('upgrade_failed');
+
+// Marketplace
+AudioManager.play('market_list');
+AudioManager.play('market_buy');
+AudioManager.play('market_sell');
+AudioManager.play('market_cancel');
+AudioManager.play('credits_spend');
+AudioManager.play('credits_gain');
+```
+
+### Loot Collection
+
+```javascript
+socket.on('loot:collect', (data) => {
+  let soundId = 'loot_pickup';
+  if (data.type === 'component') soundId = 'loot_component';
+  else if (data.type === 'relic') soundId = 'loot_relic';
+  else if (data.rarity >= 3) soundId = 'loot_rare_pickup';
+  AudioManager.play(soundId);
+});
+```
+
+### Respawn and Shield Recharge
+
+```javascript
+socket.on('player:respawn', (data) => {
+  if (data.playerId === Player.id) {
+    AudioManager.play('respawn');
+  }
 });
 
-// In NotificationManager
-function showNotification(type, message) {
-  AudioManager.play(`notification_${type}`); // success, error, warning, info
-  // ... show notification
+// Shield fully recharged after being depleted
+function onShieldFullyRecharged() {
+  if (Player._wasShieldDown) {
+    AudioManager.play('shield_recharge');
+    Player._wasShieldDown = false;
+  }
 }
+```
+
+### Warning Sounds
+
+```javascript
+// Low health (play once when crossing 25% threshold)
+if (healthPercent <= 0.25 && !Player._lowHealthWarned) {
+  AudioManager.play('warning_low_health');
+  Player._lowHealthWarned = true;
+}
+
+// Shield critical
+AudioManager.play('warning_shield_critical');
+
+// Cargo full
+AudioManager.play('warning_cargo_full');
+```
+
+### Boss Events
+
+```javascript
+socket.on('queen:phase', (data) => {
+  AudioManager.play(`queen_phase_${data.phase}`);
+});
+
+socket.on('queen:death', (data) => {
+  AudioManager.playAt('queen_death', data.x, data.y);
+});
+
+socket.on('base:destroyed', (data) => {
+  AudioManager.playAt('base_destruction', data.x, data.y);
+});
+```
+
+### Volume Settings UI
+
+```javascript
+// Connect sliders to AudioManager
+['master', 'sfx', 'ambient', 'ui'].forEach(category => {
+  const slider = document.getElementById(`volume-${category}`);
+  slider.value = AudioManager.getVolume(category) * 100;
+
+  slider.addEventListener('input', (e) => {
+    AudioManager.setVolume(category, e.target.value / 100);
+  });
+});
+
+// Mute toggle
+const muted = AudioManager.toggleMute();
 ```
 
 ## Asset Organization
@@ -236,36 +374,14 @@ Audio files should be organized in `/client/assets/audio/`:
 
 ```
 assets/audio/
-├── weapons/
-│   ├── weapon_player_t1_01.wav
-│   ├── weapon_player_t1_02.wav
-│   ├── weapon_player_t1_03.wav
-│   └── ...
-├── impacts/
-│   ├── hit_shield_t1_01.wav
-│   └── ...
-├── destruction/
-│   ├── death_player.wav
-│   ├── death_pirate_medium.wav
-│   └── ...
-├── bosses/
-│   ├── queen_phase_1.wav
-│   └── ...
-├── mining/
-│   ├── drill_t1.wav
-│   └── ...
-├── movement/
-│   ├── engine_t1.wav
-│   ├── boost_activate.wav
-│   └── ...
-├── environment/
-│   ├── star_proximity.wav
-│   ├── wormhole_enter.wav
-│   └── ...
-└── ui/
-    ├── click.wav
-    ├── notification_success.wav
-    └── ...
+├── weapons/         - Player and NPC weapon sounds
+├── impacts/         - Shield and hull hit sounds
+├── destruction/     - Explosion and death sounds
+├── bosses/          - Boss-specific sounds
+├── mining/          - Mining drill and completion
+├── movement/        - Engine and boost sounds
+├── environment/     - Ambient environmental sounds
+└── ui/              - Interface and notification sounds
 ```
 
 ## Performance Considerations
@@ -280,9 +396,9 @@ assets/audio/
 
 ## Browser Compatibility
 
-- **Modern browsers**: Full Web Audio API support
-- **Safari/iOS**: Requires user interaction to start (auto-handled)
-- **Fallback**: Graceful degradation if AudioContext unavailable
+- **Modern browsers**: Full Web Audio API support (Chrome 35+, Firefox 25+, Edge 79+)
+- **Safari/iOS**: Requires user interaction to start (auto-handled by AudioContextManager)
+- **Fallback**: Graceful degradation if AudioContext unavailable -- game functions without sound
 
 ## Debugging
 
@@ -306,23 +422,27 @@ const active = SoundPool.getActiveSources();
 console.log('Active sounds:', active);
 ```
 
+## Troubleshooting
+
+**"No sound plays"**
+- Check browser console for errors
+- Verify file path matches SoundConfig
+- Click anywhere on page first (browser auto-resume requirement)
+
+**"AudioContext suspended"**
+- Normal before first user interaction; click anywhere to resume
+
+**"Sounds cutting off"**
+- Increase priority for critical sounds
+- Check if at MAX_CONCURRENT (32) capacity
+
 ## Best Practices
 
-1. **Use `playAt()` for world events** - Automatic spatial audio for explosions, hits, etc.
-2. **Use `startLoop()` for continuous sounds** - Engines, drilling, ambient effects
-3. **Match weapon tiers to sounds** - `weapon_fire_${tier}` for progression feel
-4. **Preload critical sounds** - Weapon fire, UI clicks for instant playback
-5. **Respect categories** - Keep ambient quiet, SFX punchy, UI subtle
-6. **Use variations** - 3+ variations prevent audio fatigue
-7. **Set appropriate priorities** - Critical for boss events, low for ambient loops
-8. **Stop loops when appropriate** - Free resources when sound no longer needed
-
-## Future Enhancements
-
-- Dynamic music system (exploration, combat, boss themes)
-- Reverb/echo for environmental zones (nebula, asteroid fields)
-- Doppler effect for fast-moving objects
-- 3D positional audio (HRTF) for VR support
-- Audio ducking (lower music during combat)
-- Voice chat integration
-- Audio visualizer for debug mode
+1. **Use `playAt()` for world events** -- automatic spatial audio for explosions, hits, etc.
+2. **Use `startLoop()` for continuous sounds** -- engines, drilling, ambient effects
+3. **Match weapon tiers to sounds** -- `weapon_fire_${tier}` for progression feel
+4. **Preload critical sounds** -- weapon fire, UI clicks for instant playback
+5. **Respect categories** -- keep ambient quiet, SFX punchy, UI subtle
+6. **Use variations** -- 3+ variations prevent audio fatigue
+7. **Set appropriate priorities** -- critical for boss events, low for ambient loops
+8. **Stop loops when appropriate** -- free resources when sound no longer needed

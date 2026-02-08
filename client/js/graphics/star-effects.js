@@ -37,7 +37,7 @@ const StarEffects = {
 
     // Check if corona flares are enabled in graphics settings
     const coronaFlaresEnabled = typeof GraphicsSettings === 'undefined' ||
-      GraphicsSettings.get('coronaFlares') !== false;
+      GraphicsSettings.isFeatureEnabled('coronaFlares') !== false;
 
     if (!coronaFlaresEnabled) {
       // Skip flare spawning, just update heat overlay
@@ -96,9 +96,14 @@ const StarEffects = {
    */
   spawnFlare(star) {
     const config = CONSTANTS.CORONA_FLARE || {};
-    const particleCount = config.PARTICLES_PER_FLARE || 8;
+    const baseParticleCount = config.PARTICLES_PER_FLARE || 8;
     const speed = config.PARTICLE_SPEED || 80;
     const life = config.PARTICLE_LIFE || 1500;
+
+    // Scale particle count with quality
+    const particleCount = typeof ParticleSystem !== 'undefined'
+      ? ParticleSystem.scaleCount(baseParticleCount, 2)
+      : baseParticleCount;
 
     // Random angle for flare direction
     const baseAngle = Math.random() * Math.PI * 2;
@@ -136,8 +141,11 @@ const StarEffects = {
       });
     }
 
-    // Spawn a few spark particles for extra visual
-    for (let i = 0; i < 3; i++) {
+    // Spawn a few spark particles for extra visual (only at higher quality)
+    const sparkCount = typeof ParticleSystem !== 'undefined'
+      ? ParticleSystem.scaleCount(3, 1)
+      : 3;
+    for (let i = 0; i < sparkCount; i++) {
       const angle = baseAngle + (Math.random() - 0.5) * spread * 0.5;
       const particleSpeed = speed * 1.5;
 
@@ -238,12 +246,18 @@ const StarEffects = {
 
   /**
    * Draw heat overlay (red vignette) when near stars
+   * Quality threshold: 30+ for full effect, simplified below
    * @param {CanvasRenderingContext2D} ctx
    * @param {number} width - Viewport width
    * @param {number} height - Viewport height
    */
   drawHeatOverlay(ctx, width, height) {
     if (this.heatIntensity <= 0.05) return;
+
+    // Check quality threshold for heat overlay
+    const heatOverlayEnabled = typeof GraphicsSettings === 'undefined' ||
+      GraphicsSettings.isFeatureEnabled('heatOverlay');
+    if (!heatOverlayEnabled) return;
 
     ctx.save();
 

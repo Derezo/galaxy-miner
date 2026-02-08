@@ -176,24 +176,14 @@ pm2 monit
 pm2 restart galaxy-miner
 ```
 
-**PM2 ecosystem file** (`ecosystem.config.js`):
+**PM2 ecosystem file** (`ecosystem.config.js` in project root):
 
-```javascript
-module.exports = {
-  apps: [{
-    name: 'galaxy-miner',
-    script: 'server/index.js',
-    env: {
-      NODE_ENV: 'development'
-    },
-    env_production: {
-      NODE_ENV: 'production'
-    },
-    instances: 1,           // Single instance (game state)
-    max_memory_restart: '500M'
-  }]
-};
-```
+The production ecosystem config includes memory limits, logging paths, automatic daily restart (4 AM cron), and exponential backoff on crash. See the file for full settings. Key options:
+
+- `instances: 1` -- game state requires a single process
+- `max_memory_restart: '1500M'` -- auto-restart on memory leak
+- `cron_restart: '0 4 * * *'` -- daily restart for stability
+- `exp_backoff_restart_delay: 100` -- exponential backoff on repeated crashes
 
 ```bash
 # Start with ecosystem file
@@ -375,6 +365,42 @@ echo "Status: $STATUS, Uptime: ${UPTIME}s"
 ---
 
 ## Updates and Deployment
+
+### Automated Deployment Script
+
+The project includes a full deployment script at `scripts/deploy-production.sh` that handles the entire deployment pipeline from local machine to production VPS via SSH:
+
+```bash
+# Full deployment (tests, backup, transfer, PM2 reload, Nginx, SSL)
+./scripts/deploy-production.sh
+
+# Deploy code only, skip infrastructure
+./scripts/deploy-production.sh --skip-nginx --skip-ssl
+
+# Preview what would happen without making changes
+./scripts/deploy-production.sh --dry-run
+```
+
+The script performs these steps in order:
+1. Runs the test suite locally (fails deployment if tests fail, unless `--force`)
+2. Connects to the remote VPS via SSH
+3. Creates a compressed backup of the current deployment (last 5 kept)
+4. Packages the project (excluding `node_modules`, tests, `.git`, database files)
+5. Transfers and extracts the archive on the remote server
+6. Runs `npm ci --omit=dev` for production dependencies
+7. Deploys `.env.production` as `.env` on the remote (hash-compared, only if changed)
+8. Starts or restarts the PM2 process
+9. Deploys Nginx config and reloads (idempotent, only if changed)
+10. Sets up SSL via Let's Encrypt/certbot (idempotent, skips if cert exists)
+11. Verifies the health endpoint; rolls back automatically on failure
+
+Configuration is via environment variables or defaults:
+- `REMOTE_HOST` (default: `mittonvillage.com`)
+- `REMOTE_USER` (default: `root`)
+- `REMOTE_APP_DIR` (default: `/var/www/galaxy-miner`)
+- `DOMAIN` (default: `galaxyminer.mittonvillage.com`)
+
+The script requires `.env.production` and `ecosystem.config.js` to exist locally.
 
 ### Zero-Downtime Update (with PM2)
 

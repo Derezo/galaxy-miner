@@ -62,6 +62,14 @@ const GraveyardAtmosphere = {
    * @param {{x: number, y: number}} playerPosition - Player world position
    */
   update(dt, playerPosition) {
+    // Check if graveyard atmosphere is enabled at current quality level
+    if (typeof GraphicsSettings !== 'undefined' &&
+        !GraphicsSettings.isFeatureEnabled('graveyardAtmosphere')) {
+      this.transitionProgress = 0;
+      this.glintParticles = [];
+      return;
+    }
+
     this.time += dt;
 
     // Check if player is in Graveyard zone
@@ -75,12 +83,19 @@ const GraveyardAtmosphere = {
       this.transitionProgress = Math.max(0, this.transitionProgress - dt / this.config.transitionSpeed);
     }
 
+    // Get quality-scaled particle limits
+    const qualityMultiplier = typeof ParticleSystem !== 'undefined' && ParticleSystem.getParticleMultiplier
+      ? ParticleSystem.getParticleMultiplier()
+      : 1;
+    const scaledMaxParticles = Math.max(5, Math.floor(this.maxGlintParticles * qualityMultiplier));
+    const scaledSpawnRate = this.config.glintSpawnRate * qualityMultiplier;
+
     // Only spawn particles if we have any graveyard effect active
     if (this.transitionProgress > 0.01) {
-      // Spawn metallic glint particles
-      this.spawnAccumulator += dt * this.config.glintSpawnRate * this.transitionProgress;
+      // Spawn metallic glint particles - scaled with quality
+      this.spawnAccumulator += dt * scaledSpawnRate * this.transitionProgress;
 
-      while (this.spawnAccumulator >= 1 && this.glintParticles.length < this.maxGlintParticles) {
+      while (this.spawnAccumulator >= 1 && this.glintParticles.length < scaledMaxParticles) {
         this.spawnGlintParticle(playerPosition);
         this.spawnAccumulator -= 1;
       }

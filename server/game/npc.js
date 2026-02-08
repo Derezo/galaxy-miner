@@ -639,14 +639,6 @@ function isAttachedDrone(npcId) {
 }
 
 /**
- * Legacy function - now just calls attachDroneToBase
- * @deprecated Use attachDroneToBase instead
- */
-function processDroneAssimilation(droneId, baseId) {
-  return attachDroneToBase(droneId, baseId);
-}
-
-/**
  * Convert a base to swarm faction
  * @param {string} baseId - Base ID
  * @param {Object} base - Base data
@@ -3484,7 +3476,6 @@ module.exports = {
   sectorAssimilationCount,
   getSectorKey,
   findAssimilationTarget,
-  processDroneAssimilation,
   convertBaseToSwarm,
   convertNpcToSwarm,
   checkQueenSpawnConditions,

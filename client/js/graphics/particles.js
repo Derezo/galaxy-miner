@@ -2,17 +2,12 @@
  * Particle System with Object Pooling
  * Pre-allocates particles to avoid garbage collection during gameplay
  * Supports multiple particle types for varied visual effects
+ *
+ * Integrates with GraphicsSettings for quality-based scaling:
+ * - Pool size scales from 75 (quality 0) to 1000 (quality 100)
+ * - Particle counts scale with exponential multiplier
+ * - Glow effects use LOD-based gradient stops
  */
-
-// Quality settings for particle pool size
-const PARTICLE_QUALITY = {
-  low: 150,
-  medium: 300,
-  high: 500
-};
-
-// Default to high quality
-let PARTICLE_POOL_SIZE = PARTICLE_QUALITY.high;
 
 class Particle {
   constructor() {
@@ -77,70 +72,130 @@ class Particle {
 const ParticleSystem = {
   pool: [],
   active: [],
-  quality: 'high',
+  poolSize: 500,
+  _unsubscribeSettings: null,
 
-  init(quality = null) {
+  /**
+   * Initialize particle system with quality-based pool size
+   */
+  init() {
     this.pool = [];
     this.active = [];
 
-    // Use GraphicsSettings if available, otherwise fall back to parameter or 'high'
-    if (quality === null && typeof GraphicsSettings !== 'undefined') {
-      quality = GraphicsSettings.getLevel();
-    }
-    this.quality = quality || 'high';
+    // Get pool size from GraphicsSettings
+    this.poolSize = this._getPoolSize();
 
-    const poolSize = PARTICLE_QUALITY[this.quality] || PARTICLE_QUALITY.high;
-    PARTICLE_POOL_SIZE = poolSize;
-
-    for (let i = 0; i < poolSize; i++) {
+    // Pre-allocate particles
+    for (let i = 0; i < this.poolSize; i++) {
       this.pool.push(new Particle());
     }
 
-    Logger.log(`ParticleSystem initialized with ${poolSize} particles (${this.quality} quality)`);
+    // Subscribe to quality changes for dynamic pool resizing
+    if (typeof GraphicsSettings !== 'undefined') {
+      this._unsubscribeSettings = GraphicsSettings.addListener(() => {
+        this._onQualityChange();
+      });
+    }
+
+    Logger.log(`ParticleSystem initialized with ${this.poolSize} particles`);
+  },
+
+  /**
+   * Get pool size from settings or default
+   * @private
+   */
+  _getPoolSize() {
+    if (typeof GraphicsSettings !== 'undefined') {
+      return GraphicsSettings.getPoolSize();
+    }
+    return 500; // Default fallback
+  },
+
+  /**
+   * Handle quality setting changes
+   * @private
+   */
+  _onQualityChange() {
+    const newPoolSize = this._getPoolSize();
+
+    if (newPoolSize === this.poolSize) return;
+
+    const oldPoolSize = this.poolSize;
+    this.poolSize = newPoolSize;
+
+    if (newPoolSize > oldPoolSize) {
+      // Grow pool
+      const toAdd = newPoolSize - oldPoolSize;
+      for (let i = 0; i < toAdd; i++) {
+        this.pool.push(new Particle());
+      }
+      Logger.log(`ParticleSystem pool grew: ${oldPoolSize} -> ${newPoolSize}`);
+    } else {
+      // Shrink pool - just update target, particles will naturally return
+      Logger.log(`ParticleSystem pool target reduced: ${oldPoolSize} -> ${newPoolSize}`);
+    }
   },
 
   /**
    * Get particle count multiplier based on current graphics settings
    * Use this when spawning particles to reduce counts on lower settings
-   * @returns {number} Multiplier (0.4 for low, 0.7 for medium, 1.0 for high)
+   * @returns {number} Multiplier (0.0 to 2.0)
    */
   getParticleMultiplier() {
     if (typeof GraphicsSettings !== 'undefined') {
-      return GraphicsSettings.get('particleMultiplier') || 1.0;
+      return GraphicsSettings.getParticleMultiplier();
     }
     return 1.0;
   },
 
   /**
-   * Set particle quality level (reallocates pool)
-   * @param {string} quality - 'low', 'medium', or 'high'
+   * Get current LOD level for rendering optimization
+   * @returns {number} LOD level 0-4
    */
-  setQuality(quality) {
-    if (this.quality === quality) return;
-
-    this.quality = quality;
-    const newPoolSize = PARTICLE_QUALITY[quality] || PARTICLE_QUALITY.high;
-
-    // If new pool is larger, add more particles
-    if (newPoolSize > PARTICLE_POOL_SIZE) {
-      const toAdd = newPoolSize - PARTICLE_POOL_SIZE;
-      for (let i = 0; i < toAdd; i++) {
-        this.pool.push(new Particle());
-      }
+  getLOD() {
+    if (typeof GraphicsSettings !== 'undefined') {
+      return GraphicsSettings.getLOD();
     }
-    // If smaller, particles will naturally be removed as they expire
-
-    PARTICLE_POOL_SIZE = newPoolSize;
-    Logger.log(`ParticleSystem quality set to ${quality} (${newPoolSize} particles)`);
+    return 3; // Default to high
   },
 
+  /**
+   * Check if glow effects should be rendered
+   * @returns {boolean}
+   */
+  shouldRenderGlow() {
+    return this.getLOD() >= 1;
+  },
+
+  /**
+   * Scale a particle count by quality multiplier
+   * @param {number} baseCount - Base particle count
+   * @param {number} [floor=1] - Minimum count
+   * @returns {number} Scaled count
+   */
+  scaleCount(baseCount, floor = 1) {
+    const multiplier = this.getParticleMultiplier();
+    if (multiplier <= 0) return 0;
+    return Math.max(floor, Math.round(baseCount * multiplier));
+  },
+
+  /**
+   * Spawn a single particle
+   */
   spawn(config) {
+    // At quality 0, skip all particle spawning except essential
+    if (this.getParticleMultiplier() <= 0 && !config.essential) {
+      return null;
+    }
+
     let particle = this.pool.pop();
 
     if (!particle) {
+      // Pool exhausted - recycle oldest active particle
       if (this.active.length > 0) {
         particle = this.active.shift();
       } else {
+        // Emergency allocation
         particle = new Particle();
       }
     }
@@ -170,9 +225,17 @@ const ParticleSystem = {
     return particle;
   },
 
+  /**
+   * Spawn a burst of particles with quality scaling
+   * @param {Object} config - Base particle config
+   * @param {number} count - Base particle count (will be scaled by quality)
+   * @param {Object} spread - Spread values for randomization
+   */
   spawnBurst(config, count, spread = {}) {
     // Apply particle multiplier to reduce particle counts on lower settings
-    const adjustedCount = Math.max(1, Math.round(count * this.getParticleMultiplier()));
+    const adjustedCount = this.scaleCount(count);
+
+    if (adjustedCount === 0) return;
 
     for (let i = 0; i < adjustedCount; i++) {
       this.spawn({
@@ -194,7 +257,8 @@ const ParticleSystem = {
    */
   spawnPlunderEffect(x, y) {
     // Gold coin burst - apply particle multiplier
-    const particleCount = Math.max(5, Math.round(20 * this.getParticleMultiplier()));
+    const particleCount = this.scaleCount(20, 5);
+
     for (let i = 0; i < particleCount; i++) {
       const angle = Math.random() * Math.PI * 2;
       const speed = 50 + Math.random() * 100;
@@ -213,7 +277,7 @@ const ParticleSystem = {
       });
     }
 
-    // Central flash - large white glow
+    // Central flash - large white glow (always spawn, marked essential)
     this.spawn({
       x,
       y,
@@ -223,23 +287,29 @@ const ParticleSystem = {
       color: '#ffffff',
       size: 25,
       type: 'glow',
-      decay: 0.7
+      decay: 0.7,
+      essential: true
     });
 
-    // Expanding ring shockwave
-    this.spawn({
-      x,
-      y,
-      vx: 0,
-      vy: 0,
-      life: 500,
-      color: '#ffd700',
-      secondaryColor: '#ff9900',
-      size: 15,
-      type: 'ring'
-    });
+    // Expanding ring shockwave (always spawn if LOD > 0)
+    if (this.getLOD() >= 1) {
+      this.spawn({
+        x,
+        y,
+        vx: 0,
+        vy: 0,
+        life: 500,
+        color: '#ffd700',
+        secondaryColor: '#ff9900',
+        size: 15,
+        type: 'ring'
+      });
+    }
   },
 
+  /**
+   * Update all active particles
+   */
   update(dt) {
     for (let i = this.active.length - 1; i >= 0; i--) {
       const particle = this.active[i];
@@ -247,13 +317,22 @@ const ParticleSystem = {
       if (!particle.update(dt)) {
         this.active.splice(i, 1);
         particle.reset();
-        this.pool.push(particle);
+
+        // Only return to pool if under target size
+        if (this.pool.length < this.poolSize) {
+          this.pool.push(particle);
+        }
+        // Otherwise particle is garbage collected (pool shrinking)
       }
     }
   },
 
+  /**
+   * Draw all active particles
+   */
   draw(ctx, camera, viewportWidth, viewportHeight) {
     const margin = 50;
+    const lod = this.getLOD();
 
     for (const particle of this.active) {
       const screenX = particle.x - camera.x;
@@ -269,19 +348,19 @@ const ParticleSystem = {
 
       switch (particle.type) {
         case 'glow':
-          this.drawGlowParticle(ctx, screenX, screenY, particle);
+          this.drawGlowParticle(ctx, screenX, screenY, particle, lod);
           break;
         case 'spark':
           this.drawSparkParticle(ctx, screenX, screenY, particle);
           break;
         case 'trail':
-          this.drawTrailParticle(ctx, screenX, screenY, particle);
+          this.drawTrailParticle(ctx, screenX, screenY, particle, lod);
           break;
         case 'smoke':
-          this.drawSmokeParticle(ctx, screenX, screenY, particle);
+          this.drawSmokeParticle(ctx, screenX, screenY, particle, lod);
           break;
         case 'energy':
-          this.drawEnergyParticle(ctx, screenX, screenY, particle);
+          this.drawEnergyParticle(ctx, screenX, screenY, particle, lod);
           break;
         case 'debris':
           this.drawDebrisParticle(ctx, screenX, screenY, particle);
@@ -290,7 +369,7 @@ const ParticleSystem = {
           this.drawRingParticle(ctx, screenX, screenY, particle);
           break;
         case 'flame':
-          this.drawFlameParticle(ctx, screenX, screenY, particle);
+          this.drawFlameParticle(ctx, screenX, screenY, particle, lod);
           break;
         default:
           this.drawDefaultParticle(ctx, screenX, screenY, particle);
@@ -307,21 +386,42 @@ const ParticleSystem = {
     ctx.fill();
   },
 
-  drawGlowParticle(ctx, x, y, particle) {
+  drawGlowParticle(ctx, x, y, particle, lod) {
+    if (lod === 0) {
+      // Minimal: solid circle only
+      ctx.fillStyle = particle.color;
+      ctx.beginPath();
+      ctx.arc(x, y, particle.size, 0, Math.PI * 2);
+      ctx.fill();
+      return;
+    }
+
+    // Gradient glow - fewer stops at lower LOD
     const gradient = ctx.createRadialGradient(x, y, 0, x, y, particle.size * 2);
-    gradient.addColorStop(0, particle.color);
-    gradient.addColorStop(0.5, particle.color + '80');
-    gradient.addColorStop(1, 'transparent');
+
+    if (lod >= 3) {
+      // High/Ultra: full gradient
+      gradient.addColorStop(0, particle.color);
+      gradient.addColorStop(0.5, particle.color + '80');
+      gradient.addColorStop(1, 'transparent');
+    } else {
+      // Low/Medium: simplified gradient
+      gradient.addColorStop(0, particle.color);
+      gradient.addColorStop(1, 'transparent');
+    }
 
     ctx.fillStyle = gradient;
     ctx.beginPath();
     ctx.arc(x, y, particle.size * 2, 0, Math.PI * 2);
     ctx.fill();
 
-    ctx.fillStyle = '#ffffff';
-    ctx.beginPath();
-    ctx.arc(x, y, particle.size * 0.5, 0, Math.PI * 2);
-    ctx.fill();
+    // White core only at LOD 2+
+    if (lod >= 2) {
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath();
+      ctx.arc(x, y, particle.size * 0.5, 0, Math.PI * 2);
+      ctx.fill();
+    }
   },
 
   drawSparkParticle(ctx, x, y, particle) {
@@ -338,7 +438,16 @@ const ParticleSystem = {
     ctx.stroke();
   },
 
-  drawTrailParticle(ctx, x, y, particle) {
+  drawTrailParticle(ctx, x, y, particle, lod) {
+    if (lod === 0) {
+      // Minimal: solid circle
+      ctx.fillStyle = particle.color;
+      ctx.beginPath();
+      ctx.arc(x, y, particle.size, 0, Math.PI * 2);
+      ctx.fill();
+      return;
+    }
+
     const gradient = ctx.createRadialGradient(x, y, 0, x, y, particle.size);
     gradient.addColorStop(0, particle.color);
     gradient.addColorStop(1, 'transparent');
@@ -349,10 +458,19 @@ const ParticleSystem = {
     ctx.fill();
   },
 
-  drawSmokeParticle(ctx, x, y, particle) {
+  drawSmokeParticle(ctx, x, y, particle, lod) {
     // Expanding, fading smoke puff
     const lifeRatio = particle.life / particle.maxLife;
-    const expandedSize = particle.size * (1.5 + (1 - lifeRatio) * 2); // Expands over time
+    const expandedSize = particle.size * (1.5 + (1 - lifeRatio) * 2);
+
+    if (lod === 0) {
+      // Minimal: simple circle with alpha
+      ctx.fillStyle = particle.color + '40';
+      ctx.beginPath();
+      ctx.arc(x, y, expandedSize, 0, Math.PI * 2);
+      ctx.fill();
+      return;
+    }
 
     const gradient = ctx.createRadialGradient(x, y, 0, x, y, expandedSize);
     gradient.addColorStop(0, particle.color + '60');
@@ -365,14 +483,25 @@ const ParticleSystem = {
     ctx.fill();
   },
 
-  drawEnergyParticle(ctx, x, y, particle) {
+  drawEnergyParticle(ctx, x, y, particle, lod) {
     // Pulsing energy with inner core
     const pulseSize = particle.size * (0.8 + Math.sin(Date.now() * 0.01) * 0.2);
+
+    if (lod === 0) {
+      // Minimal: solid pulsing circle
+      ctx.fillStyle = particle.color;
+      ctx.beginPath();
+      ctx.arc(x, y, pulseSize, 0, Math.PI * 2);
+      ctx.fill();
+      return;
+    }
 
     // Outer glow
     const outerGradient = ctx.createRadialGradient(x, y, 0, x, y, pulseSize * 2);
     outerGradient.addColorStop(0, particle.color);
-    outerGradient.addColorStop(0.4, particle.color + '80');
+    if (lod >= 3) {
+      outerGradient.addColorStop(0.4, particle.color + '80');
+    }
     outerGradient.addColorStop(1, 'transparent');
 
     ctx.fillStyle = outerGradient;
@@ -381,10 +510,12 @@ const ParticleSystem = {
     ctx.fill();
 
     // Bright core
-    ctx.fillStyle = '#ffffff';
-    ctx.beginPath();
-    ctx.arc(x, y, pulseSize * 0.3, 0, Math.PI * 2);
-    ctx.fill();
+    if (lod >= 2) {
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath();
+      ctx.arc(x, y, pulseSize * 0.3, 0, Math.PI * 2);
+      ctx.fill();
+    }
   },
 
   drawDebrisParticle(ctx, x, y, particle) {
@@ -417,16 +548,16 @@ const ParticleSystem = {
   drawRingParticle(ctx, x, y, particle) {
     // Expanding ring effect (shockwave)
     const lifeRatio = particle.life / particle.maxLife;
-    const expandedSize = particle.size * (1 + (1 - lifeRatio) * 3); // Rapid expansion
+    const expandedSize = particle.size * (1 + (1 - lifeRatio) * 3);
 
     ctx.strokeStyle = particle.color;
-    ctx.lineWidth = Math.max(0.5, particle.size * 0.3 * lifeRatio); // Thins as it expands
+    ctx.lineWidth = Math.max(0.5, particle.size * 0.3 * lifeRatio);
     ctx.beginPath();
     ctx.arc(x, y, expandedSize, 0, Math.PI * 2);
     ctx.stroke();
 
-    // Optional inner ring for dual-ring effect
-    if (particle.secondaryColor && lifeRatio > 0.3) {
+    // Optional inner ring for dual-ring effect (only at LOD 2+)
+    if (particle.secondaryColor && lifeRatio > 0.3 && this.getLOD() >= 2) {
       ctx.strokeStyle = particle.secondaryColor;
       ctx.lineWidth = Math.max(0.3, particle.size * 0.2 * lifeRatio);
       ctx.beginPath();
@@ -435,10 +566,19 @@ const ParticleSystem = {
     }
   },
 
-  drawFlameParticle(ctx, x, y, particle) {
+  drawFlameParticle(ctx, x, y, particle, lod) {
     // Flickering flame with color gradient
-    const flicker = 0.8 + Math.random() * 0.4; // Random flicker
+    const flicker = 0.8 + Math.random() * 0.4;
     const size = particle.size * flicker;
+
+    if (lod === 0) {
+      // Minimal: simple ellipse
+      ctx.fillStyle = particle.color;
+      ctx.beginPath();
+      ctx.ellipse(x, y, size * 0.7, size * 1.2, 0, 0, Math.PI * 2);
+      ctx.fill();
+      return;
+    }
 
     // Outer orange/red
     const outerGradient = ctx.createRadialGradient(x, y + size * 0.3, 0, x, y, size * 1.5);
@@ -448,30 +588,59 @@ const ParticleSystem = {
 
     ctx.fillStyle = outerGradient;
     ctx.beginPath();
-    // Flame shape - taller than wide
     ctx.ellipse(x, y, size * 0.7, size * 1.2, 0, 0, Math.PI * 2);
     ctx.fill();
 
-    // Inner bright core
-    ctx.fillStyle = '#ffffff90';
-    ctx.beginPath();
-    ctx.ellipse(x, y + size * 0.2, size * 0.25, size * 0.4, 0, 0, Math.PI * 2);
-    ctx.fill();
+    // Inner bright core (only at LOD 2+)
+    if (lod >= 2) {
+      ctx.fillStyle = '#ffffff90';
+      ctx.beginPath();
+      ctx.ellipse(x, y + size * 0.2, size * 0.25, size * 0.4, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
   },
 
+  /**
+   * Get particle system statistics
+   */
   getStats() {
     return {
       active: this.active.length,
       pooled: this.pool.length,
-      total: this.active.length + this.pool.length
+      total: this.active.length + this.pool.length,
+      targetPoolSize: this.poolSize,
+      multiplier: this.getParticleMultiplier().toFixed(2),
+      lod: this.getLOD()
     };
   },
 
+  /**
+   * Clear all active particles
+   */
   clear() {
     while (this.active.length > 0) {
       const particle = this.active.pop();
       particle.reset();
-      this.pool.push(particle);
+      if (this.pool.length < this.poolSize) {
+        this.pool.push(particle);
+      }
     }
+  },
+
+  /**
+   * Cleanup - remove settings listener
+   */
+  destroy() {
+    if (this._unsubscribeSettings) {
+      this._unsubscribeSettings();
+      this._unsubscribeSettings = null;
+    }
+    this.clear();
+    this.pool = [];
   }
 };
+
+// Expose globally
+if (typeof window !== 'undefined') {
+  window.ParticleSystem = ParticleSystem;
+}

@@ -6,24 +6,7 @@ A lazy-loading DOM element cache for Galaxy Miner that reduces repeated `getElem
 
 The `DOMCache` module provides a centralized, lazy-loading cache for DOM elements accessed via `getElementById`. Instead of repeatedly querying the DOM for the same elements, the cache stores references after the first access, significantly improving performance in UI-heavy operations.
 
-## Features
-
-- **Lazy Loading**: Elements are only cached when first accessed
-- **Named Getters**: Convenient property-based access for common elements
-- **Cache Invalidation**: Refresh cache when DOM changes dynamically
-- **Batch Operations**: Get multiple elements at once
-- **Debug Utilities**: Built-in cache statistics and debugging
-- **Zero Dependencies**: Pure vanilla JavaScript, no build step required
-
-## Installation
-
-The module is already included in `index.html` and loads automatically:
-
-```html
-<script src="js/dom-cache.js"></script>
-```
-
-It's available globally as `window.DOMCache`.
+The module is included in `index.html` and available globally as `window.DOMCache`.
 
 ## Basic Usage
 
@@ -58,26 +41,23 @@ const radarCanvas = DOMCache.radarCanvas;
 ### Core Methods
 
 #### `DOMCache.get(id)`
-Get a DOM element by ID with caching.
+Get a DOM element by ID with caching. Returns `HTMLElement` or `null`.
 
 ```javascript
 const panel = DOMCache.get('terminal-panel');
-// Returns: HTMLElement or null if not found
 ```
 
 #### `DOMCache.getMany(ids)`
-Get multiple elements at once.
+Get multiple elements at once. Returns an object keyed by ID.
 
 ```javascript
 const elements = DOMCache.getMany(['auth-screen', 'hud', 'terminal-panel']);
-// Returns: { 'auth-screen': HTMLElement, 'hud': HTMLElement, ... }
 ```
 
 #### `DOMCache.invalidate(id)`
-Clear a cached element (useful when DOM changes dynamically).
+Clear a cached element (use when DOM changes dynamically).
 
 ```javascript
-// After recreating an element in the DOM
 DOMCache.invalidate('custom-modal');
 const freshElement = DOMCache.get('custom-modal'); // Re-fetches from DOM
 ```
@@ -85,64 +65,29 @@ const freshElement = DOMCache.get('custom-modal'); // Re-fetches from DOM
 #### `DOMCache.invalidateMany(ids)`
 Clear multiple cached elements at once.
 
-```javascript
-DOMCache.invalidateMany(['modal-1', 'modal-2', 'modal-3']);
-```
-
 #### `DOMCache.invalidateAll()`
 Clear entire cache (use when doing major DOM restructuring).
-
-```javascript
-DOMCache.invalidateAll();
-```
 
 #### `DOMCache.refresh(id)`
 Invalidate and immediately re-fetch an element.
 
 ```javascript
 const element = DOMCache.refresh('terminal-panel');
-// Equivalent to: invalidate + get
 ```
 
 #### `DOMCache.exists(id)`
 Check if an element exists without caching it.
 
-```javascript
-if (DOMCache.exists('optional-feature')) {
-  // Element exists in DOM
-}
-```
-
 #### `DOMCache.preload()`
 Pre-cache critical elements for faster first access. Called automatically on DOM ready.
-
-```javascript
-DOMCache.preload(); // Usually not needed - called automatically
-```
 
 ### Debug Utilities
 
 #### `DOMCache.getStats()`
-Get cache statistics.
-
-```javascript
-const stats = DOMCache.getStats();
-console.log(stats);
-// {
-//   totalCached: 45,
-//   validElements: 43,
-//   nullElements: 2,
-//   initialized: true
-// }
-```
+Returns `{ totalCached, validElements, nullElements, initialized }`.
 
 #### `DOMCache.debug()`
 Log detailed cache information to console.
-
-```javascript
-DOMCache.debug();
-// Outputs formatted table with cache stats and contents
-```
 
 ## Named Getters Reference
 
@@ -221,249 +166,60 @@ DOMCache.chatSend            // Send button
 DOMCache.chatUnreadBadge     // Unread message badge
 ```
 
-### Hints & Overlays
+### Hints, Overlays & Canvas
 ```javascript
 DOMCache.miningHint          // Mining hint text
-DOMCache.lootHint            // Loot hint text (not in current HTML)
+DOMCache.lootHint            // Loot hint text
 DOMCache.wormholeHint        // Wormhole hint text
 DOMCache.uiContainer         // Main UI container
-```
-
-### Canvas Elements
-```javascript
 DOMCache.gameCanvas          // Main game canvas
 DOMCache.shipPreviewCanvas   // Ship preview canvas
 DOMCache.wormholeTransitCanvas // Wormhole transit canvas
-```
-
-### Tooltip Elements
-```javascript
 DOMCache.radarTooltip        // Radar tooltip element
 ```
 
 ## Usage Patterns
 
-### Pattern 1: Show/Hide Elements
+### Show/Hide Elements
 ```javascript
-// Old way
-document.getElementById('auth-screen').classList.add('hidden');
-document.getElementById('hud').classList.remove('hidden');
-
-// New way
 DOMCache.authScreen.classList.add('hidden');
 DOMCache.hud.classList.remove('hidden');
 ```
 
-### Pattern 2: Update Text Content
+### Update Text Content
 ```javascript
-// Old way
-document.getElementById('credit-value').textContent = credits;
-document.getElementById('sector-coords').textContent = `${x}, ${y}`;
-
-// New way
 DOMCache.creditValue.textContent = credits;
 DOMCache.sectorCoords.textContent = `${x}, ${y}`;
 ```
 
-### Pattern 3: Event Listeners
+### Working with Dynamic Content
 ```javascript
-// Old way
-document.getElementById('login-btn').addEventListener('click', handleLogin);
-
-// New way
-DOMCache.loginBtn.addEventListener('click', handleLogin);
-```
-
-### Pattern 4: Working with Dynamic Content
-```javascript
-// When you dynamically create/replace an element
 function recreateModal() {
   const container = DOMCache.get('modal-container');
   container.innerHTML = '<div id="my-modal">New content</div>';
-
-  // Invalidate cache since the element was replaced
-  DOMCache.invalidate('my-modal');
-
-  // Next access will fetch the new element
+  DOMCache.invalidate('my-modal'); // Important: invalidate after DOM change
   const newModal = DOMCache.get('my-modal');
 }
 ```
 
-### Pattern 5: Batch Access for Initialization
+### Batch Access for Initialization
 ```javascript
-function initializeUI() {
-  const elements = DOMCache.getMany([
-    'auth-screen',
-    'hud',
-    'terminal-panel',
-    'chat-overlay',
-    'radar-canvas'
-  ]);
-
-  // All elements are now cached and accessible via elements object
-  elements['auth-screen'].classList.add('hidden');
-  elements.hud.classList.remove('hidden');
-}
-```
-
-## Performance Benefits
-
-### Before (Repeated DOM Queries)
-```javascript
-// Each call queries the DOM tree
-function updateHUD() {
-  document.getElementById('credit-value').textContent = player.credits;
-  document.getElementById('credit-value').classList.add('updated'); // Queries again!
-}
-
-// Called 60 times per second in render loop
-function render() {
-  updateHUD();
-  // Each frame = 2 DOM queries
-}
-```
-
-### After (Cached Access)
-```javascript
-function updateHUD() {
-  const creditEl = DOMCache.creditValue; // Cached after first access
-  creditEl.textContent = player.credits;
-  creditEl.classList.add('updated'); // No DOM query!
-}
-
-// Called 60 times per second in render loop
-function render() {
-  updateHUD();
-  // First frame = 1 DOM query, subsequent frames = 0 queries
-}
-```
-
-**Result**: Reduces DOM queries from 120/sec to ~0/sec after initial cache.
-
-## Migration Guide
-
-### Converting Existing Code
-
-#### Step 1: Identify Frequently Accessed Elements
-Look for repeated `getElementById` calls in your code:
-```javascript
-// These are good candidates for caching
-document.getElementById('hud')
-document.getElementById('terminal-panel')
-document.getElementById('credit-value')
-```
-
-#### Step 2: Use Named Getters if Available
-```javascript
-// Before
-const hud = document.getElementById('hud');
-
-// After
-const hud = DOMCache.hud;
-```
-
-#### Step 3: Use `.get()` for Other Elements
-```javascript
-// Before
-const customElement = document.getElementById('custom-element');
-
-// After
-const customElement = DOMCache.get('custom-element');
-```
-
-#### Step 4: Handle Dynamic Content
-```javascript
-// When replacing elements, invalidate cache
-function updatePanel() {
-  const panel = DOMCache.get('panel');
-  panel.innerHTML = '<div id="inner">New content</div>';
-
-  DOMCache.invalidate('inner'); // Important!
-}
-```
-
-### Common Pitfalls
-
-**Pitfall 1: Forgetting to Invalidate After DOM Changes**
-```javascript
-// BAD - cache may hold stale reference
-element.innerHTML = '<div id="child">...</div>';
-const child = DOMCache.get('child'); // May be null or stale!
-
-// GOOD - invalidate after DOM modification
-element.innerHTML = '<div id="child">...</div>';
-DOMCache.invalidate('child');
-const child = DOMCache.get('child'); // Fresh element
-```
-
-**Pitfall 2: Caching Non-Existent Elements**
-```javascript
-// Element doesn't exist yet - returns null
-const modal = DOMCache.get('not-yet-created');
-// modal === null
-
-// Later, after element is created
-const modal2 = DOMCache.get('not-yet-created'); // Still null (cached)
-DOMCache.refresh('not-yet-created'); // Now it works!
-```
-
-**Pitfall 3: Using Cache Before DOM Ready**
-```javascript
-// BAD - may not find elements
-const element = DOMCache.get('my-element');
-
-// GOOD - wait for DOM ready
-document.addEventListener('DOMContentLoaded', () => {
-  const element = DOMCache.get('my-element');
-});
+const elements = DOMCache.getMany([
+  'auth-screen', 'hud', 'terminal-panel', 'chat-overlay', 'radar-canvas'
+]);
 ```
 
 ## Best Practices
 
-1. **Use Named Getters When Available**: They're cleaner and easier to read
-2. **Invalidate After DOM Changes**: Always invalidate when elements are replaced
-3. **Cache in Local Variables**: For multiple uses in a single function
-4. **Use `.exists()` for Optional Elements**: Avoid caching non-critical elements
-5. **Debug with `.debug()`**: Use cache statistics to identify issues
+1. **Use Named Getters When Available** -- they are cleaner and easier to read
+2. **Invalidate After DOM Changes** -- always invalidate when elements are replaced
+3. **Cache in Local Variables** -- for multiple uses in a single function
+4. **Use `.exists()` for Optional Elements** -- avoid caching non-critical elements
+5. **Debug with `.debug()`** -- use cache statistics to identify issues
 
-## Testing
+**Common Pitfall**: forgetting to invalidate after DOM changes. If you replace an element's innerHTML and then access a child via `DOMCache.get()`, you may get a stale or null reference. Always call `DOMCache.invalidate(id)` after modifying the DOM.
 
-```javascript
-// Test cache functionality
-console.log('Testing DOMCache...');
-
-// Test basic access
-const hud = DOMCache.hud;
-console.assert(hud !== null, 'HUD should exist');
-
-// Test caching
-const hud2 = DOMCache.hud;
-console.assert(hud === hud2, 'Should return cached element');
-
-// Test invalidation
-DOMCache.invalidate('hud');
-const hud3 = DOMCache.hud;
-console.assert(hud === hud3, 'Should re-fetch same element');
-
-// Test stats
-const stats = DOMCache.getStats();
-console.log('Cache stats:', stats);
-
-console.log('DOMCache tests passed!');
-```
-
-## Browser Compatibility
-
-Works in all modern browsers that support:
-- `document.getElementById()`
-- ES6 getters
-- Object property access
-
-Essentially: All browsers from IE11+ and all evergreen browsers.
-
-## Performance Metrics
-
-Benchmarked on a typical game frame (60 FPS):
+## Performance
 
 | Metric | Before Cache | After Cache | Improvement |
 |--------|--------------|-------------|-------------|
@@ -471,6 +227,6 @@ Benchmarked on a typical game frame (60 FPS):
 | Frame time | 16.8ms | 16.2ms | 3.5% faster |
 | Memory usage | Baseline | +2KB | Negligible |
 
-## License
+## Migration
 
-Part of Galaxy Miner. MIT License.
+For a step-by-step guide on converting existing `getElementById` calls to use DOMCache, see the archived [DOM Cache Migration Guide](../../docs/archive/dom-cache-migration-guide.md).
