@@ -295,17 +295,21 @@ function tick() {
   const deltaTime = now - lastTickTime;
   lastTickTime = now;
 
-  // Update all game systems
-  updatePlayers(deltaTime);
-  updateBases(deltaTime);  // Check for bases near players and spawn NPCs
-  updateNPCs(deltaTime);
-  updateMining(deltaTime);
-  updateWreckage(deltaTime);
-  updateStarDamage(deltaTime);  // Apply star heat damage
-  updateComets(deltaTime);  // Comet hazard collision detection
-  broadcastNearbyBasesToPlayers(now);  // Send base positions for radar
+  try {
+    // Update all game systems
+    updatePlayers(deltaTime);
+    updateBases(deltaTime);  // Check for bases near players and spawn NPCs
+    updateNPCs(deltaTime);
+    updateMining(deltaTime);
+    updateWreckage(deltaTime);
+    updateStarDamage(deltaTime);  // Apply star heat damage
+    updateComets(deltaTime);  // Comet hazard collision detection
+    broadcastNearbyBasesToPlayers(now);  // Send base positions for radar
+  } catch (err) {
+    logger.error('[Engine] Tick error:', err);
+  }
 
-  // Schedule next tick
+  // Schedule next tick (always, even on error)
   const tickInterval = 1000 / config.SERVER_TICK_RATE;
   const elapsed = Date.now() - now;
   const delay = Math.max(0, tickInterval - elapsed);

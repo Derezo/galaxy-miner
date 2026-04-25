@@ -319,6 +319,21 @@ check_remote_prerequisites() {
         local node_version
         node_version=$(ssh_exec "node --version")
         log_success "Remote node: $node_version"
+
+        # Validate remote Node.js major version matches .nvmrc
+        if [ -f "$PROJECT_ROOT/.nvmrc" ]; then
+            local required_major
+            required_major=$(tr -d '[:space:]' < "$PROJECT_ROOT/.nvmrc")
+            local remote_major
+            remote_major=$(echo "$node_version" | tr -d '[:space:]' | sed 's/v\([0-9]*\).*/\1/')
+            if [ "$remote_major" != "$required_major" ]; then
+                log_error "Remote Node.js major version ($remote_major) does not match .nvmrc ($required_major)"
+                log_error "Update the remote Node.js version or update .nvmrc to match"
+                exit 1
+            else
+                log_success "Remote Node.js major version matches .nvmrc ($required_major)"
+            fi
+        fi
     else
         log_error "node is not installed on remote server"
         exit 1

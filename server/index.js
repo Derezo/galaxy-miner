@@ -67,6 +67,19 @@ httpServer.listen(config.PORT, config.HOST, () => {
   logger.log(`Galaxy seed: ${config.GALAXY_SEED}`);
 });
 
+// Catch unhandled errors to prevent silent crashes
+process.on('uncaughtException', (err) => {
+  logger.error('[FATAL] Uncaught exception:', err);
+  httpServer.close(() => process.exit(1));
+  setTimeout(() => process.exit(1), 3000);
+});
+
+process.on('unhandledRejection', (reason) => {
+  logger.error('[FATAL] Unhandled rejection:', reason);
+  httpServer.close(() => process.exit(1));
+  setTimeout(() => process.exit(1), 3000);
+});
+
 // Graceful shutdown
 process.on('SIGTERM', () => {
   logger.log('SIGTERM received, shutting down...');

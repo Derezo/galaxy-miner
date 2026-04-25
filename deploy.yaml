@@ -1,0 +1,52 @@
+schema_version: 1
+name: galaxy-miner
+plugin: generic-node
+version_scheme: semver
+target: vps
+
+remote:
+  host: mittonvillage.com
+  user: galaxy-miner
+  ssh_user: root
+  app_dir: /var/www/galaxy-miner
+  releases_kept: 5
+
+# No build step — galaxy-miner ships source verbatim. Optional pre-build
+# commands (tests) listed below. The plugin runs `npm ci --omit=dev` INSIDE
+# the stage so native bindings (better-sqlite3) build against the prod Node ABI.
+build:
+  commands:
+    - npm test --silent
+  artifact_dir: "."
+  # Plugin auto-excludes .git, node_modules, .deploy-staging, data, logs, tests.
+  # Add extra explicit includes here if the exclude list drops something
+  # runtime-critical.
+  include: []
+  env: {}
+
+secrets:
+  provider: lsd-vault
+  lsd_vault:
+    keys:
+      - SESSION_SECRET
+
+services:
+  - name: galaxy-miner
+    kind: pm2
+    script: server/index.js
+    exec_mode: fork
+    singleton: true         # single-process SQLite; scaling would corrupt DB
+    max_memory: 512M
+
+health:
+  url: https://galaxyminer.mittonvillage.com/
+  expect_status: 200
+  timeout_s: 30
+  retries: 6
+  retry_delay_s: 5
+
+nginx:
+  template: api.conf.tpl
+  server_name: galaxyminer.mittonvillage.com
+  vars:
+    upstream: "127.0.0.1:3388"

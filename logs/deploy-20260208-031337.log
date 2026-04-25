@@ -1,0 +1,156 @@
+[0;36mℹ  Target: root@mittonvillage.com:/var/www/galaxy-miner[0m
+[0;36mℹ  Domain: galaxyminer.mittonvillage.com[0m
+[0;32m✓ Deployment lock acquired[0m
+
+[0;34m==>[1m Checking local prerequisites[0m
+[0;32m✓ tar is installed[0m
+[0;32m✓ node is installed (v22.21.0)[0m
+[0;32m✓ SSH key found: /home/eric/.ssh/id_ed25519[0m
+[0;32m✓ .env.production found[0m
+[0;32m✓ ecosystem.config.js found[0m
+[0;32m✓ package.json found[0m
+
+[0;34m==>[1m Running pre-deployment validation[0m
+[0;36mℹ  Running test suite...[0m
+
+> galaxy-miner@1.0.0 test
+> vitest run
+
+[33mThe CJS build of Vite's Node API is deprecated. See https://vite.dev/guide/troubleshooting.html#vite-cjs-node-api-deprecated for more details.[39m
+
+ RUN  v2.1.9 /home/eric/Projects/galaxy-miner
+
+ ✓ tests/unit/shared/physics.test.js (34 tests) 22ms
+ ✓ tests/unit/server/void-loot.test.js (18 tests) 17ms
+stdout | tests/unit/shared/star-system.test.js > shared/star-system > generateBases > should include starX and starY matching the parent star coordinates
+[WORLDGENERATION] StarSystem Config: {
+  SUPER_SECTOR_SIZE: 6000,
+  MIN_STAR_SEPARATION: 3000,
+  SYSTEMS_MIN: 1,
+  SYSTEMS_MAX: 2,
+  configLoaded: true
+}
+
+ ✓ tests/unit/shared/graveyard.test.js (16 tests) 11ms
+ ✓ tests/unit/shared/star-system.test.js (3 tests) 13ms
+ ✓ tests/unit/server/spatial-hash.test.js (24 tests) 16ms
+ ✓ tests/unit/server/respawn.test.js (23 tests) 20ms
+ ✓ tests/unit/shared/utils.test.js (41 tests) 18ms
+stdout | tests/unit/network/duplicate-handlers.test.js > Duplicate Handler Detection > Client Handler Duplicates > should report total client handler count
+
+Total client handler registrations: 127
+Handlers per file:
+  client/js/network.js: 2
+  client/js/network/auth.js: 2
+  client/js/network/chat.js: 3
+  client/js/network/combat.js: 9
+  client/js/network/derelict.js: 5
+  client/js/network/loot.js: 18
+  client/js/network/marketplace.js: 8
+  client/js/network/mining.js: 8
+  client/js/network/npc.js: 33
+  client/js/network/pirate.js: 6
+  client/js/network/player.js: 10
+  client/js/network/scavenger.js: 8
+  client/js/network/ship.js: 8
+  client/js/network/wormhole.js: 7
+
+ ✓ tests/unit/server/void-leviathan.test.js (36 tests) 18ms
+stdout | tests/unit/network/duplicate-handlers.test.js > Duplicate Handler Detection > Server Handler Duplicates > should report total server handler count
+
+Total server handler registrations: 35
+Handlers per file:
+  server/socket/auth.js: 4
+  server/socket/chat.js: 1
+  server/socket/combat.js: 1
+  server/socket/connection.js: 2
+  server/socket/derelict.js: 3
+  server/socket/emote.js: 1
+  server/socket/loot.js: 4
+  server/socket/marketplace.js: 5
+  server/socket/mining.js: 2
+  server/socket/player.js: 2
+  server/socket/relic.js: 1
+  server/socket/ship.js: 4
+  server/socket/wormhole.js: 5
+
+stdout | tests/unit/network/duplicate-handlers.test.js > Duplicate Handler Detection > Handler Registry > should list all unique events with their locations
+
+Total unique events: 160
+
+ ✓ tests/unit/network/duplicate-handlers.test.js (5 tests) 16ms
+ ✓ tests/unit/network/event-contracts.test.js (32 tests) 22ms
+ ✓ tests/unit/server/derelict.test.js (28 tests) 31ms
+ ✓ tests/unit/server/auth.test.js (21 tests) 472ms
+
+ Test Files  12 passed (12)
+      Tests  281 passed (281)
+   Start at  03:13:37
+   Duration  811ms (transform 278ms, setup 0ms, collect 691ms, tests 675ms, environment 3ms, prepare 1.18s)
+
+[0;32m✓ Tests passed[0m
+[0;32m✓ Pre-deployment validation passed[0m
+
+[0;34m==>[1m Checking SSH connectivity[0m
+[0;32m✓ SSH connection to mittonvillage.com verified[0m
+
+[0;34m==>[1m Checking remote prerequisites[0m
+[0;32m✓ Remote node: v20.20.0[0m
+[0;32m✓ Remote npm installed[0m
+[0;32m✓ Remote pm2 installed[0m
+[0;32m✓ Remote nginx installed[0m
+
+[0;34m==>[1m Creating remote backup[0m
+[0;32m✓ Backup created: /var/backups/galaxy-miner/backup-20260208-031350.tar.gz[0m
+[0;36mℹ  Old backups cleaned up (keeping last 5)[0m
+
+[0;34m==>[1m Creating deployment package[0m
+[0;36mℹ  Packaging application files...[0m
+[0;32m✓ Deployment package created: 9.5M[0m
+
+[0;34m==>[1m Transferring to remote server[0m
+[0;36mℹ  Uploading deployment package...[0m
+[0;32m✓ Package uploaded[0m
+[0;36mℹ  Stopping PM2 process for deployment...[0m
+[0;36mℹ  Extracting on remote server...[0m
+[0;32m✓ Package extracted[0m
+[0;32m✓ Code deployed[0m
+
+[0;34m==>[1m Installing dependencies[0m
+[0;36mℹ  Installing production dependencies (this may take a moment)...[0m
+[0;32m✓ Dependencies installed[0m
+
+[0;34m==>[1m Deploying environment configuration[0m
+[0;36mℹ  Environment file unchanged, skipping[0m
+
+[0;34m==>[1m Checking database[0m
+[0;36mℹ  Database already exists, preserving data[0m
+
+[0;34m==>[1m Deploying with PM2[0m
+[0;36mℹ  Restarting PM2 process...[0m
+[0;32m✓ PM2 deployment complete[0m
+
+[0;34m==>[1m Deploying Nginx configuration[0m
+[0;36mℹ  Skipping Nginx deployment (--skip-nginx)[0m
+
+[0;34m==>[1m Setting up SSL certificate[0m
+[0;36mℹ  Skipping SSL setup (--skip-ssl)[0m
+
+[0;34m==>[1m Verifying deployment[0m
+[0;36mℹ  Waiting for PM2 process to start...[0m
+[0;32m✓ PM2 process is online[0m
+[0;36mℹ  Waiting for health endpoint...[0m
+[0;32m✓ Health check passed (local)[0m
+
+[0;34m==>[1m Deployment Summary[0m
+[0;32m✓ Galaxy Miner deployed successfully![0m
+[0;36mℹ  [0m
+[0;36mℹ  Application URL: https://galaxyminer.mittonvillage.com[0m
+[0;36mℹ  Health endpoint: https://galaxyminer.mittonvillage.com/health[0m
+[0;36mℹ  [0m
+[0;36mℹ  Useful commands:[0m
+[0;36mℹ    View logs:     ssh root@mittonvillage.com 'pm2 logs galaxy-miner'[0m
+[0;36mℹ    Restart app:   ssh root@mittonvillage.com 'pm2 restart galaxy-miner'[0m
+[0;36mℹ    Stop app:      ssh root@mittonvillage.com 'pm2 stop galaxy-miner'[0m
+[0;36mℹ    App status:    ssh root@mittonvillage.com 'pm2 status'[0m
+[0;36mℹ  Cleaned up local deployment package[0m
