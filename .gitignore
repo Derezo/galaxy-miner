@@ -30,3 +30,8 @@ coverage/
 
 # OS
 Thumbs.db
+# lsd deploy logs (per-deploy timestamped output)
+logs/
+
+# Vitest cache (regenerated per test run)
+node_modules/.vite/
