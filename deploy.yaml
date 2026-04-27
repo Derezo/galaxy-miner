@@ -9,7 +9,7 @@ remote:
   user: galaxy-miner
   ssh_user: root
   app_dir: /var/www/galaxy-miner
-  releases_kept: 5
+  releases_kept: 2
 
 # No build step — galaxy-miner ships source verbatim. Optional pre-build
 # commands (tests) listed below. The plugin runs `npm ci --omit=dev` INSIDE
@@ -50,3 +50,5 @@ nginx:
   server_name: galaxyminer.mittonvillage.com
   vars:
     upstream: "127.0.0.1:3388"
+    websocket: "true"        # /socket.io/ with upgrade headers + 1h read timeout
+    api_rate_limit: "true"   # 100r/s default; matches legacy 50r/s zone closely enough
