@@ -51,4 +51,10 @@ nginx:
   vars:
     upstream: "127.0.0.1:3388"
     websocket: "true"        # /socket.io/ with upgrade headers + 1h read timeout
-    api_rate_limit: "true"   # 100r/s default; matches legacy 50r/s zone closely enough
+    # The game shell + API share one vhost. First page load over HTTP/2 fans
+    # out ~50 concurrent /js/* and /css/* requests, which busts the default
+    # burst=50 and trips 429s. Bump rate + burst so the static asset bundle
+    # always clears in one cycle. CrowdSec is the actual abuse defence.
+    api_rate_limit: "true"
+    api_rate:  "200r/s"
+    api_burst: "200"
