@@ -1,6 +1,6 @@
 # Dreamy Dynamic Starfield Implementation Plan
 
-> **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
+> **For Codex:** Follow this plan task by task. Verify each task before continuing and run the relevant tests after implementation.
 
 **Goal:** Replace the flickering static starfield with a dreamy, zone-aware background system featuring soft stars, dynamic color palettes, and activity-responsive nebula clouds.
 

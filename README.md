@@ -282,7 +282,7 @@ Current architecture supports:
 
 For questions about the codebase:
 1. Check the documentation in `/docs/`
-2. Review `CLAUDE.md` for quick reference
+2. Review [`AGENTS.md`](AGENTS.md) for repository guidance and quick reference
 3. Examine the relevant source code files
 4. Reach out to the development team
 

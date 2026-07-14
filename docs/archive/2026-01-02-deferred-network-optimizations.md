@@ -4,7 +4,7 @@
 
 These optimizations were identified during the Network Performance & Sync Improvements implementation but deferred due to complexity. They are lower priority since the core issues have been resolved.
 
-**Related Plan:** `/home/eric/.claude/plans/snuggly-sleeping-whistle.md`
+**Related Plan:** `snuggly-sleeping-whistle.md` was a user-level planning artifact and is not checked into this repository.
 
 ---
 

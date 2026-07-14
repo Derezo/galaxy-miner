@@ -5,7 +5,7 @@ Welcome to the Galaxy Miner technical documentation. This documentation provides
 ## Table of Contents
 
 ### Getting Started
-- [Project Overview](../CLAUDE.md) - Quick reference for developers
+- [Repository Guidance](../AGENTS.md) - Project conventions and quick reference for developers
 - [Architecture Overview](architecture/overview.md) - System architecture and design principles
 - [Game Loop](architecture/game-loop.md) - Client and server game loop architecture
 - [Deployment Guide](deployment.md) - Production setup and configuration
