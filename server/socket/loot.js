@@ -7,9 +7,38 @@
 
 const config = require('../config');
 const { statements, getSafeCredits } = require('../database');
-const engine = require('../game/engine');
+const fallbackLoot = require('../game/loot');
 const Constants = require('../../shared/constants');
 const logger = require('../../shared/logger');
+const { getRadarRange } = require('../../shared/utils');
+
+const COLLECTION_POLL_MS = 100;
+const MAX_WRECKAGE_ID_LENGTH = 128;
+
+function isValidWreckageId(value) {
+  return typeof value === 'string' && value.length > 0 &&
+    value.length <= MAX_WRECKAGE_ID_LENGTH;
+}
+
+function mergeLootResults(target, source) {
+  target.credits += Number(source?.credits) || 0;
+  for (const key of ['resources', 'components', 'relics', 'duplicateRelics', 'buffs', 'errors']) {
+    if (Array.isArray(source?.[key])) target[key].push(...source[key]);
+  }
+  return target;
+}
+
+function createEmptyLootResults() {
+  return {
+    credits: 0,
+    resources: [],
+    components: [],
+    relics: [],
+    duplicateRelics: [],
+    buffs: [],
+    errors: []
+  };
+}
 
 /**
  * Register loot socket event handlers
@@ -17,7 +46,8 @@ const logger = require('../../shared/logger');
  * @param {Object} deps - Shared dependencies
  */
 function register(socket, deps) {
-  const { io, getAuthenticatedUserId } = deps;
+  const { getAuthenticatedUserId } = deps;
+  const loot = deps.loot || fallbackLoot;
   const {
     connectedPlayers,
     trackInterval,
@@ -29,353 +59,415 @@ function register(socket, deps) {
     processCollectedLoot
   } = deps.state;
 
-  // Loot: Start collecting wreckage
-  socket.on('loot:startCollect', (data) => {
-    try {
-      const authenticatedUserId = getAuthenticatedUserId();
-      if (!authenticatedUserId) return;
+  let activeTimer = null;
+  let activeWreckageIds = [];
 
-      const player = connectedPlayers.get(socket.id);
-      if (!player) return;
+  function isPlayerUnavailable(player, playerId) {
+    return !player || player.isDead ||
+      Boolean(deps.wormhole?.isInTransit?.(playerId));
+  }
 
-      const { wreckageId } = data;
+  function clearCollectionTimer() {
+    if (!activeTimer) return;
+    clearInterval(activeTimer);
+    untrackInterval(socket.id, activeTimer);
+    activeTimer = null;
+  }
 
-      // Check if wreckage exists and is in range
-      const wreckage = engine.getWreckage(wreckageId);
-      if (!wreckage) {
-        socket.emit('loot:error', { message: 'Wreckage not found' });
-        return;
-      }
+  function clearCollectionState() {
+    clearCollectionTimer();
+    activeWreckageIds = [];
+  }
 
-      // Check range (use mining range, subtract wreckage size like mining does)
-      const dx = wreckage.position.x - player.position.x;
-      const dy = wreckage.position.y - player.position.y;
-      const dist = Math.sqrt(dx * dx + dy * dy);
-      const wreckageSize = wreckage.size || 20; // Standard wreckage size
-      const effectiveDistance = dist - wreckageSize;
-      const collectRange = config.MINING_RANGE || 100;
+  function broadcastCollectionStopped(player, playerId) {
+    if (!player) return;
+    broadcastToNearby(socket, player, 'loot:playerStopped', { playerId });
+  }
 
-      if (effectiveDistance > collectRange) {
-        socket.emit('loot:error', { message: 'Too far from wreckage' });
-        return;
-      }
-
-      // Start collection
-      const result = engine.startWreckageCollection(wreckageId, authenticatedUserId);
-
-      if (result && result.error) {
-        socket.emit('loot:error', { message: result.error });
-        return;
-      }
-
-      if (result && result.success) {
-        socket.emit('loot:started', {
-          wreckageId,
-          totalTime: result.totalTime
-        });
-
-        // Set player status to collecting
-        setPlayerStatus(authenticatedUserId, 'collecting');
-
-        // Broadcast collection start to nearby players
-        broadcastToNearby(socket, player, 'loot:playerCollecting', {
-          playerId: authenticatedUserId,
-          wreckageId,
-          x: wreckage.position.x,
-          y: wreckage.position.y
-        });
-
-        // Set up collection progress check
-        // Once collection starts, it continues regardless of movement (beam locks onto target)
-        const checkCollection = setInterval(() => {
-          const currentPlayer = connectedPlayers.get(socket.id);
-          if (!currentPlayer) {
-            clearInterval(checkCollection);
-            untrackInterval(socket.id, checkCollection);
-            engine.cancelWreckageCollection(wreckageId, authenticatedUserId);
-            return;
-          }
-
-          // Update collection progress
-          const progress = engine.updateWreckageCollection(wreckageId, authenticatedUserId, 100);
-
-          if (!progress) {
-            clearInterval(checkCollection);
-            untrackInterval(socket.id, checkCollection);
-            setPlayerStatus(authenticatedUserId, 'idle');
-            return;
-          }
-
-          if (progress.complete) {
-            clearInterval(checkCollection);
-            untrackInterval(socket.id, checkCollection);
-
-            // Distribute credits to team members who contributed damage
-            const teamCredits = distributeTeamCredits(
-              progress.creditReward,
-              progress.damageContributors,
-              authenticatedUserId
-            );
-
-            // Filter out credits from contents - they're handled via team distribution
-            const nonCreditContents = progress.contents.filter(item => item.type !== 'credits');
-
-            // Distribute resources to team based on rarity
-            // Common/Uncommon: Split equally
-            // Rare/Ultrarare: Collector only, team notified
-            const teamResources = distributeTeamResources(
-              nonCreditContents,
-              progress.damageContributors,
-              authenticatedUserId
-            );
-
-            // Process only the collector's portion of loot
-            const lootResults = processCollectedLoot(authenticatedUserId, teamResources.collectorLoot);
-            lootResults.credits = teamCredits.collectorCredits;
-
-            // Debug: log collection details
-            logger.log('[LOOT] Collection complete:', wreckageId,
-              'contents:', progress.contents.length,
-              'collectorLoot:', teamResources.collectorLoot.length,
-              'results:', JSON.stringify(lootResults));
-
-            socket.emit('loot:complete', {
-              wreckageId,
-              contents: progress.contents,
-              results: lootResults,
-              teamCredits: teamCredits.total
-            });
-
-            // Update inventory and credits
-            const inventory = statements.getInventory.all(authenticatedUserId);
-            const ship = statements.getShipByUserId.get(authenticatedUserId);
-            socket.emit('inventory:update', {
-              inventory,
-              credits: getSafeCredits(ship)
-            });
-
-            // Clear player status
-            setPlayerStatus(authenticatedUserId, 'idle');
-
-            // Broadcast wreckage collected to nearby players
-            broadcastToNearby(socket, currentPlayer, 'loot:playerStopped', {
-              playerId: authenticatedUserId
-            });
-            broadcastToNearby(socket, currentPlayer, 'wreckage:collected', {
-              wreckageId,
-              collectedBy: authenticatedUserId
-            });
-          } else {
-            // Send progress update
-            socket.emit('loot:progress', {
-              wreckageId,
-              progress: progress.progress
-            });
-          }
-        }, 100);
-        // Track interval for cleanup on disconnect
-        trackInterval(socket.id, checkCollection);
-      }
-    } catch (err) {
-      logger.error(`[HANDLER] loot:startCollect error:`, err);
+  function cancelActiveCollection(reason, shouldEmit = true) {
+    const playerId = getAuthenticatedUserId();
+    const player = connectedPlayers.get(socket.id);
+    clearCollectionState();
+    if (playerId) {
+      loot.cancelCollectionsForPlayer(playerId);
+      setPlayerStatus(playerId, 'idle');
+      broadcastCollectionStopped(player, playerId);
     }
-  });
+    if (shouldEmit) socket.emit('loot:cancelled', { reason });
+  }
 
-  // Loot: Cancel collection
-  socket.on('loot:cancelCollect', (data) => {
-    const authenticatedUserId = getAuthenticatedUserId();
-    if (!authenticatedUserId) return;
+  function startPolling(callback) {
+    activeTimer = setInterval(() => {
+      try {
+        callback();
+      } catch (error) {
+        logger.error('[LOOT] Collection poll failed:', error);
+        cancelActiveCollection('Collection interrupted');
+      }
+    }, COLLECTION_POLL_MS);
+    trackInterval(socket.id, activeTimer);
+  }
+
+  function emitInventoryUpdate(playerId) {
+    const inventory = statements.getInventory.all(playerId);
+    const ship = statements.getShipByUserId.get(playerId);
+    socket.emit('inventory:update', {
+      inventory,
+      credits: getSafeCredits(ship)
+    });
+  }
+
+  function buildWreckageData(wreckage) {
+    return {
+      id: wreckage.id,
+      x: wreckage.position.x,
+      y: wreckage.position.y,
+      size: wreckage.size,
+      source: wreckage.source,
+      faction: wreckage.faction,
+      npcType: wreckage.npcType,
+      npcName: wreckage.npcName,
+      contentCount: (wreckage.contents?.length || 0) +
+        (wreckage.pendingCredits?.length || 0),
+      despawnTime: wreckage.despawnTime
+    };
+  }
+
+  /**
+   * Persist one wreckage independently. This is intentionally called once per
+   * Scrap Siphon target: merging contributor maps before applying team bonuses
+   * would inflate rewards from unrelated kills.
+   */
+  function settleWreckage(wreckageId, progress, collectorId) {
+    const teamCredits = distributeTeamCredits(
+      progress.pendingCredits?.length > 0 ? 0 : progress.creditReward,
+      progress.damageContributors,
+      collectorId,
+      progress.pendingCredits
+    );
+
+    const nonCreditContents = progress.contents.filter(item => item?.type !== 'credits');
+    const teamResources = distributeTeamResources(
+      nonCreditContents,
+      progress.damageContributors,
+      collectorId
+    );
+    const lootResults = processCollectedLoot(collectorId, teamResources.collectorLoot);
+    lootResults.credits = teamCredits.collectorCredits;
+
+    const remainingContents = [
+      ...(teamResources.remainingLoot || []),
+      ...(lootResults.remainingLoot || [])
+    ];
+    // remainingLoot is server settlement metadata, not a reward-display field.
+    delete lootResults.remainingLoot;
+
+    const finalization = loot.finalizeCollection(wreckageId, collectorId, {
+      remainingContents,
+      pendingCredits: teamCredits.pendingCredits || []
+    });
+    if (!finalization?.success) {
+      throw new Error(finalization?.error || 'Unable to finalize wreckage collection');
+    }
+
+    return {
+      contents: progress.contents,
+      results: lootResults,
+      teamCredits,
+      removed: finalization.removed,
+      remaining: finalization.remaining
+    };
+  }
+
+  function emitRemainingWreckage(wreckage, player) {
+    if (!wreckage || !player) return;
+    const data = buildWreckageData(wreckage);
+    socket.emit('wreckage:spawn', data);
+    broadcastToNearby(socket, player, 'wreckage:spawn', data);
+  }
+
+  function notifyScavengersOfCollection(player, playerId, knownScrapSiphon = null) {
+    if (!player?.position || typeof deps.npc?.notifyWreckageCollectedNearby !== 'function') {
+      return null;
+    }
+
+    try {
+      const hasScrapSiphon = knownScrapSiphon === null
+        ? Boolean(statements.hasRelic.get(playerId, 'SCRAP_SIPHON'))
+        : knownScrapSiphon === true;
+      const notification = deps.npc.notifyWreckageCollectedNearby(
+        playerId,
+        player.position,
+        hasScrapSiphon
+      );
+      if (!notification?.action || !notification.npc?.position) return notification;
+
+      const { npc, action } = notification;
+      deps.broadcasts?.emitNear(npc.position, 'scavenger:rage', {
+        npcId: action.npcId,
+        targetId: action.targetId,
+        reason: action.reason,
+        rageRange: action.rageRange,
+        x: npc.position.x,
+        y: npc.position.y
+      }, Number(npc.size) || 0);
+      return notification;
+    } catch (error) {
+      // Collection settlement is already durable; an AI notification failure
+      // must not turn a successful claim into a client-visible loot failure.
+      logger.error('[LOOT] Unable to notify nearby scavengers:', error);
+      return null;
+    }
+  }
+
+  socket.on('loot:startCollect', (data) => {
+    const playerId = getAuthenticatedUserId();
+    if (!playerId) return;
 
     const player = connectedPlayers.get(socket.id);
-    if (!player) return;
+    if (isPlayerUnavailable(player, playerId)) {
+      socket.emit('loot:error', { message: 'Cannot collect wreckage right now' });
+      return;
+    }
+    if (!data || !isValidWreckageId(data.wreckageId)) {
+      socket.emit('loot:error', { message: 'Invalid wreckage ID' });
+      return;
+    }
 
-    engine.cancelWreckageCollection(data.wreckageId, authenticatedUserId);
-    socket.emit('loot:cancelled', { reason: 'Cancelled by player' });
-    setPlayerStatus(authenticatedUserId, 'idle');
-    broadcastToNearby(socket, player, 'loot:playerStopped', {
-      playerId: authenticatedUserId
+    const { wreckageId } = data;
+    const wreckage = loot.getWreckage(wreckageId);
+    if (!wreckage) {
+      socket.emit('loot:error', { message: 'Wreckage not found' });
+      return;
+    }
+
+    const dx = Number(wreckage.position?.x) - Number(player.position?.x);
+    const dy = Number(wreckage.position?.y) - Number(player.position?.y);
+    const distance = Math.hypot(dx, dy);
+    const wreckageSize = Number(wreckage.size) || 20;
+    const effectiveDistance = distance - wreckageSize;
+    const collectRange = Number(config.MINING_RANGE) || 100;
+
+    if (!Number.isFinite(effectiveDistance) || effectiveDistance > collectRange) {
+      socket.emit('loot:error', { message: 'Too far from wreckage' });
+      return;
+    }
+
+    const start = loot.startCollection(wreckageId, playerId);
+    if (!start?.success) {
+      socket.emit('loot:error', { message: start?.error || 'Unable to collect wreckage' });
+      return;
+    }
+
+    activeWreckageIds = [wreckageId];
+    socket.emit('loot:started', { wreckageId, totalTime: start.totalTime });
+    setPlayerStatus(playerId, 'collecting');
+    broadcastToNearby(socket, player, 'loot:playerCollecting', {
+      playerId,
+      wreckageId,
+      x: wreckage.position.x,
+      y: wreckage.position.y
+    });
+
+    startPolling(() => {
+      const currentPlayer = connectedPlayers.get(socket.id);
+      if (isPlayerUnavailable(currentPlayer, playerId)) {
+        cancelActiveCollection('Collection interrupted', Boolean(currentPlayer));
+        return;
+      }
+
+      const progress = loot.updateCollection(wreckageId, playerId);
+      if (!progress) {
+        cancelActiveCollection('Collection is no longer active');
+        return;
+      }
+      if (!progress.complete) {
+        socket.emit('loot:progress', { wreckageId, progress: progress.progress });
+        return;
+      }
+
+      clearCollectionState();
+      const settlement = settleWreckage(wreckageId, progress, playerId);
+      setPlayerStatus(playerId, 'idle');
+      broadcastCollectionStopped(currentPlayer, playerId);
+      notifyScavengersOfCollection(currentPlayer, playerId);
+
+      socket.emit('loot:complete', {
+        wreckageId,
+        contents: settlement.contents,
+        results: settlement.results,
+        teamCredits: settlement.teamCredits.total,
+        cargoLimited: settlement.remaining
+      });
+      emitInventoryUpdate(playerId);
+
+      if (settlement.removed) {
+        broadcastToNearby(socket, currentPlayer, 'wreckage:collected', {
+          wreckageId,
+          collectedBy: playerId
+        });
+      } else {
+        emitRemainingWreckage(loot.getWreckage(wreckageId), currentPlayer);
+      }
     });
   });
 
-  // Loot: Get nearby wreckage
+  socket.on('loot:cancelCollect', (data) => {
+    const playerId = getAuthenticatedUserId();
+    if (!playerId) return;
+    if (!data || !isValidWreckageId(data.wreckageId)) {
+      socket.emit('loot:error', { message: 'Invalid wreckage ID' });
+      return;
+    }
+    if (!activeWreckageIds.includes(data.wreckageId)) {
+      socket.emit('loot:error', { message: 'No matching collection is active' });
+      return;
+    }
+
+    cancelActiveCollection('Cancelled by player');
+  });
+
   socket.on('loot:getNearby', () => {
-    const authenticatedUserId = getAuthenticatedUserId();
-    if (!authenticatedUserId) return;
+    const playerId = getAuthenticatedUserId();
+    if (!playerId) return;
 
     const player = connectedPlayers.get(socket.id);
-    if (!player) return;
+    if (!player?.position) return;
 
-    const radarRange = config.BASE_RADAR_RANGE * Math.pow(config.TIER_MULTIPLIER, player.radarTier - 1);
-    const nearby = engine.getWreckageInRange(player.position, radarRange);
+    const radarTier = Math.max(1, Math.floor(Number(player.radarTier) || 1));
+    const radarRange = getRadarRange(radarTier);
+    const nearby = loot.getWreckageInRange(player.position, radarRange);
 
     socket.emit('loot:nearby', {
-      wreckage: nearby.map(w => ({
-        id: w.id,
-        x: w.position.x,
-        y: w.position.y,
-        faction: w.faction,
-        npcName: w.npcName,
-        contentCount: w.contents.length,
-        distance: w.distance,
-        despawnTime: w.despawnTime
+      wreckage: nearby.map(wreckage => ({
+        id: wreckage.id,
+        x: wreckage.position.x,
+        y: wreckage.position.y,
+        faction: wreckage.faction,
+        npcName: wreckage.npcName,
+        contentCount: (wreckage.contents?.length || 0) +
+          (wreckage.pendingCredits?.length || 0),
+        distance: wreckage.distance,
+        despawnTime: wreckage.despawnTime
       }))
     });
   });
 
-  // Loot: Multi-collect wreckage with Scrap Siphon relic (M key)
   socket.on('wreckage:multiCollect', () => {
-    try {
-      const authenticatedUserId = getAuthenticatedUserId();
-      if (!authenticatedUserId) return;
+    const playerId = getAuthenticatedUserId();
+    if (!playerId) return;
 
-      const player = connectedPlayers.get(socket.id);
-      if (!player) return;
-
-      // Check if player has the Scrap Siphon relic
-      const hasScrapSiphon = statements.hasRelic.get(authenticatedUserId, 'SCRAP_SIPHON');
-      if (!hasScrapSiphon) {
-        socket.emit('loot:error', { message: 'You need the Scrap Siphon relic to use multi-collect' });
-        return;
-      }
-
-      // Get Scrap Siphon effect values
-      const siphonEffects = Constants.RELIC_TYPES.SCRAP_SIPHON.effects;
-      const multiCount = siphonEffects.multiWreckageCount || 3;
-      const multiRange = siphonEffects.multiWreckageRange || 300;
-      const collectSpeed = siphonEffects.wreckageCollectionSpeed || 0.5;
-
-      // Find nearest wreckage within multi-collect range
-      // Exclude derelict salvage - it must be collected manually with tractor beam
-      const allNearbyWreckage = engine.getWreckageInRange(player.position, multiRange);
-      const nearbyWreckage = allNearbyWreckage.filter(w => w.source !== 'derelict');
-
-      if (nearbyWreckage.length === 0) {
-        socket.emit('loot:error', { message: 'No wreckage within range' });
-        return;
-      }
-
-      // Sort by distance and take up to multiCount
-      nearbyWreckage.sort((a, b) => a.distance - b.distance);
-      const toCollect = nearbyWreckage.slice(0, multiCount);
-
-      // Check none are being collected by others
-      for (const w of toCollect) {
-        if (w.beingCollectedBy && w.beingCollectedBy !== authenticatedUserId) {
-          socket.emit('loot:error', { message: 'Some wreckage is being collected by another player' });
-          return;
-        }
-      }
-
-      // Mark all as being collected
-      const wreckageIds = toCollect.map(w => w.id);
-      for (const w of toCollect) {
-        engine.startWreckageCollection(w.id, authenticatedUserId);
-      }
-
-      logger.category('relics', 'Siphon multi-collect started:', wreckageIds, 'totalTime:', collectSpeed * 1000);
-      socket.emit('loot:multiStarted', {
-        wreckageIds,
-        totalTime: collectSpeed * 1000
-      });
-
-      setPlayerStatus(authenticatedUserId, 'collecting');
-
-      // Broadcast multi-collection start
-      broadcastToNearby(socket, player, 'loot:playerMultiCollecting', {
-        playerId: authenticatedUserId,
-        wreckageIds
-      });
-
-      // Single timer for the fast collection
-      const multiCollectTimeout = setTimeout(() => {
-        const currentPlayer = connectedPlayers.get(socket.id);
-        if (!currentPlayer) {
-          for (const wId of wreckageIds) {
-            engine.cancelWreckageCollection(wId, authenticatedUserId);
-          }
-          return;
-        }
-
-        // Collect all wreckage and merge rewards
-        const allContents = [];
-        let totalCredits = 0;
-        const allDamageContributors = {};
-
-        for (const wId of wreckageIds) {
-          const wreckage = engine.getWreckage(wId);
-          if (wreckage) {
-            allContents.push(...wreckage.contents);
-            totalCredits += wreckage.creditReward || 0;
-
-            // Merge damage contributors
-            if (wreckage.damageContributors) {
-              for (const [pid, dmg] of Object.entries(wreckage.damageContributors)) {
-                allDamageContributors[pid] = (allDamageContributors[pid] || 0) + dmg;
-              }
-            }
-
-            // Remove wreckage
-            engine.removeWreckage(wId);
-          }
-        }
-
-        // Distribute credits (merged)
-        const teamCredits = distributeTeamCredits(
-          totalCredits,
-          Object.keys(allDamageContributors).length > 0 ? allDamageContributors : null,
-          authenticatedUserId
-        );
-
-        // Filter out credits
-        const nonCreditContents = allContents.filter(item => item.type !== 'credits');
-
-        // Distribute resources
-        const teamResources = distributeTeamResources(
-          nonCreditContents,
-          Object.keys(allDamageContributors).length > 0 ? allDamageContributors : null,
-          authenticatedUserId
-        );
-
-        // Process collector's loot
-        const lootResults = processCollectedLoot(authenticatedUserId, teamResources.collectorLoot);
-        lootResults.credits = teamCredits.collectorCredits;
-
-        socket.emit('loot:multiComplete', {
-          wreckageIds,
-          contents: allContents,
-          results: lootResults,
-          teamCredits: teamCredits.total
-        });
-
-        // Update inventory
-        const inventory = statements.getInventory.all(authenticatedUserId);
-        const ship = statements.getShipByUserId.get(authenticatedUserId);
-        socket.emit('inventory:update', {
-          inventory,
-          credits: getSafeCredits(ship)
-        });
-
-        setPlayerStatus(authenticatedUserId, 'idle');
-
-        // Broadcast collection complete
-        broadcastToNearby(socket, currentPlayer, 'loot:playerStopped', {
-          playerId: authenticatedUserId
-        });
-        for (const wId of wreckageIds) {
-          broadcastToNearby(socket, currentPlayer, 'wreckage:collected', {
-            wreckageId: wId,
-            collectedBy: authenticatedUserId
-          });
-        }
-
-        // Scrap Siphon provides rage immunity, so we skip rage check here
-      }, collectSpeed * 1000);
-
-      trackInterval(socket.id, multiCollectTimeout);
-    } catch (err) {
-      logger.error(`[HANDLER] wreckage:multiCollect error:`, err);
+    const player = connectedPlayers.get(socket.id);
+    if (isPlayerUnavailable(player, playerId)) {
+      socket.emit('loot:error', { message: 'Cannot collect wreckage right now' });
+      return;
     }
+
+    const hasScrapSiphon = statements.hasRelic.get(playerId, 'SCRAP_SIPHON');
+    if (!hasScrapSiphon) {
+      socket.emit('loot:error', { message: 'You need the Scrap Siphon relic to use multi-collect' });
+      return;
+    }
+
+    const effects = Constants.RELIC_TYPES.SCRAP_SIPHON.effects;
+    const multiCount = Math.max(1, Math.floor(Number(effects.multiWreckageCount) || 1));
+    const multiRange = Math.max(1, Number(effects.multiWreckageRange) || 1);
+    const durationMultiplier = Number(effects.wreckageCollectionSpeed);
+
+    // Select only currently unlocked, non-derelict targets. The game layer then
+    // atomically revalidates and reserves this explicitly bounded set.
+    const toCollect = loot.getWreckageInRange(player.position, multiRange)
+      .filter(wreckage => wreckage.source !== 'derelict' && !wreckage.beingCollectedBy)
+      .sort((a, b) => a.distance - b.distance)
+      .slice(0, multiCount);
+
+    if (toCollect.length === 0) {
+      socket.emit('loot:error', { message: 'No wreckage within range' });
+      return;
+    }
+
+    const start = loot.startMultiCollection(
+      toCollect.map(wreckage => wreckage.id),
+      playerId,
+      { maxCount: multiCount, durationMultiplier }
+    );
+    if (!start?.success) {
+      socket.emit('loot:error', { message: start?.error || 'Unable to collect wreckage' });
+      return;
+    }
+
+    activeWreckageIds = start.wreckageIds;
+    socket.emit('loot:multiStarted', {
+      wreckageIds: start.wreckageIds,
+      totalTime: start.totalTime
+    });
+    setPlayerStatus(playerId, 'collecting');
+    broadcastToNearby(socket, player, 'loot:playerMultiCollecting', {
+      playerId,
+      wreckageIds: start.wreckageIds
+    });
+
+    startPolling(() => {
+      const currentPlayer = connectedPlayers.get(socket.id);
+      if (isPlayerUnavailable(currentPlayer, playerId)) {
+        cancelActiveCollection('Collection interrupted', Boolean(currentPlayer));
+        return;
+      }
+
+      const progressEntries = start.wreckageIds.map(wreckageId => ({
+        wreckageId,
+        progress: loot.updateCollection(wreckageId, playerId)
+      }));
+      if (progressEntries.some(entry => !entry.progress)) {
+        cancelActiveCollection('Collection is no longer active');
+        return;
+      }
+      if (progressEntries.some(entry => !entry.progress.complete)) return;
+
+      clearCollectionState();
+      const aggregateResults = createEmptyLootResults();
+      const allContents = [];
+      const removedIds = [];
+      const remainingIds = [];
+      let totalTeamCredits = 0;
+
+      // Settle each wreckage with its own contributor map and multiplier.
+      for (const entry of progressEntries) {
+        const settlement = settleWreckage(entry.wreckageId, entry.progress, playerId);
+        allContents.push(...settlement.contents);
+        mergeLootResults(aggregateResults, settlement.results);
+        totalTeamCredits += settlement.teamCredits.total;
+        if (settlement.removed) removedIds.push(entry.wreckageId);
+        else remainingIds.push(entry.wreckageId);
+      }
+
+      setPlayerStatus(playerId, 'idle');
+      broadcastCollectionStopped(currentPlayer, playerId);
+      notifyScavengersOfCollection(currentPlayer, playerId, true);
+      socket.emit('loot:multiComplete', {
+        // Only fully consumed wreckage should be removed by the client. The
+        // attempted IDs let clients clear every siphon animation.
+        wreckageIds: removedIds,
+        attemptedWreckageIds: start.wreckageIds,
+        remainingWreckageIds: remainingIds,
+        contents: allContents,
+        results: aggregateResults,
+        teamCredits: totalTeamCredits,
+        cargoLimited: remainingIds.length > 0
+      });
+      emitInventoryUpdate(playerId);
+
+      for (const wreckageId of removedIds) {
+        broadcastToNearby(socket, currentPlayer, 'wreckage:collected', {
+          wreckageId,
+          collectedBy: playerId
+        });
+      }
+      for (const wreckageId of remainingIds) {
+        emitRemainingWreckage(loot.getWreckage(wreckageId), currentPlayer);
+      }
+    });
   });
 }
 
-module.exports = { register };
+module.exports = { register, isValidWreckageId };

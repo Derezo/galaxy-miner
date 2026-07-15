@@ -1295,7 +1295,7 @@ const NPCWeaponEffects = {
       // Scavenger weapons by role
       scavenger_scrapper: 'dual_laser',
       scavenger_salvager: 'dual_laser',
-      scavenger_barge: 'jury_laser',
+      scavenger_collector: 'jury_laser',
       scavenger_barnacle_king: 'boring_drill',
       scavenger_hauler: 'jury_laser',
       // Swarm weapons
@@ -1303,9 +1303,10 @@ const NPCWeaponEffects = {
       swarm_warrior: 'dark_energy',
       swarm_queen: 'web_snare',
       // Void weapons
-      void_entity: 'dark_beam',
-      void_sentinel: 'dark_beam',
-      void_harbinger: 'dark_beam',
+      void_whisper: 'dark_beam',
+      void_shadow: 'dark_beam',
+      void_phantom: 'dark_beam',
+      void_leviathan: 'dark_beam',
       // Rogue miner weapons (actual NPC type names)
       rogue_prospector: 'mining_laser',
       rogue_driller: 'mining_laser',

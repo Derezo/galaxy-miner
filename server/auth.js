@@ -4,6 +4,7 @@ const { db, statements, createUserWithShip } = require('./database');
 const config = require('./config');
 const world = require('./world');
 const logger = require('../shared/logger');
+const { reconcileShipDurability } = require('./game/ship-durability');
 
 // In-memory session store (for MVP - could use Redis later)
 const sessions = new Map();
@@ -150,26 +151,23 @@ function getPlayerData(userId) {
   const ship = statements.getShipByUserId.get(userId);
   const inventory = statements.getInventory.all(userId);
   const relics = statements.getRelics.all(userId);
+  const activeBuffs = statements.getActiveBuffs?.all(userId, Date.now()) || [];
 
-  // Recalculate shield_max and hull_max based on tier (self-healing for older accounts)
-  const shieldTier = ship.shield_tier || 1;
-  const hullTier = ship.hull_tier || 1;
-  const shieldMultiplier = config.SHIELD_TIER_MULTIPLIER || 2.0;
-  const hullMultiplier = config.TIER_MULTIPLIER || 1.5;
-
-  const expectedShieldMax = Math.round(config.DEFAULT_SHIELD_HP * Math.pow(shieldMultiplier, shieldTier - 1));
-  const expectedHullMax = Math.round(config.DEFAULT_HULL_HP * Math.pow(hullMultiplier, hullTier - 1));
-
-  let shieldMax = ship.shield_max;
-  let hullMax = ship.hull_max;
-
-  // Update database if max values are incorrect
-  if (shieldMax !== expectedShieldMax || hullMax !== expectedHullMax) {
-    shieldMax = expectedShieldMax;
-    hullMax = expectedHullMax;
-    // Update the database with corrected values
-    db.prepare('UPDATE ships SET shield_max = ?, hull_max = ? WHERE user_id = ?')
-      .run(shieldMax, hullMax, userId);
+  // Self-heal accounts created under older durability balance values while
+  // preserving their current damage percentage.
+  const durability = reconcileShipDurability(ship, config);
+  if (durability.changed) {
+    db.prepare(`
+      UPDATE ships
+      SET shield_hp = ?, shield_max = ?, hull_hp = ?, hull_max = ?
+      WHERE user_id = ?
+    `).run(
+      durability.shieldHp,
+      durability.shieldMax,
+      durability.hullHp,
+      durability.hullMax,
+      userId
+    );
   }
 
   return {
@@ -180,24 +178,25 @@ function getPlayerData(userId) {
     rotation: ship.rotation,
     velocity_x: ship.velocity_x,
     velocity_y: ship.velocity_y,
-    hull_hp: ship.hull_hp,
-    hull_max: hullMax,
-    shield_hp: ship.shield_hp,
-    shield_max: shieldMax,
+    hull_hp: durability.hullHp,
+    hull_max: durability.hullMax,
+    shield_hp: durability.shieldHp,
+    shield_max: durability.shieldMax,
     credits: ship.credits,
     engine_tier: ship.engine_tier,
     weapon_type: ship.weapon_type,
     weapon_tier: ship.weapon_tier,
-    shield_tier: shieldTier,
+    shield_tier: durability.shieldTier,
     mining_tier: ship.mining_tier,
     cargo_tier: ship.cargo_tier,
     radar_tier: ship.radar_tier,
     energy_core_tier: ship.energy_core_tier || 1,
-    hull_tier: hullTier,
+    hull_tier: durability.hullTier,
     ship_color_id: ship.ship_color_id || 'green',
     profile_id: ship.profile_id || 'pilot',
     inventory,
-    relics
+    relics,
+    active_buffs: activeBuffs
   };
 }
 

@@ -21,6 +21,23 @@ class SwarmStrategy {
    * Main update for swarm behavior
    */
   update(npc, nearbyPlayers, nearbyAllies, deltaTime, context) {
+    // Assimilation worms remain targetable entities on the converted base,
+    // but they no longer patrol, acquire targets, or fire. The engine anchors
+    // them to the base and derives only that base's authoritative motion.
+    if (npc.attachedToBase) {
+      npc.state = 'attached';
+      npc.targetPlayer = null;
+      npc.targetNPC = null;
+      npc.velocity = npc.velocity || { x: 0, y: 0 };
+      npc.velocity.x = 0;
+      npc.velocity.y = 0;
+      npc.vx = 0;
+      npc.vy = 0;
+      npc._vx = 0;
+      npc._vy = 0;
+      return null;
+    }
+
     // Route Swarm Queen to phase-based boss AI
     if (npc.type === 'swarm_queen') {
       return this.updateQueenAI(npc, nearbyPlayers, nearbyAllies, deltaTime, context);
@@ -381,8 +398,13 @@ class SwarmStrategy {
       const pDy = interceptTarget.position.y - queenY;
       const pDist = Math.sqrt(pDx * pDx + pDy * pDy);
       // Position ourselves between player and queen, closer to player
-      targetX = queenX + (pDx / pDist) * (pDist * 0.7);
-      targetY = queenY + (pDy / pDist) * (pDist * 0.7);
+      if (pDist > 0) {
+        targetX = queenX + (pDx / pDist) * (pDist * 0.7);
+        targetY = queenY + (pDy / pDist) * (pDist * 0.7);
+      } else {
+        targetX = queenX;
+        targetY = queenY;
+      }
       npc.isIntercepting = true;
     } else {
       targetX = orbitX;
@@ -448,6 +470,7 @@ class SwarmStrategy {
     if (!queen) return false;
     if (queen.hull <= 0) return false; // Don't guard dead queen
     if (npc.type === 'swarm_queen') return false; // Queen doesn't guard herself
+    if (npc.attachedToBase) return false; // Assimilation worms never leave their base
 
     // Normalize queen position (handle both queen.position.x and queen.x formats)
     const queenX = queen.position?.x ?? queen.x;
@@ -634,7 +657,7 @@ class SwarmStrategy {
       const dist = Math.sqrt(dx * dx + dy * dy);
 
       // Move away from threat, stay near guards
-      if (dist < 400) {
+      if (dist > 0 && dist < 400) {
         const effectiveSpeed = queen.speed * modifiers.speedMultiplier;
         const moveSpeed = effectiveSpeed * (deltaTime / 1000);
         queen.position.x += (dx / dist) * moveSpeed;
@@ -682,10 +705,13 @@ class SwarmStrategy {
     const dy = target.position.y - queenY;
     const dist = Math.sqrt(dx * dx + dy * dy);
 
-    // Always chase, never stop
-    const moveSpeed = effectiveSpeed * (deltaTime / 1000);
-    queen.position.x += (dx / dist) * moveSpeed;
-    queen.position.y += (dy / dist) * moveSpeed;
+    // Always chase, never stop. A player can occupy the exact same point for
+    // one tick, in which case there is no direction vector to normalize.
+    if (dist > 0) {
+      const moveSpeed = effectiveSpeed * (deltaTime / 1000);
+      queen.position.x += (dx / dist) * moveSpeed;
+      queen.position.y += (dy / dist) * moveSpeed;
+    }
 
     queen.rotation = Math.atan2(dy, dx);
 

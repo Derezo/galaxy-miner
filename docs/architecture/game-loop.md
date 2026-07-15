@@ -1,29 +1,31 @@
 # Game Loop Architecture
 
-This document details the dual game loop system in Galaxy Miner: the server-authoritative game loop running at 20 ticks per second and the client render loop running at 60 FPS.
+This document details Galaxy Miner's server-authoritative 20-tick target cadence,
+fixed 60Hz client simulation, and independently configurable presentation rate.
 
 ## Overview
 
 Galaxy Miner uses a **client-server architecture** with separate game loops:
 
 ```
-SERVER LOOP (20 tps)          CLIENT LOOP (60 FPS)
-┌─────────────────┐          ┌─────────────────┐
-│  Game Tick      │          │  Render Frame   │
-│  (50ms fixed)   │ ◄─────► │  (16.67ms var)  │
-│                 │  Events  │                 │
-│ - AI Updates    │          │ - Local Input   │
-│ - Physics       │          │ - Prediction    │
-│ - Combat        │          │ - Interpolation │
-│ - Mining        │          │ - Rendering     │
-└─────────────────┘          └─────────────────┘
+SERVER (20 tps target)        CLIENT
+┌─────────────────┐          ┌────────────────────────┐
+│  Measured tick  │          │  60Hz fixed simulation │
+│  (~50ms cadence)│ ◄─────► │  Configurable render   │
+│                 │  Events  │                        │
+│ - AI / Physics  │          │ - Input / Prediction   │
+│ - Combat        │          │ - Interpolation        │
+│ - Mining        │          │ - Rendering / HUD      │
+└─────────────────┘          └────────────────────────┘
 ```
 
 ## Server Game Loop
 
 **Location:** `/server/game/engine.js`
 
-The server game loop is the authoritative source of truth, running at a fixed **20 ticks per second** (50ms per tick).
+The server game loop is the authoritative source of truth. It targets **20 ticks
+per second** (50ms cadence) and supplies measured elapsed time to time-based
+systems.
 
 ### Engine Initialization
 
@@ -147,16 +149,19 @@ updateBases() {
       if (nearbyPlayers.length > 0 && !base.active) {
         // Activate base - start spawning NPCs
         this.activateBase(base);
-      } else if (nearbyPlayers.length === 0 && base.active) {
-        // Deactivate base - cleanup NPCs
-        this.deactivateBase(base);
+      } else if (base.active && base.lastNearbyAt < now - 60000) {
+        // Unload NPCs while preserving authoritative base/economy state.
+        this.moveBaseToDormantState(base);
       }
     }
   }
 }
 ```
 
-**Optimization:** Bases only spawn NPCs when players are in the sector, reducing unnecessary AI processing.
+**Optimization:** Living-player lookups use the player spatial hash. Bases only
+spawn NPCs while relevant; after a 60-second grace period, inactive bases move
+to state-preserving dormant snapshots so explored factions do not accumulate
+per-tick AI work.
 
 #### 3. NPC Updates (`updateNPCs`)
 
@@ -167,7 +172,8 @@ updateNPCs(deltaTime) {
   const allPlayers = Array.from(connectedPlayers.values());
 
   for (const [npcId, npc] of activeNPCs) {
-    // Get players in aggro range
+    // Get players in aggro range. Explicit faction retaliation/raid contracts
+    // may retain one living target up to their own bounded clear range.
     const nearbyPlayers = this.getPlayersNearNPC(npc);
 
     // Get allies for formation/swarm behaviors
@@ -200,9 +206,15 @@ updateNPCs(deltaTime) {
 ```
 
 **Performance Notes:**
-- Only NPCs near players are active
-- Proximity-based broadcasting reduces network traffic
-- AI strategies are stateless (no shared mutable state)
+- NPCs remain simulated throughout every legitimate delivery/engagement range.
+- Proximity-based, delta-compressed batches reduce network traffic.
+- Each update carries the server-derived canonical velocity used by client dead
+  reckoning and NPC hit prediction.
+- Fire actions resolve either a live player or a live NPC target. NPC sources
+  provoke faction reactions but never become player reward contributors.
+- Visibility reconciliation filters queued updates against the live registry;
+  dead observers and entities that leave range receive silent retirement so an
+  older delta cannot recreate a prediction ghost.
 
 #### 4. Mining Progress (`updateMiningProgress`)
 
@@ -311,75 +323,87 @@ broadcastPositions() {
 }
 ```
 
-**Proximity Range:** 2× radar range (500-5062 units based on radar tier)
+**Proximity Range:** 2× radar range (1,000–5,062 units based on radar tier)
 
 ## Client Game Loop
 
 **Location:** `/client/js/game.js`
 
-The client runs at **60 FPS** using `requestAnimationFrame` for smooth rendering and local prediction.
+The client uses `requestAnimationFrame` for presentation, but simulation runs at a
+fixed **60 updates per second**. Rendering is independently capped by the selected
+graphics setting.
 
 ### Client Loop Initialization
 
 ```javascript
-class Game {
-  constructor() {
-    this.lastFrameTime = performance.now();
-    this.isRunning = false;
-  }
-
-  start() {
-    this.isRunning = true;
-    this.lastFrameTime = performance.now();
-    this.loop();
-  }
+const Game = {
+  SIMULATION_HZ: 60,
+  MAX_CATCH_UP_STEPS: 5,
 
   loop() {
-    if (!this.isRunning) return;
-
     const now = performance.now();
-    const deltaTime = now - this.lastFrameTime;
-    this.lastFrameTime = now;
+    const elapsed = now - this.lastTime;
+    this.lastTime = now;
+    const stepMs = 1000 / this.SIMULATION_HZ;
 
-    // Update game state
-    this.update(deltaTime);
+    // Bound accumulated work after a stalled frame.
+    this._simulationAccumulator = Math.min(
+      this._simulationAccumulator + elapsed,
+      stepMs * this.MAX_CATCH_UP_STEPS
+    );
+    this._renderAccumulator += elapsed;
+    while (this._simulationAccumulator >= stepMs) {
+      this.update(1 / this.SIMULATION_HZ);
+      this._simulationAccumulator -= stepMs;
+    }
 
-    // Render frame
-    this.render();
+    // Presentation has a separate accumulator and target frame rate.
+    if (this._renderAccumulator >= 1000 / GraphicsSettings.getTargetFPS()) {
+      this.render();
+    }
 
-    // Next frame
-    requestAnimationFrame(() => this.loop());
+    requestAnimationFrame(this._boundLoop);
   }
 }
 ```
+
+Visibility changes reset both accumulators. Hidden tabs do no simulation or
+render work, so returning to the game cannot create a large catch-up burst.
 
 ### Client Update Pipeline
 
 ```javascript
 update(deltaTime) {
-  // 1. Input Processing
-  Input.update();
+  // One reusable procedural snapshot covers every frame consumer.
+  const objects = World.getVisibleObjects(
+    Player.position,
+    getWorldQueryDistance()
+  );
 
-  // 2. Local Player Prediction
-  Player.update(deltaTime);
+  // 1. Local input and prediction
+  Player.update(deltaTime, objects);
 
-  // 3. Remote Entity Interpolation
+  // 2. Optional mobile auto-fire
+  AutoFire.update(deltaTime);
+
+  // 3. Remote interpolation
   Entities.update(deltaTime);
 
   // 4. World Sector Loading
   World.update(Player.position);
 
-  // 5. Graphics Systems
-  ParticleSystem.update(deltaTime);
-  ProjectileSystem.update(deltaTime);
+  // 5. Graphics/effect simulation
+  Renderer.update(deltaTime, objects);
 
-  // 6. Audio System
-  AudioManager.updateListener(Player.position);
-
-  // 7. UI State
-  HUD.update();
+  // 6. DOM and radar refresh at 10Hz
+  if (hudRefreshDue) HUD.update(objects);
 }
 ```
+
+`World.getVisibleObjects()` deliberately reuses its result arrays. The game
+loop therefore performs one query sized for player mechanics, the viewport,
+and strategic radar, then passes that snapshot to every consumer before the
+next query. This avoids repeated 5×5-sector traversal and per-frame garbage.
 
 ### Local Player Prediction
 
@@ -502,7 +526,8 @@ class Entities {
 ```
 
 **Interpolation Benefits:**
-- Server updates at 20 tps, client renders at 60 FPS
+- Server updates at a 20 tps target; the client simulates at 60Hz and renders
+  at the selected presentation rate
 - Smooth motion without jitter
 - Reduces perceived lag
 
@@ -560,58 +585,57 @@ class Entities {
 
 ## Timing & Performance
 
-### Fixed Timestep (Server)
+### Target Cadence (Server)
 
-The server uses a **fixed timestep** of 50ms to ensure deterministic physics:
+The server targets a **50ms cadence** and passes measured elapsed time to its
+systems. Processing time is subtracted from the next timeout:
 
 ```javascript
 tick() {
-  const targetDelta = 50; // Fixed 50ms
   const now = Date.now();
   const actualDelta = now - this.lastTickTime;
+  this.lastTickTime = now;
 
-  // Use fixed delta for physics calculations
-  this.update(targetDelta);
+  this.update(actualDelta);
 
   // Schedule next tick accounting for processing time
   const processingTime = Date.now() - now;
-  const nextTick = targetDelta - processingTime;
+  const nextTick = 50 - processingTime;
 
   setTimeout(() => this.tick(), Math.max(0, nextTick));
 }
 ```
 
-**Benefits:**
-- Consistent physics regardless of server load
-- Predictable NPC behavior
-- Reproducible game state
+This preserves real-time rates when an individual tick is late while keeping
+the normal server frequency at 20 ticks per second.
 
-### Variable Timestep (Client)
+### Fixed Simulation, Independent Rendering (Client)
 
-The client uses a **variable timestep** for smooth rendering:
+The client accumulates rAF elapsed time into a fixed simulation step and a
+separate render budget:
 
 ```javascript
 loop() {
-  const now = performance.now();
-  const deltaTime = now - this.lastFrameTime; // Variable 16-20ms
-  this.lastFrameTime = now;
-
-  this.update(deltaTime); // Use actual delta for smooth interpolation
-
+  while (simulationAccumulator >= 1000 / 60) {
+    this.update(1 / 60);
+    simulationAccumulator -= 1000 / 60;
+  }
+  if (renderAccumulator >= 1000 / targetFPS) this.render();
   requestAnimationFrame(() => this.loop());
 }
 ```
 
 **Benefits:**
-- Adapts to monitor refresh rate (60Hz, 120Hz, 144Hz)
-- Smooth motion even if framerate varies
-- No screen tearing
+- Identical local prediction at 30Hz, 60Hz, and high-refresh displays
+- Bounded recovery after foreground stalls
+- Rendering can be reduced without slowing simulation
+- Frame-budget monitoring measures rendered frames rather than skipped callbacks
 
 ## Proximity-Based Updates
 
 ### Radar Range System
 
-Players only receive updates for entities within their radar range:
+`RADAR_TIERS` supplies the canonical ranges (500, 750, 1125, 1688, and 2531). Normal radar presentation and exact base snapshots use radar range; live entity and combat delivery generally uses twice each recipient's range:
 
 ```javascript
 // Server calculates radar range based on tier
@@ -682,16 +706,11 @@ setInterval(() => {
 
 ### Client Loop Performance
 
-**Target:** 16.67ms per frame (60 FPS)
-
-**Actual Performance (50 nearby entities):**
-- Input processing: ~0.5ms
-- Player prediction: ~0.3ms
-- Entity interpolation: ~2ms
-- Particle updates: ~3ms
-- Rendering: ~8ms
-- Total: ~14ms per frame
-- **Headroom:** 2.67ms (16% CPU available)
+At a 60 FPS presentation target, the frame budget is **16.67ms**. Lower
+graphics targets reduce rendering work without changing the 60Hz prediction
+step. Procedural world traversal is shared once per simulation update, and DOM
+plus radar work is capped at 10Hz. Use `FrameBudgetMonitor` for measurements on
+the actual device; this document does not assume fixed entity-count timings.
 
 ## Debugging & Monitoring
 
@@ -731,9 +750,10 @@ if (Input.isKeyPressed('F3')) {
 
 ### Client Loop
 1. Use `requestAnimationFrame` for smooth rendering
-2. Interpolate remote entities for smooth motion
-3. Predict local player for instant feedback
-4. Decouple game logic from rendering (update + render split)
+2. Keep local simulation on the fixed 60Hz step
+3. Interpolate remote entities for smooth motion
+4. Predict local player for instant feedback
+5. Decouple game logic from rendering (update + render split)
 
 ---
 

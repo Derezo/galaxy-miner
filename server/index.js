@@ -32,6 +32,10 @@ app.get('/shared/physics.js', (req, res) => {
   res.sendFile(path.join(__dirname, '..', 'shared', 'physics.js'));
 });
 
+app.get('/shared/resource-selection.js', (req, res) => {
+  res.sendFile(path.join(__dirname, '..', 'shared', 'resource-selection.js'));
+});
+
 app.get('/shared/star-system.js', (req, res) => {
   res.sendFile(path.join(__dirname, '..', 'shared', 'star-system.js'));
 });
@@ -58,7 +62,7 @@ const socketModule = require('./socket')(io);
 
 // Initialize and start game engine
 const engine = require('./game/engine');
-engine.init(io, socketModule.connectedPlayers);
+engine.init(io, socketModule.connectedPlayers, socketModule);
 engine.start();
 
 // Start server

@@ -7,23 +7,63 @@ const _visibleObjectsResult = {
   planets: [],
   asteroids: [],
   wormholes: [],
-  bases: []
+  bases: [],
+  comets: []
+};
+const _visibleObjectIds = {
+  stars: new Set(),
+  planets: new Set(),
+  asteroids: new Set(),
+  wormholes: new Set(),
+  bases: new Set(),
+  comets: new Set()
 };
 const _systemCache = new Map();
+const _owningSystemCache = new Map();
 // Reusable star position object for orbital computations
 const _starPos = { x: 0, y: 0 };
+
+function isInSwarmExclusionZone(sectorX, sectorY) {
+  const zone = CONSTANTS.SWARM_EXCLUSION_ZONE;
+  if (!zone) return false;
+  const minDistance = zone.MIN_SECTOR_DISTANCE || 10;
+  return Math.max(Math.abs(sectorX), Math.abs(sectorY)) < minDistance;
+}
+
+function markVisibleObject(category, object) {
+  if (!object?.id) return true;
+  const seen = _visibleObjectIds[category];
+  if (seen.has(object.id)) return false;
+  seen.add(object.id);
+  return true;
+}
+
+function resolveSystemObjectPosition(object, time) {
+  if (!object?.systemId || typeof StarSystem === 'undefined' ||
+      typeof StarSystem.resolveObjectPosition !== 'function') {
+    return null;
+  }
+  let system = _owningSystemCache.get(object.systemId);
+  if (system === undefined) {
+    system = StarSystem.getStarSystemById(object.systemId) || null;
+    _owningSystemCache.set(object.systemId, system);
+  }
+  return system ? StarSystem.resolveObjectPosition(system, object, time) : null;
+}
 
 const World = {
   seed: null,
   sectors: new Map(),
   currentSector: { x: 0, y: 0 },
+  _currentSectorKey: null,
   worldChanges: new Map(),
   useStarSystemModel: true, // Feature flag for new generation
 
-  init(seed) {
+  init(seed, initialPosition = null) {
     this.seed = seed;
     this.sectors.clear();
     this.worldChanges.clear();
+    this._currentSectorKey = null;
     // Reset debug flags
     this._confirmedStarSystem = false;
     this._debugLogCount = 0;
@@ -36,12 +76,27 @@ const World = {
       Logger.error('StarSystem NOT LOADED! Check for JS errors above.');
     }
     Logger.category('worldGeneration', 'World initialized with seed:', seed);
+
+    // Player is initialized before World in the production startup sequence. The
+    // optional position keeps initialization deterministic in isolated callers.
+    const startPosition = initialPosition || (
+      typeof Player !== 'undefined' && Player.position
+        ? Player.position
+        : { x: 0, y: 0 }
+    );
+    this.update(startPosition);
   },
 
   update(playerPosition) {
     // Calculate current sector
     const sectorX = Math.floor(playerPosition.x / CONSTANTS.SECTOR_SIZE);
     const sectorY = Math.floor(playerPosition.y / CONSTANTS.SECTOR_SIZE);
+    const currentKey = `${sectorX}_${sectorY}`;
+
+    // Sector generation and eviction only need to run when crossing a boundary.
+    if (currentKey === this._currentSectorKey) {
+      return false;
+    }
 
     // Load 5x5 grid of sectors (expanded from 3x3 for large stars)
     for (let dx = -2; dx <= 2; dx++) {
@@ -62,6 +117,8 @@ const World = {
     }
 
     this.currentSector = { x: sectorX, y: sectorY };
+    this._currentSectorKey = currentKey;
+    return true;
   },
 
   generateSector(sectorX, sectorY) {
@@ -103,6 +160,7 @@ const World = {
       asteroids: [],
       wormholes: [],
       bases: [],
+      comets: [],
       systems: [] // Reference to parent star systems
     };
 
@@ -126,7 +184,10 @@ const World = {
         sector.stars.push({
           ...system.primaryStar,
           systemId: system.id,
-          isBinary: !!system.binaryInfo
+          isBinary: !!system.binaryInfo,
+          isPrimaryBinary: system.binaryInfo ? true : undefined,
+          binaryRole: system.binaryInfo ? 'primary' : null,
+          binaryInfo: system.binaryInfo || null
         });
       }
 
@@ -137,7 +198,9 @@ const World = {
           sector.stars.push({
             ...secondary,
             systemId: system.id,
+            isBinary: true,
             isPrimaryBinary: false,
+            binaryRole: 'secondary',
             binaryInfo: system.binaryInfo
           });
         }
@@ -157,7 +220,8 @@ const World = {
             ...planet,
             starX: starX,
             starY: starY,
-            systemId: system.id
+            systemId: system.id,
+            parentStarRole: StarSystem.getStarRole(system, planet.starId)
           });
         }
       }
@@ -173,6 +237,7 @@ const World = {
             starX: system.primaryStar.x,
             starY: system.primaryStar.y,
             systemId: system.id,
+            parentStarRole: StarSystem.getStarRole(system, asteroid.starId),
             isOrbital: true // Flag for orbital vs bouncing
           });
         }
@@ -195,6 +260,12 @@ const World = {
       const bufferMaxY = (graveyardConfig?.MAX_SECTOR_Y + 2) * sectorSize;
 
       for (const base of system.bases) {
+        // Match the server's origin exclusion before adding any Swarm hive
+        // clone to an overlapping sector.
+        if (base.type === 'swarm_hive' && isInSwarmExclusionZone(sectorX, sectorY)) {
+          continue;
+        }
+
         // Skip hostile faction bases in Graveyard zone and buffer zone (must match server filtering)
         if (inGraveyardBuffer && graveyardConfig.BLOCKED_FACTIONS &&
             graveyardConfig.BLOCKED_FACTIONS.includes(base.faction)) {
@@ -231,7 +302,8 @@ const World = {
               ...base,
               starX: starX,
               starY: starY,
-              systemId: system.id
+              systemId: system.id,
+              parentStarRole: StarSystem.getStarRole(system, base.starId)
             });
           }
         } else if (isInSector(base.x, base.y)) {
@@ -244,7 +316,8 @@ const World = {
             ...base,
             starX: starX,
             starY: starY,
-            systemId: system.id
+            systemId: system.id,
+            parentStarRole: StarSystem.getStarRole(system, base.starId)
           });
         }
       }
@@ -261,6 +334,16 @@ const World = {
             }
           });
         }
+      }
+
+      // Comets are copied to every sector touched by their Bezier bounds. The
+      // visible-object query deduplicates these overlapping clones by ID.
+      for (const comet of StarSystem.getCometsForSector(system, sectorX, sectorY)) {
+        sector.comets.push({
+          ...comet,
+          systemId: system.id,
+          parentStarRole: StarSystem.getStarRole(system, comet.starId)
+        });
       }
 
       // Add mining claim objects (asteroids/planets generated near mining claims)
@@ -281,6 +364,7 @@ const World = {
                 starX: system.primaryStar.x,
                 starY: system.primaryStar.y,
                 systemId: system.id,
+                parentStarRole: null,
                 isOrbital: false  // Mining claim objects don't orbit
               });
             } else {
@@ -290,6 +374,7 @@ const World = {
                 starX: system.primaryStar.x,
                 starY: system.primaryStar.y,
                 systemId: system.id,
+                parentStarRole: null,
                 isOrbital: false  // Mining claim objects don't orbit
               });
             }
@@ -403,7 +488,8 @@ const World = {
       planets: [],
       asteroids: [],
       wormholes: [],
-      bases: []
+      bases: [],
+      comets: []
     };
 
     // Track all placed objects for spacing checks
@@ -586,6 +672,12 @@ const World = {
         continue;
       }
 
+      // Keep the legacy fallback consistent with the server as well. This is
+      // intentionally before the spawn roll so both sides consume the same RNG.
+      if (hubType.id === 'swarm_hive' && isInSwarmExclusionZone(sectorX, sectorY)) {
+        continue;
+      }
+
       // Roll for this base type in this sector
       if (rng() < hubType.spawnChance) {
         const size = hubType.size || 100;
@@ -642,13 +734,12 @@ const World = {
     objects.asteroids.length = 0;
     objects.wormholes.length = 0;
     objects.bases.length = 0;
+    objects.comets.length = 0;
+    for (const seen of Object.values(_visibleObjectIds)) seen.clear();
+    _owningSystemCache.clear();
 
     const orbitTime = Physics.getOrbitTime();
     const asteroidTime = Physics.getPhysicsTime();
-
-    // Get objects from nearby sectors (5x5 grid for large stars)
-    const sectorX = Math.floor(position.x / CONSTANTS.SECTOR_SIZE);
-    const sectorY = Math.floor(position.y / CONSTANTS.SECTOR_SIZE);
 
     // Viewport AABB for sector culling (500px margin for large stars)
     const SECTOR_CULL_MARGIN = 500;
@@ -662,11 +753,19 @@ const World = {
     _systemCache.clear();
     const systemCache = _systemCache;
 
-    for (let dx = -2; dx <= 2; dx++) {
-      for (let dy = -2; dy <= 2; dy++) {
+    // Derive traversal bounds from the requested view instead of a fixed 5x5
+    // neighborhood. Top-tier radar can extend more than two sectors from the
+    // player's current sector, especially when the player is near an edge.
+    const minSectorX = Math.floor(viewMinX / CONSTANTS.SECTOR_SIZE);
+    const maxSectorX = Math.floor(viewMaxX / CONSTANTS.SECTOR_SIZE);
+    const minSectorY = Math.floor(viewMinY / CONSTANTS.SECTOR_SIZE);
+    const maxSectorY = Math.floor(viewMaxY / CONSTANTS.SECTOR_SIZE);
+
+    for (let querySectorX = minSectorX; querySectorX <= maxSectorX; querySectorX++) {
+      for (let querySectorY = minSectorY; querySectorY <= maxSectorY; querySectorY++) {
         // Sector AABB vs viewport AABB culling
-        const sectorWorldX = (sectorX + dx) * CONSTANTS.SECTOR_SIZE;
-        const sectorWorldY = (sectorY + dy) * CONSTANTS.SECTOR_SIZE;
+        const sectorWorldX = querySectorX * CONSTANTS.SECTOR_SIZE;
+        const sectorWorldY = querySectorY * CONSTANTS.SECTOR_SIZE;
         const sectorMaxX = sectorWorldX + CONSTANTS.SECTOR_SIZE;
         const sectorMaxY = sectorWorldY + CONSTANTS.SECTOR_SIZE;
 
@@ -675,10 +774,20 @@ const World = {
           continue;
         }
 
-        const sector = this.getSector(sectorX + dx, sectorY + dy);
+        const sector = this.getSector(querySectorX, querySectorY);
 
         // Process stars - binary stars need position updates
         for (const star of sector.stars) {
+          if (!markVisibleObject('stars', star)) continue;
+
+          const authoritativePosition = resolveSystemObjectPosition(star, orbitTime);
+          if (authoritativePosition) {
+            star.x = authoritativePosition.x;
+            star.y = authoritativePosition.y;
+            objects.stars.push(star);
+            continue;
+          }
+
           if (star.binaryInfo) {
             // This is part of a binary system - compute current positions
             const positions = Physics.computeBinaryStarPositions(
@@ -717,6 +826,16 @@ const World = {
 
         // Planets orbit their stars - compute current positions
         for (const planet of sector.planets) {
+          if (!markVisibleObject('planets', planet)) continue;
+
+          const authoritativePosition = resolveSystemObjectPosition(planet, orbitTime);
+          if (authoritativePosition) {
+            planet.x = authoritativePosition.x;
+            planet.y = authoritativePosition.y;
+            objects.planets.push(planet);
+            continue;
+          }
+
           // Find parent star to check for binary system
           const parentStar = planet.starId
             ? sector.stars.find(s => s.id === planet.starId)
@@ -758,7 +877,19 @@ const World = {
 
         // Asteroids - orbital vs bouncing physics
         for (const asteroid of sector.asteroids) {
+          if (!markVisibleObject('asteroids', asteroid)) continue;
+
           if (asteroid.isOrbital) {
+            const authoritativePosition = resolveSystemObjectPosition(asteroid, orbitTime);
+            if (authoritativePosition) {
+              asteroid.x = authoritativePosition.x;
+              asteroid.y = authoritativePosition.y;
+              asteroid.currentAngle = asteroid.orbitAngle + asteroid.orbitSpeed * (orbitTime / 1000);
+              asteroid.state = 'orbiting';
+              objects.asteroids.push(asteroid);
+              continue;
+            }
+
             // Orbital belt asteroid - check for binary star system
             const parentStar = asteroid.starId
               ? sector.stars.find(s => s.id === asteroid.starId)
@@ -815,11 +946,43 @@ const World = {
 
         // Wormholes don't move - push individually to avoid spread allocation
         for (let wi = 0; wi < sector.wormholes.length; wi++) {
-          objects.wormholes.push(sector.wormholes[wi]);
+          const wormhole = sector.wormholes[wi];
+          if (markVisibleObject('wormholes', wormhole)) {
+            objects.wormholes.push(wormhole);
+          }
+        }
+
+        // Comet path bounds overlap multiple sectors; expose each stable ID once.
+        const sectorComets = sector.comets || [];
+        for (let ci = 0; ci < sectorComets.length; ci++) {
+          const comet = sectorComets[ci];
+          if (markVisibleObject('comets', comet)) {
+            objects.comets.push(comet);
+          }
         }
 
         // Bases - compute positions for orbital bases and binary star systems
         for (const base of sector.bases) {
+          if (!markVisibleObject('bases', base)) continue;
+
+          const authoritativePosition = resolveSystemObjectPosition(base, orbitTime);
+          if (authoritativePosition) {
+            if (base.orbitRadius && base.orbitSpeed) {
+              base.x = authoritativePosition.x;
+              base.y = authoritativePosition.y;
+              objects.bases.push(base);
+            } else if (authoritativePosition.x !== base.x || authoritativePosition.y !== base.y) {
+              objects.bases.push({
+                ...base,
+                x: authoritativePosition.x,
+                y: authoritativePosition.y
+              });
+            } else {
+              objects.bases.push(base);
+            }
+            continue;
+          }
+
           // Find parent star to check for binary system
           const parentStar = base.starId
             ? sector.stars.find(s => s.id === base.starId)
@@ -922,13 +1085,9 @@ const World = {
   },
 
   getPlanetResources(rng) {
-    const resources = [];
-    const types = Object.keys(CONSTANTS.RESOURCE_TYPES);
     const count = 1 + Math.floor(rng() * 3);
-    for (let i = 0; i < count; i++) {
-      resources.push(types[Math.floor(rng() * types.length)]);
-    }
-    return resources;
+    if (typeof ResourceSelection === 'undefined') return [];
+    return ResourceSelection.selectResources(CONSTANTS.RESOURCE_TYPES, rng, count);
   },
 
   getAsteroidResources(rng) {

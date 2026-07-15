@@ -35,10 +35,9 @@ const CLIENT_FILES = [
   'client/js/network/pirate.js'
 ];
 
-// Server handler files to scan
-const SERVER_FILES = [
-  'server/socket.js'
-];
+// Server handler files to scan. Keep this directory-based so newly added
+// modular handlers are audited automatically.
+const SERVER_HANDLER_DIR = 'server/socket';
 
 // Pattern to find socket.on() registrations
 const ON_PATTERN = /(?:socket|this\.socket)\.on\s*\(\s*['"`]([^'"`]+)['"`]/g;
@@ -69,6 +68,21 @@ function extractHandlers(filePath) {
   return handlers;
 }
 
+function getJsFiles(dirPath) {
+  const fullPath = path.join(PROJECT_ROOT, dirPath);
+  if (!fs.existsSync(fullPath)) return [];
+
+  return fs.readdirSync(fullPath, { withFileTypes: true })
+    .filter(entry => !entry.name.startsWith('.'))
+    .flatMap(entry => {
+      const relativePath = path.join(dirPath, entry.name);
+      if (entry.isDirectory()) return getJsFiles(relativePath);
+      return entry.isFile() && entry.name.endsWith('.js') ? [relativePath] : [];
+    })
+    // index.js orchestrates modules but does not own socket.on registrations.
+    .filter(file => file !== path.join(SERVER_HANDLER_DIR, 'index.js'));
+}
+
 function findDuplicates(handlers) {
   const eventMap = new Map();
 
@@ -90,6 +104,7 @@ console.log('  Handler Duplicate Audit');
 console.log('====================================\n');
 
 const allClientHandlers = CLIENT_FILES.flatMap(extractHandlers);
+const SERVER_FILES = getJsFiles(SERVER_HANDLER_DIR);
 const allServerHandlers = SERVER_FILES.flatMap(extractHandlers);
 
 const clientDupes = findDuplicates(allClientHandlers);

@@ -6,11 +6,24 @@
  */
 function register(socket) {
   socket.on('mining:started', (data) => {
-    // Start mining drill loop
-    if (typeof AudioManager !== 'undefined' && AudioManager.isReady && AudioManager.isReady()) {
-      const tier = data.miningTier || 1;
-      Network._activeMiningDrillTier = tier;
-      AudioManager.startLoop('mining_drill_' + tier);
+    const tier = data.miningTier || Player.ship?.miningTier || 1;
+    const previousTier = Network._activeMiningDrillTier;
+    Network._activeMiningDrillTier = tier;
+
+    // Loop intent is gameplay state, so keep it synchronized even while audio
+    // is muted, suspended, or waiting for a user gesture.
+    if (typeof AudioManager !== 'undefined') {
+      if (
+        previousTier !== null &&
+        previousTier !== undefined &&
+        previousTier !== tier &&
+        typeof AudioManager.stopLoop === 'function'
+      ) {
+        AudioManager.stopLoop('mining_drill_' + previousTier);
+      }
+      if (typeof AudioManager.startLoop === 'function') {
+        AudioManager.startLoop('mining_drill_' + tier);
+      }
     }
 
     Player.onMiningStarted(data);
@@ -18,11 +31,15 @@ function register(socket) {
 
   socket.on('mining:complete', (data) => {
     // Stop mining drill loop and play completion sound
-    if (typeof AudioManager !== 'undefined' && AudioManager.isReady && AudioManager.isReady()) {
-      const tier = Network._activeMiningDrillTier || 1;
-      AudioManager.stopLoop('mining_drill_' + tier);
-      Network._activeMiningDrillTier = null;
-      AudioManager.play('mining_complete');
+    const tier = Network._activeMiningDrillTier;
+    Network._activeMiningDrillTier = null;
+    if (typeof AudioManager !== 'undefined') {
+      if (tier !== null && tier !== undefined && typeof AudioManager.stopLoop === 'function') {
+        AudioManager.stopLoop('mining_drill_' + tier);
+      }
+      if (typeof AudioManager.play === 'function') {
+        AudioManager.play('mining_complete');
+      }
     }
 
     // Track resources mined for session statistics
@@ -35,10 +52,15 @@ function register(socket) {
 
   socket.on('mining:cancelled', (data) => {
     // Stop mining drill loop
-    if (typeof AudioManager !== 'undefined' && AudioManager.isReady && AudioManager.isReady()) {
-      const tier = Network._activeMiningDrillTier || 1;
+    const tier = Network._activeMiningDrillTier;
+    Network._activeMiningDrillTier = null;
+    if (
+      typeof AudioManager !== 'undefined' &&
+      tier !== null &&
+      tier !== undefined &&
+      typeof AudioManager.stopLoop === 'function'
+    ) {
       AudioManager.stopLoop('mining_drill_' + tier);
-      Network._activeMiningDrillTier = null;
     }
 
     Player.onMiningCancelled(data);
@@ -85,6 +107,28 @@ function register(socket) {
     // Refresh UI
     if (typeof CargoPanel !== 'undefined') {
       CargoPanel.refresh();
+    }
+
+    // Upgrade affordability must follow the same authoritative inventory
+    // snapshot as the cargo UI. ShipUpgradePanel otherwise retains the values
+    // from the last time its tab was opened.
+    if (typeof ShipUpgradePanel !== 'undefined') {
+      ShipUpgradePanel.updateData({
+        ship: Player.ship,
+        inventory: Player.inventory || [],
+        credits: Player.credits
+      }, { authoritativeInventory: true });
+    } else if (typeof UpgradesUI !== 'undefined') {
+      if (typeof UpgradesUI.applyAuthoritativeSnapshot === 'function') {
+        UpgradesUI.applyAuthoritativeSnapshot();
+      } else {
+        UpgradesUI.refresh();
+      }
+    }
+
+    if (typeof HUD !== 'undefined' &&
+        typeof HUD.updateUpgradeIndicator === 'function') {
+      HUD.updateUpgradeIndicator();
     }
   });
 }

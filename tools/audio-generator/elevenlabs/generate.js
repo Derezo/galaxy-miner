@@ -5,27 +5,51 @@
  *   node generate.js                    # Generate all Tier 1 sounds
  *   node generate.js --tier 2           # Generate Tier 2 sounds
  *   node generate.js --category weapons # Generate specific category
+ *   node generate.js --collection ui    # Generate every UI category
  *   node generate.js --single weapon_t1 # Generate single sound
+ *   node generate.js --dry-run --collection weapons
  *   node generate.js --list             # List all sounds
  *   node generate.js --force            # Regenerate even if files exist
  */
 
 const fs = require("fs");
+const os = require("os");
 const path = require("path");
+const { spawnSync } = require("child_process");
 
-// API Configuration
-const API_KEY = process.env.ELEVENLABS_API_KEY || "YOUR_API_KEY_HERE";
-const API_URL = "https://api.elevenlabs.io/v1/sound-generation";
+// API configuration. Environment overrides make credential-free dry runs and
+// local contract tests possible without ever redirecting production assets.
+const DEFAULT_API_URL = "https://api.elevenlabs.io/v1/sound-generation";
+const DEFAULT_OUTPUT_FORMAT = "mp3_44100_128";
+const DEFAULT_MODEL_ID = "eleven_text_to_sound_v2";
+const DEFAULT_PROMPT_INFLUENCE = 0.6;
 
 // Output directory (relative to project root)
-const OUTPUT_BASE = path.join(__dirname, "../../../client/assets/audio");
+const DEFAULT_OUTPUT_BASE = path.join(
+  __dirname,
+  "../../../client/assets/audio"
+);
 
 // Delay between API calls (ms) to avoid rate limiting
-const API_DELAY = 2000;
+const DEFAULT_API_DELAY = 2000;
+const DEFAULT_TIMEOUT_MS = 30000;
+const MAX_ATTEMPTS = 3;
 
 // ElevenLabs API constraints
 const MIN_DURATION = 0.5; // API minimum
-const MAX_DURATION = 22.0; // API maximum
+const MAX_DURATION = 30.0; // API maximum
+
+// The model is more consistent when every short game cue describes its
+// envelope and isolation requirements. Individual definitions provide the
+// identity; these suffixes keep weapon fire separate from impacts/destruction
+// and keep UI feedback from turning into music or ambience.
+function weaponPrompt(identity, activeMilliseconds) {
+  return `Dry isolated game-ready weapon one-shot: ${identity} Clean cutoff within ${activeMilliseconds} milliseconds; punchy mono-compatible mix. Firing only—no projectile flight, impact, ricochet, explosion, destruction, reverb, echo, ambience, music, or voice.`;
+}
+
+function uiPrompt(identity, activeMilliseconds) {
+  return `Dry isolated game-ready spaceship-interface one-shot: ${identity} Clean cutoff within ${activeMilliseconds} milliseconds; mono-compatible and non-fatiguing when repeated. No ambience, music, voice, reverb, echo, or long tail.`;
+}
 
 /**
  * Sound definitions organized by tier and category
@@ -57,73 +81,123 @@ const SOUNDS = {
       {
         id: "weapon_t1",
         filename: "weapon_player_t1.mp3",
+        variationPattern: "weapon_player_t1_{index}.mp3",
+        variations: 3,
         duration: 0.5,
-        prompt:
-          "Quick cyan laser blaster shot, clean electronic zap with bright energy pulse, short sci-fi pew sound, punchy and crisp",
+        activeDuration: 0.09,
+        prompt: weaponPrompt(
+          "compact cyan pulse blaster with a needle-sharp electronic snap, bright glassy zap, and tiny power-cell chirp.",
+          90
+        ),
       },
       {
         id: "weapon_t2",
         filename: "weapon_player_t2.mp3",
+        variationPattern: "weapon_player_t2_{index}.mp3",
+        variations: 3,
         duration: 0.5,
-        prompt:
-          "Twin cyan laser bolts firing in rapid succession, two quick electronic zaps one after another, dual blaster shot",
+        activeDuration: 0.12,
+        prompt: weaponPrompt(
+          "paired cyan emitters fire two tightly offset laser snaps about 20 milliseconds apart, with crisp electrical transients and a brighter energy body than tier one.",
+          120
+        ),
       },
       {
         id: "weapon_t3",
         filename: "weapon_player_t3.mp3",
+        variationPattern: "weapon_player_t3_{index}.mp3",
+        variations: 3,
         duration: 0.5,
-        prompt:
-          "Green energy pulse cannon firing, deep thump with rising plasma whoosh, heavy sci-fi projectile launch with bass impact",
+        activeDuration: 0.16,
+        prompt: weaponPrompt(
+          "green plasma-orb launcher with a firm capacitor punch, dense rounded energy bloom, and fast ion hiss; weighty low-mid body without a cinematic boom.",
+          160
+        ),
       },
       {
         id: "weapon_t4",
         filename: "weapon_player_t4.mp3",
+        variationPattern: "weapon_player_t4_{index}.mp3",
+        variations: 3,
         duration: 0.6,
-        prompt:
-          "Orange energy beam weapon sustained fire, continuous laser hum with heat shimmer sound, intense focused power beam",
+        activeDuration: 0.16,
+        prompt: weaponPrompt(
+          "orange thermal beam ignition, a hard contact snap into a compact searing energy buzz with a precise power-gate cutoff; hot, focused, and intense.",
+          160
+        ),
       },
       {
         id: "weapon_t5",
         filename: "weapon_player_t5.mp3",
+        variationPattern: "weapon_player_t5_{index}.mp3",
+        variations: 5,
         duration: 0.6,
-        prompt:
-          "Smooth electrical discharge with crackling arc lightning, buzzing electricity with lightning sparks, high voltage hum softly fading out",
+        activeDuration: 0.15,
+        prompt: weaponPrompt(
+          "Tesla cannon discharge with a violent coil snap, branching blue-cyan electrical arcs, and a brief high-voltage crackle; dense and powerful but compact, without thunder or sustained hum.",
+          150
+        ),
       },
       // NPC weapons - faction specific visuals
       {
         id: "npc_pirate",
         filename: "weapon_npc_pirate.mp3",
+        variationPattern: "weapon_pirate_{index}.mp3",
+        variations: 3,
         duration: 0.5,
-        prompt:
-          "Fiery cannon blast with trailing sparks, aggressive explosive shot with crackling fire trail, pirate ship weapon boom",
+        activeDuration: 0.14,
+        prompt: weaponPrompt(
+          "brutal pirate cannon muzzle report with a hot propellant punch, scorched-metal crack, and short spark spit; gritty, heavy, and compact.",
+          140
+        ),
       },
       {
         id: "npc_scavenger",
         filename: "weapon_npc_scavenger.mp3",
+        variationPattern: "weapon_scavenger_{index}.mp3",
+        variations: 3,
         duration: 0.5,
-        prompt:
-          "Unstable flickering laser beam, malfunctioning energy weapon with sputtering electrical discharge, jury-rigged tech sound",
+        activeDuration: 0.13,
+        prompt: weaponPrompt(
+          "jury-rigged scavenger laser with an uneven double energy spit, loose relay tick, and unstable capacitor crackle; cheap, erratic, and compact.",
+          130
+        ),
       },
       {
         id: "npc_swarm",
         filename: "weapon_npc_swarm.mp3",
+        variationPattern: "weapon_swarm_{index}.mp3",
+        variations: 3,
         duration: 0.5,
-        prompt:
-          "Dark alien energy projectile with void tear effect, deep resonant pulse with organic undertones, crimson tendril whoosh",
+        activeDuration: 0.16,
+        prompt: weaponPrompt(
+          "Swarm bio-projectile launch with a hard chitin click, compact wet membrane snap, deep vacuum pulse, and short tendril hiss; organic but non-vocal.",
+          160
+        ),
       },
       {
         id: "npc_void",
         filename: "weapon_npc_void.mp3",
+        variationPattern: "weapon_void_{index}.mp3",
+        variations: 3,
         duration: 0.5,
-        prompt:
-          "Ethereal dark purple energy beam, haunting otherworldly pulse with dimensional resonance, ghostly void attack",
+        activeDuration: 0.18,
+        prompt: weaponPrompt(
+          "focused Void beam ignition, a brief inverse-suction transient into a dense low energy pulse with a cold crystalline edge and abrupt dimensional snap; mysterious but punchy, never ghostly or vocal.",
+          180
+        ),
       },
       {
         id: "npc_miner",
         filename: "weapon_npc_miner.mp3",
+        variationPattern: "weapon_rogue_miner_{index}.mp3",
+        variations: 3,
         duration: 0.5,
-        prompt:
-          "Industrial mining laser weapon fire, harsh yellow beam with mechanical grinding undertone, repurposed tool as weapon",
+        activeDuration: 0.16,
+        prompt: weaponPrompt(
+          "repurposed industrial mining laser with a heavy contactor clack, short abrasive cutting arc, and brief motor strain; rugged mechanical weight without a continuous drill or long grind.",
+          160
+        ),
       },
     ],
   },
@@ -310,43 +384,61 @@ const SOUNDS = {
         id: "ui_click",
         filename: "ui_click.mp3",
         duration: 0.5,
-        prompt:
-          "Futuristic UI button click, soft electronic confirmation beep, clean and responsive sci-fi interface",
+        activeDuration: 0.06,
+        prompt: uiPrompt(
+          "tactile console button press, a tiny polymer click layered with one clean high digital tick; neutral and responsive.",
+          60
+        ),
       },
       {
         id: "ui_hover",
         filename: "ui_hover.mp3",
         duration: 0.5,
-        prompt:
-          "Subtle UI hover sound, light electronic highlight tone, gentle interface feedback",
+        activeDuration: 0.04,
+        prompt: uiPrompt(
+          "very quiet feather-light capacitive hover tick, one soft glassy blip with no bass; subtle enough for frequent repetition.",
+          40
+        ),
       },
       {
         id: "ui_panel_open",
         filename: "ui_panel_open.mp3",
         duration: 0.5,
-        prompt:
-          "Holographic panel materializing, sci-fi interface whoosh with digital expansion sweep",
+        activeDuration: 0.18,
+        prompt: uiPrompt(
+          "holographic panel opens with a fast rising filtered-data sweep, two delicate scan ticks, and a soft digital latch; crisp and restrained, never a cinematic whoosh.",
+          180
+        ),
       },
       {
         id: "ui_panel_close",
         filename: "ui_panel_close.mp3",
         duration: 0.5,
-        prompt:
-          "Holographic panel closing, interface collapse with digital contraction sweep",
+        activeDuration: 0.16,
+        prompt: uiPrompt(
+          "holographic panel closes with a quick descending filtered-data sweep and muted digital latch; clearly the inverse of panel open, crisp and restrained.",
+          160
+        ),
       },
       {
         id: "ui_notification",
         filename: "ui_notification.mp3",
         duration: 0.5,
-        prompt:
-          "Important notification alert, attention-grabbing electronic chime, clear and distinct ping",
+        activeDuration: 0.22,
+        prompt: uiPrompt(
+          "neutral two-pulse data alert, a rounded first ping followed by a slightly brighter answer ping; noticeable without sounding urgent or becoming an alarm loop.",
+          220
+        ),
       },
       {
         id: "ui_error",
         filename: "ui_error.mp3",
         duration: 0.5,
-        prompt:
-          "Error notification sound, negative electronic buzz with rejection tone, something went wrong",
+        activeDuration: 0.2,
+        prompt: uiPrompt(
+          "short electronic refusal, two tight low dissonant buzz pulses ending in a muted terminal thunk; assertive but not abrasive, never a siren.",
+          200
+        ),
       },
     ],
   },
@@ -522,71 +614,101 @@ const SOUNDS = {
         id: "ui_success",
         filename: "ui_success.mp3",
         duration: 0.5,
-        prompt:
-          "Success confirmation sound, positive electronic chime with achievement tone, something good happened",
+        activeDuration: 0.24,
+        prompt: uiPrompt(
+          "clean two-step success confirmation, a rounded digital ping followed by a brighter resolved sparkle; satisfying and restrained, never a fanfare or coin sound.",
+          240
+        ),
       },
       {
         id: "ui_warning",
         filename: "ui_warning.mp3",
         duration: 0.5,
-        prompt:
-          "Warning notification sound, cautionary electronic tone, attention required but not critical",
+        activeDuration: 0.3,
+        prompt: uiPrompt(
+          "two evenly spaced warning beeps over one firm low electronic pulse; cautionary and clear but not an emergency siren or alarm loop.",
+          300
+        ),
       },
       {
         id: "ui_info",
         filename: "ui_info.mp3",
         duration: 0.5,
-        prompt:
-          "Information notification, neutral electronic ping, new data available",
+        activeDuration: 0.14,
+        prompt: uiPrompt(
+          "one neutral data ping with a tiny soft interface click beneath it; calm, unobtrusive, and without a sparkle cascade or warning tone.",
+          140
+        ),
       },
       {
         id: "ui_tab_switch",
         filename: "ui_tab_switch.mp3",
         duration: 0.5,
-        prompt:
-          "Interface tab switch, quick digital transition whoosh, smooth navigation",
+        activeDuration: 0.07,
+        prompt: uiPrompt(
+          "tiny lateral digital swipe ending in a crisp mechanical detent; very short and light for rapid tab navigation, never a broad whoosh.",
+          70
+        ),
       },
       {
         id: "ui_upgrade",
         filename: "ui_upgrade_purchase.mp3",
         duration: 0.6,
-        prompt:
-          "Ship upgrade purchased, powerful enhancement activation with system boost sound, getting stronger",
+        activeDuration: 0.4,
+        prompt: uiPrompt(
+          "ship upgrade locks into place with a compact mechanical clunk, rising electrical power surge, and bright energy seal; substantial and rewarding, without a fanfare or explosion.",
+          400
+        ),
       },
       {
         id: "market_list",
         filename: "market_list.mp3",
         duration: 0.5,
-        prompt:
-          "Marketplace item listed, transaction initiated tone, selling something",
+        activeDuration: 0.16,
+        prompt: uiPrompt(
+          "marketplace listing upload, a scanner click followed by one short upward data chirp and final register tick; neutral transaction feedback, never a cash register.",
+          160
+        ),
       },
       {
         id: "market_buy",
         filename: "market_buy.mp3",
         duration: 0.5,
-        prompt:
-          "Marketplace purchase complete, successful transaction chime with credits spent sound",
+        activeDuration: 0.22,
+        prompt: uiPrompt(
+          "marketplace purchase approved, a crisp terminal stamp followed by a short descending two-step digital debit tone; clear and restrained, without coins or fanfare.",
+          220
+        ),
       },
       {
         id: "market_sell",
         filename: "market_sell.mp3",
         duration: 0.5,
-        prompt:
-          "Marketplace sale complete, credits received confirmation cha-ching, profitable exchange",
+        activeDuration: 0.24,
+        prompt: uiPrompt(
+          "marketplace sale completed, a crisp terminal tick followed by a quick ascending credit-arrival cascade and one bright final ping; positive but restrained, without coins or cash register.",
+          240
+        ),
       },
       {
         id: "market_cancel",
         filename: "market_cancel.mp3",
         duration: 0.5,
-        prompt:
-          "Marketplace listing cancelled, transaction abort sound, nevermind tone",
+        activeDuration: 0.15,
+        prompt: uiPrompt(
+          "marketplace listing cancelled, a muted reverse data chirp ending in a soft mechanical release click; neutral and non-alarming, without an error buzz or dramatic whoosh.",
+          150
+        ),
       },
       {
         id: "chat_receive",
         filename: "chat_message.mp3",
         duration: 0.5,
-        prompt:
-          "Chat message received, soft communication ping, someone said something notification",
+        activeDuration: 0.13,
+        prompt: uiPrompt(
+          "incoming spacecraft comms message, two tiny rounded radio-data pips; friendly, soft, and low-distraction for frequent use, without static or a ringtone.",
+          130
+        ),
       },
     ],
   },
@@ -738,29 +860,41 @@ const SOUNDS = {
         id: "slider_tick",
         filename: "slider_tick.mp3",
         duration: 0.5,
-        prompt:
-          "UI slider tick, tiny electronic click, subtle feedback for slider movement",
+        activeDuration: 0.03,
+        prompt: uiPrompt(
+          "extremely short and quiet unpitched mechanical detent tick for one slider step; crisp, with no beep, tonal ring, or bass.",
+          30
+        ),
       },
       {
         id: "toggle_on",
         filename: "toggle_on.mp3",
         duration: 0.5,
-        prompt:
-          "UI toggle switch on, electronic activation sound with positive confirmation",
+        activeDuration: 0.08,
+        prompt: uiPrompt(
+          "small physical switch snap paired with one short rising electronic activation blip; positive and compact, without a power-up swell or bass hit.",
+          80
+        ),
       },
       {
         id: "toggle_off",
         filename: "toggle_off.mp3",
         duration: 0.5,
-        prompt:
-          "UI toggle switch off, electronic deactivation sound with gentle shutdown",
+        activeDuration: 0.08,
+        prompt: uiPrompt(
+          "small physical switch snap paired with one short falling electronic deactivation blip; softer and darker than toggle on, without a shutdown swell or bass hit.",
+          80
+        ),
       },
       {
         id: "relic_acquired",
         filename: "relic_acquired.mp3",
         duration: 0.8,
-        prompt:
-          "Rare relic acquisition, magical discovery fanfare with ancient power awakening, epic find",
+        activeDuration: 0.48,
+        prompt: uiPrompt(
+          "ancient crystalline relic activates with a compact low energy bloom, layered glass shimmer, and one final harmonic ping; mysterious, rare, and valuable, without a fanfare, choir, explosion, or long drone.",
+          480
+        ),
       },
     ],
   },
@@ -945,292 +1079,702 @@ const SOUNDS = {
   },
 };
 
-/**
- * Generate a single sound using ElevenLabs API
- */
-async function generateSound(soundConfig, category, forceRegenerate = false) {
-  const outputDir = path.join(OUTPUT_BASE, category);
-  const outputPath = path.join(outputDir, soundConfig.filename);
+const CATEGORY_OUTPUT_MAP = Object.freeze({
+  ui_extended: "ui",
+  ui_extras: "ui",
+  destruction_variants: "destruction",
+  shields: "movement",
+  environment_extras: "environment",
+  rewards: "rewards",
+  base_destruction: "destruction",
+});
 
-  // Create output directory if it doesn't exist
-  if (!fs.existsSync(outputDir)) {
-    fs.mkdirSync(outputDir, { recursive: true });
+// These are deliberately narrow safe selections. In particular, neither
+// collection includes NPC death, boss death, or base-destruction definitions.
+const COLLECTIONS = Object.freeze({
+  weapons: ["weapons"],
+  ui: ["ui", "ui_extended", "ui_extras"],
+  "weapon-ui": ["weapons", "ui", "ui_extended", "ui_extras"],
+});
+
+function getRuntimeOptions(overrides = {}) {
+  return {
+    apiKey: overrides.apiKey ?? process.env.ELEVENLABS_API_KEY,
+    apiUrl:
+      overrides.apiUrl ??
+      process.env.ELEVENLABS_API_URL ??
+      DEFAULT_API_URL,
+    outputBase:
+      overrides.outputBase ??
+      process.env.ELEVENLABS_OUTPUT_DIR ??
+      DEFAULT_OUTPUT_BASE,
+    outputFormat:
+      overrides.outputFormat ??
+      process.env.ELEVENLABS_OUTPUT_FORMAT ??
+      DEFAULT_OUTPUT_FORMAT,
+    modelId:
+      overrides.modelId ??
+      process.env.ELEVENLABS_MODEL_ID ??
+      DEFAULT_MODEL_ID,
+    promptInfluence: Number(
+      overrides.promptInfluence ??
+        process.env.ELEVENLABS_PROMPT_INFLUENCE ??
+        DEFAULT_PROMPT_INFLUENCE
+    ),
+    apiDelay: Number(
+      overrides.apiDelay ??
+        process.env.ELEVENLABS_API_DELAY_MS ??
+        DEFAULT_API_DELAY
+    ),
+    timeoutMs: Number(
+      overrides.timeoutMs ??
+        process.env.ELEVENLABS_TIMEOUT_MS ??
+        DEFAULT_TIMEOUT_MS
+    ),
+    maxAttempts: Number(overrides.maxAttempts ?? MAX_ATTEMPTS),
+    fetchImpl: overrides.fetchImpl ?? globalThis.fetch,
+    sleep:
+      overrides.sleep ??
+      ((milliseconds) =>
+        new Promise((resolve) => setTimeout(resolve, milliseconds))),
+    audioProcessor: overrides.audioProcessor ?? trimMp3ToActiveDuration,
+    spawnSyncImpl: overrides.spawnSyncImpl ?? spawnSync,
+    logger: overrides.logger ?? console,
+    dryRun: Boolean(overrides.dryRun),
+    forceRegenerate: Boolean(overrides.forceRegenerate),
+    includeVariations: overrides.includeVariations !== false,
+  };
+}
+
+function outputCategoryFor(categoryName) {
+  return CATEGORY_OUTPUT_MAP[categoryName] || categoryName;
+}
+
+function formatVariationFilename(pattern, index) {
+  return pattern.split("{index}").join(String(index).padStart(2, "0"));
+}
+
+function expandSoundAssets(soundConfig, includeVariations = true) {
+  const assets = [
+    {
+      ...soundConfig,
+      definitionId: soundConfig.id,
+      variation: null,
+    },
+  ];
+
+  if (
+    !includeVariations ||
+    !Number.isInteger(soundConfig.variations) ||
+    soundConfig.variations < 1 ||
+    typeof soundConfig.variationPattern !== "string"
+  ) {
+    return assets;
   }
 
-  // Skip if file already exists (unless force)
-  if (fs.existsSync(outputPath) && !forceRegenerate) {
-    console.log(`  [SKIP] ${soundConfig.id} - already exists`);
-    return { success: true, skipped: true };
-  }
-
-  // Enforce minimum duration for API
-  const apiDuration = Math.max(
-    MIN_DURATION,
-    Math.min(soundConfig.duration, MAX_DURATION)
-  );
-
-  console.log(`  [GEN] ${soundConfig.id} (${apiDuration}s)...`);
-
-  try {
-    const response = await fetch(API_URL, {
-      method: "POST",
-      headers: {
-        "xi-api-key": API_KEY,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        text: soundConfig.prompt,
-        duration_seconds: apiDuration,
-        output_format: "mp3_44100_128",
-      }),
+  for (let index = 1; index <= soundConfig.variations; index++) {
+    const suffix = String(index).padStart(2, "0");
+    assets.push({
+      ...soundConfig,
+      id: `${soundConfig.id}_${suffix}`,
+      definitionId: soundConfig.id,
+      filename: formatVariationFilename(soundConfig.variationPattern, index),
+      variation: index,
     });
+  }
 
-    if (!response.ok) {
-      const error = await response.text();
-      throw new Error(`API error ${response.status}: ${error}`);
+  return assets;
+}
+
+function getCategoryAssets(categoryName, includeVariations = true) {
+  const categoryData = SOUNDS[categoryName];
+  if (!categoryData) return [];
+
+  const outputCategory = outputCategoryFor(categoryName);
+  return categoryData.sounds.flatMap((sound) =>
+    expandSoundAssets(sound, includeVariations).map((asset) => ({
+      ...asset,
+      categoryName,
+      outputCategory,
+      relativePath: path.posix.join(outputCategory, asset.filename),
+    }))
+  );
+}
+
+function findSound(soundId) {
+  for (const [categoryName, categoryData] of Object.entries(SOUNDS)) {
+    const sound = categoryData.sounds.find((candidate) => candidate.id === soundId);
+    if (sound) return { categoryName, sound };
+  }
+  return null;
+}
+
+function isSafeRelativePath(value) {
+  if (typeof value !== "string" || value.length === 0 || path.isAbsolute(value)) {
+    return false;
+  }
+  const normalized = path.normalize(value);
+  return normalized !== ".." && !normalized.startsWith(`..${path.sep}`);
+}
+
+function validateCatalog() {
+  const errors = [];
+  const ids = new Set();
+  const outputPaths = new Set();
+
+  for (const [categoryName, categoryData] of Object.entries(SOUNDS)) {
+    if (![1, 2, 3].includes(categoryData.tier)) {
+      errors.push(`${categoryName}: invalid tier ${categoryData.tier}`);
     }
 
-    // Get audio data as buffer
-    const audioBuffer = Buffer.from(await response.arrayBuffer());
+    for (const sound of categoryData.sounds) {
+      if (ids.has(sound.id)) errors.push(`duplicate sound ID: ${sound.id}`);
+      ids.add(sound.id);
 
-    // Save to file
-    fs.writeFileSync(outputPath, audioBuffer);
+      if (typeof sound.prompt !== "string" || sound.prompt.length === 0) {
+        errors.push(`${sound.id}: prompt is empty`);
+      } else if (sound.prompt.length > 450) {
+        errors.push(`${sound.id}: prompt exceeds 450 characters`);
+      }
 
-    console.log(
-      `  [OK] ${soundConfig.filename} (${(audioBuffer.length / 1024).toFixed(
-        1
-      )}KB)`
-    );
-    return { success: true, size: audioBuffer.length };
-  } catch (error) {
-    console.error(`  [ERR] ${soundConfig.id}: ${error.message}`);
-    return { success: false, error: error.message };
+      if (
+        typeof sound.duration !== "number" ||
+        sound.duration < MIN_DURATION ||
+        sound.duration > MAX_DURATION
+      ) {
+        errors.push(`${sound.id}: duration must be ${MIN_DURATION}-${MAX_DURATION}s`);
+      }
+
+      if (
+        sound.activeDuration !== undefined &&
+        (sound.activeDuration <= 0 || sound.activeDuration > sound.duration)
+      ) {
+        errors.push(`${sound.id}: invalid activeDuration`);
+      }
+
+      if (
+        sound.variationPattern !== undefined &&
+        !sound.variationPattern.includes("{index}")
+      ) {
+        errors.push(`${sound.id}: variationPattern must contain {index}`);
+      }
+
+      for (const asset of getCategoryAssets(categoryName)) {
+        if (asset.definitionId !== sound.id) continue;
+        if (!isSafeRelativePath(asset.relativePath)) {
+          errors.push(`${asset.id}: unsafe output path ${asset.relativePath}`);
+        }
+        if (outputPaths.has(asset.relativePath)) {
+          errors.push(`duplicate output path: ${asset.relativePath}`);
+        }
+        outputPaths.add(asset.relativePath);
+      }
+    }
+  }
+
+  return errors;
+}
+
+function buildApiRequest(soundConfig, overrides = {}) {
+  const options = getRuntimeOptions(overrides);
+  const url = new URL(options.apiUrl);
+  url.searchParams.set("output_format", options.outputFormat);
+
+  return {
+    url: url.toString(),
+    body: {
+      text: soundConfig.prompt,
+      duration_seconds: Math.max(
+        MIN_DURATION,
+        Math.min(soundConfig.duration, MAX_DURATION)
+      ),
+      prompt_influence: options.promptInfluence,
+      model_id: options.modelId,
+      loop: false,
+    },
+  };
+}
+
+function assertApiKey(apiKey) {
+  if (
+    typeof apiKey !== "string" ||
+    apiKey.trim().length === 0 ||
+    apiKey === "YOUR_API_KEY_HERE"
+  ) {
+    throw new Error("ELEVENLABS_API_KEY is required for generation");
   }
 }
 
-/**
- * Generate all sounds in a category
- */
-async function generateCategory(
-  categoryName,
-  categoryData,
-  forceRegenerate = false
-) {
-  console.log(
-    `\n=== ${categoryName.toUpperCase()} (${
-      categoryData.sounds.length
-    } sounds) ===`
-  );
+function looksLikeMp3(buffer) {
+  if (!Buffer.isBuffer(buffer) || buffer.length < 4) return false;
+  const hasId3 = buffer.subarray(0, 3).toString("ascii") === "ID3";
+  const hasFrameSync = buffer[0] === 0xff && (buffer[1] & 0xe0) === 0xe0;
+  return hasId3 || hasFrameSync;
+}
 
-  const results = { success: 0, skipped: 0, failed: 0 };
+function trimMp3ToActiveDuration(audioBuffer, soundConfig, options) {
+  if (
+    typeof soundConfig.activeDuration !== "number" ||
+    soundConfig.activeDuration >= soundConfig.duration
+  ) {
+    return audioBuffer;
+  }
 
-  // Map category name to output folder
-  const categoryMap = {
-    ui_extended: "ui",
-    ui_extras: "ui",
-    destruction_variants: "destruction",
-    shields: "movement",
-    environment_extras: "environment",
-    rewards: "rewards",
-    base_destruction: "destruction",
-  };
-  const outputCategory = categoryMap[categoryName] || categoryName;
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "galaxy-miner-sfx-"));
+  const sourcePath = path.join(tempDir, "source.mp3");
+  const outputPath = path.join(tempDir, "trimmed.mp3");
+  const fadeDuration = Math.min(0.008, soundConfig.activeDuration / 4);
+  const fadeStart = Math.max(0, soundConfig.activeDuration - fadeDuration);
+  const filter = [
+    "silenceremove=start_periods=1:start_duration=0:start_threshold=-50dB:start_silence=0.002",
+    `atrim=duration=${soundConfig.activeDuration.toFixed(3)}`,
+    `afade=t=out:st=${fadeStart.toFixed(3)}:d=${fadeDuration.toFixed(3)}`,
+    "loudnorm=I=-18:TP=-3:LRA=7",
+  ].join(",");
 
-  for (const sound of categoryData.sounds) {
-    const result = await generateSound(sound, outputCategory, forceRegenerate);
+  try {
+    fs.writeFileSync(sourcePath, audioBuffer);
+    const result = options.spawnSyncImpl(
+      "ffmpeg",
+      [
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-y",
+        "-i",
+        sourcePath,
+        "-af",
+        filter,
+        "-ac",
+        "1",
+        "-ar",
+        "44100",
+        "-b:a",
+        "128k",
+        outputPath,
+      ],
+      { encoding: "utf8" }
+    );
 
-    if (result.success) {
-      if (result.skipped) {
-        results.skipped++;
-      } else {
-        results.success++;
-      }
-    } else {
-      results.failed++;
+    if (result.error) {
+      throw new Error(`ffmpeg is required to trim short cues: ${result.error.message}`);
+    }
+    if (result.status !== 0 || !fs.existsSync(outputPath)) {
+      const details = (result.stderr || "unknown ffmpeg error").trim();
+      throw new Error(`ffmpeg could not trim ${soundConfig.id}: ${details}`);
     }
 
-    // Delay between API calls
-    if (!result.skipped) {
-      await new Promise((resolve) => setTimeout(resolve, API_DELAY));
+    const trimmed = fs.readFileSync(outputPath);
+    if (!looksLikeMp3(trimmed)) {
+      throw new Error(`ffmpeg produced invalid MP3 data for ${soundConfig.id}`);
+    }
+    return trimmed;
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+}
+
+function writeFileAtomically(outputPath, audioBuffer) {
+  const outputDir = path.dirname(outputPath);
+  fs.mkdirSync(outputDir, { recursive: true });
+  const temporaryPath = `${outputPath}.tmp-${process.pid}-${Date.now()}`;
+
+  try {
+    fs.writeFileSync(temporaryPath, audioBuffer);
+    fs.renameSync(temporaryPath, outputPath);
+  } finally {
+    if (fs.existsSync(temporaryPath)) fs.unlinkSync(temporaryPath);
+  }
+}
+
+function retryDelay(response, attempt) {
+  const retryAfter = Number(response?.headers?.get?.("retry-after"));
+  if (Number.isFinite(retryAfter) && retryAfter >= 0) {
+    return Math.min(retryAfter * 1000, 10000);
+  }
+  return Math.min(500 * 2 ** (attempt - 1), 4000);
+}
+
+async function requestAudio(soundConfig, options) {
+  assertApiKey(options.apiKey);
+  if (typeof options.fetchImpl !== "function") {
+    throw new Error("This Node.js runtime does not provide fetch");
+  }
+
+  const request = buildApiRequest(soundConfig, options);
+  let lastError;
+
+  for (let attempt = 1; attempt <= options.maxAttempts; attempt++) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), options.timeoutMs);
+
+    try {
+      const response = await options.fetchImpl(request.url, {
+        method: "POST",
+        headers: {
+          "xi-api-key": options.apiKey,
+          "Content-Type": "application/json",
+          Accept: "audio/mpeg",
+        },
+        body: JSON.stringify(request.body),
+        signal: controller.signal,
+      });
+
+      if (response.ok) {
+        const audioBuffer = Buffer.from(await response.arrayBuffer());
+        if (!looksLikeMp3(audioBuffer)) {
+          throw new Error("ElevenLabs returned empty or invalid MP3 data");
+        }
+        return audioBuffer;
+      }
+
+      const responseText = (await response.text()).replace(/\s+/g, " ").slice(0, 500);
+      const error = new Error(
+        `ElevenLabs API error ${response.status}: ${responseText || response.statusText}`
+      );
+      const retryable = response.status === 429 || response.status >= 500;
+      if (!retryable || attempt === options.maxAttempts) throw error;
+      lastError = error;
+      await options.sleep(retryDelay(response, attempt));
+    } catch (error) {
+      const isAbort = error?.name === "AbortError";
+      const retryable = isAbort || error instanceof TypeError;
+      lastError = isAbort
+        ? new Error(`ElevenLabs request timed out after ${options.timeoutMs}ms`)
+        : error;
+      if (!retryable || attempt === options.maxAttempts) throw lastError;
+      await options.sleep(retryDelay(null, attempt));
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
+  throw lastError || new Error("ElevenLabs request failed");
+}
+
+/** Generate one concrete output asset using the ElevenLabs API. */
+async function generateSound(soundConfig, category, overrides = {}) {
+  const options = getRuntimeOptions(overrides);
+  const outputPath = path.join(options.outputBase, category, soundConfig.filename);
+
+  if (fs.existsSync(outputPath) && !options.forceRegenerate) {
+    options.logger.log(`  [SKIP] ${soundConfig.id} - already exists`);
+    return { success: true, skipped: true, outputPath };
+  }
+
+  if (options.dryRun) {
+    options.logger.log(
+      `  [DRY] ${soundConfig.id} (${soundConfig.duration}s) -> ${outputPath}`
+    );
+    return { success: true, dryRun: true, outputPath };
+  }
+
+  options.logger.log(`  [GEN] ${soundConfig.id} (${soundConfig.duration}s)...`);
+
+  try {
+    const sourceAudio = await requestAudio(soundConfig, options);
+    const processedAudio = await options.audioProcessor(
+      sourceAudio,
+      soundConfig,
+      options
+    );
+    if (!looksLikeMp3(processedAudio)) {
+      throw new Error(`Audio processor returned invalid MP3 data for ${soundConfig.id}`);
+    }
+    writeFileAtomically(outputPath, processedAudio);
+    options.logger.log(
+      `  [OK] ${soundConfig.filename} (${(processedAudio.length / 1024).toFixed(1)}KB)`
+    );
+    return {
+      success: true,
+      generated: true,
+      outputPath,
+      size: processedAudio.length,
+    };
+  } catch (error) {
+    options.logger.error(`  [ERR] ${soundConfig.id}: ${error.message}`);
+    return { success: false, outputPath, error: error.message };
+  }
+}
+
+function emptyResults() {
+  return { success: 0, skipped: 0, dryRun: 0, failed: 0 };
+}
+
+function addResult(totals, result) {
+  if (!result.success) totals.failed++;
+  else if (result.skipped) totals.skipped++;
+  else if (result.dryRun) totals.dryRun++;
+  else totals.success++;
+}
+
+function mergeResults(totals, results) {
+  for (const key of Object.keys(totals)) totals[key] += results[key] || 0;
+}
+
+/** Generate every concrete asset in one definition category. */
+async function generateCategory(categoryName, categoryData, overrides = {}) {
+  const options = getRuntimeOptions(overrides);
+  const assets = getCategoryAssets(categoryName, options.includeVariations);
+  options.logger.log(
+    `\n=== ${categoryName.toUpperCase()} (${assets.length} assets) ===`
+  );
+  const results = emptyResults();
+
+  for (let index = 0; index < assets.length; index++) {
+    const asset = assets[index];
+    const result = await generateSound(asset, asset.outputCategory, options);
+    addResult(results, result);
+
+    if (result.generated && index < assets.length - 1 && options.apiDelay > 0) {
+      await options.sleep(options.apiDelay);
     }
   }
 
   return results;
 }
 
-/**
- * Generate sounds by tier
- */
-async function generateByTier(targetTier, forceRegenerate = false) {
-  console.log(`\nGenerating Tier ${targetTier} sounds...\n`);
+async function generateCategories(categoryNames, overrides = {}) {
+  const options = getRuntimeOptions(overrides);
+  const totals = emptyResults();
 
-  const totals = { success: 0, skipped: 0, failed: 0 };
-
-  for (const [categoryName, categoryData] of Object.entries(SOUNDS)) {
-    if (categoryData.tier === targetTier) {
-      const results = await generateCategory(
-        categoryName,
-        categoryData,
-        forceRegenerate
-      );
-      totals.success += results.success;
-      totals.skipped += results.skipped;
-      totals.failed += results.failed;
-    }
+  for (const categoryName of categoryNames) {
+    const results = await generateCategory(categoryName, SOUNDS[categoryName], options);
+    mergeResults(totals, results);
   }
 
-  console.log("\n=== SUMMARY ===");
-  console.log(`Generated: ${totals.success}`);
-  console.log(`Skipped: ${totals.skipped}`);
-  console.log(`Failed: ${totals.failed}`);
+  options.logger.log("\n=== SUMMARY ===");
+  options.logger.log(`Generated: ${totals.success}`);
+  options.logger.log(`Dry run: ${totals.dryRun}`);
+  options.logger.log(`Skipped: ${totals.skipped}`);
+  options.logger.log(`Failed: ${totals.failed}`);
+  return totals;
+}
+
+async function generateByTier(targetTier, overrides = {}) {
+  const categoryNames = Object.entries(SOUNDS)
+    .filter(([, categoryData]) => categoryData.tier === targetTier)
+    .map(([categoryName]) => categoryName);
+  return generateCategories(categoryNames, overrides);
+}
+
+async function generateCollection(collectionName, overrides = {}) {
+  const categoryNames = COLLECTIONS[collectionName];
+  if (!categoryNames) throw new Error(`Unknown collection: ${collectionName}`);
+  return generateCategories(categoryNames, overrides);
+}
+
+async function generateSingle(soundId, overrides = {}) {
+  const found = findSound(soundId);
+  if (!found) throw new Error(`Sound not found: ${soundId}`);
+  const options = getRuntimeOptions(overrides);
+  const assets = expandSoundAssets(found.sound, options.includeVariations);
+  const totals = emptyResults();
+
+  for (let index = 0; index < assets.length; index++) {
+    const result = await generateSound(
+      assets[index],
+      outputCategoryFor(found.categoryName),
+      options
+    );
+    addResult(totals, result);
+    if (result.generated && index < assets.length - 1 && options.apiDelay > 0) {
+      await options.sleep(options.apiDelay);
+    }
+  }
 
   return totals;
 }
 
-/**
- * Generate a single sound by ID
- */
-async function generateSingle(soundId, forceRegenerate = false) {
-  for (const [categoryName, categoryData] of Object.entries(SOUNDS)) {
-    const sound = categoryData.sounds.find((s) => s.id === soundId);
-    if (sound) {
-      const categoryMap = {
-        ui_extended: "ui",
-        ui_extras: "ui",
-        destruction_variants: "destruction",
-        shields: "movement",
-        rewards: "rewards",
-        base_destruction: "destruction",
-      };
-      const outputCategory = categoryMap[categoryName] || categoryName;
-      await generateSound(sound, outputCategory, forceRegenerate);
-      return;
-    }
-  }
-  console.error(`Sound not found: ${soundId}`);
-}
-
-/**
- * List all sounds
- */
-function listSounds() {
-  console.log("\n=== ALL SOUNDS ===\n");
-
-  let total = 0;
+function listSounds(logger = console) {
+  logger.log("\n=== ALL SOUNDS ===\n");
+  let definitions = 0;
+  let assets = 0;
 
   for (const [categoryName, categoryData] of Object.entries(SOUNDS)) {
-    console.log(`\n[Tier ${categoryData.tier}] ${categoryName}:`);
+    logger.log(`\n[Tier ${categoryData.tier}] ${categoryName}:`);
     for (const sound of categoryData.sounds) {
-      console.log(`  ${sound.id} (${sound.duration}s) - ${sound.filename}`);
-      total++;
+      const assetCount = expandSoundAssets(sound).length;
+      logger.log(
+        `  ${sound.id} (${sound.duration}s, ${assetCount} asset${assetCount === 1 ? "" : "s"}) - ${sound.filename}`
+      );
+      definitions++;
+      assets += assetCount;
     }
   }
 
-  console.log(`\nTotal: ${total} sounds`);
+  logger.log(`\nTotal: ${definitions} definitions, ${assets} output assets`);
 }
 
-/**
- * Count sounds by tier
- */
 function countSounds() {
   const counts = { 1: 0, 2: 0, 3: 0 };
-
   for (const categoryData of Object.values(SOUNDS)) {
     counts[categoryData.tier] += categoryData.sounds.length;
   }
-
   return counts;
 }
 
-// ================
-// CLI Entry Point
-// ================
+function optionValue(args, option) {
+  const index = args.indexOf(option);
+  return index === -1 ? undefined : args[index + 1];
+}
 
-async function main() {
-  const args = process.argv.slice(2);
-  const forceRegenerate = args.includes("--force");
+function printHelp(logger = console) {
+  logger.log(`
+Usage: node generate.js [selection] [options]
 
-  console.log("Galaxy Miner - ElevenLabs Sound Generator");
-  console.log("=========================================");
+Selections (choose one):
+  --collection <name> Generate a safe aggregate collection
+  --category <name>   Generate one exact definition category
+  --single <id>       Generate one sound family by ID
+  --tier <n>          Generate every category in tier n
 
-  // Parse arguments
+Options:
+  --base-only         Do not generate configured variations
+  --dry-run           Show every output without API calls or writes
+  --output-dir <path> Override the production audio output directory
+  --force             Regenerate files that already exist
+  --validate          Validate prompts, durations, IDs, and paths
+  --list              List all sound definitions and asset counts
+  --count             Show definition counts by tier
+  --help, -h          Show this help
+
+Collections: ${Object.keys(COLLECTIONS).join(", ")}
+Categories: ${Object.keys(SOUNDS).join(", ")}
+
+Examples:
+  node generate.js --dry-run --collection weapon-ui
+  node generate.js --force --collection weapons
+  node generate.js --force --collection ui
+  node generate.js --single weapon_t1 --base-only --output-dir /tmp/sfx-smoke
+
+Use ELEVENLABS_API_KEY for authentication. Tier selections can include
+destruction sounds; use the weapon-ui collection when refreshing weapons/UI.
+`);
+}
+
+async function main(args = process.argv.slice(2), overrides = {}) {
+  const logger = overrides.logger ?? console;
+
+  if (args.includes("--help") || args.includes("-h")) {
+    printHelp(logger);
+    return 0;
+  }
+
+  logger.log("Galaxy Miner - ElevenLabs Sound Generator");
+  logger.log("=========================================");
+
+  if (args.includes("--validate")) {
+    const errors = validateCatalog();
+    if (errors.length > 0) {
+      errors.forEach((error) => logger.error(`  [ERR] ${error}`));
+      return 1;
+    }
+    logger.log("Catalog valid.");
+    return 0;
+  }
+
   if (args.includes("--list")) {
-    listSounds();
-    return;
+    listSounds(logger);
+    return 0;
   }
 
   if (args.includes("--count")) {
     const counts = countSounds();
-    console.log(`\nSound counts by tier:`);
-    console.log(`  Tier 1: ${counts[1]} sounds`);
-    console.log(`  Tier 2: ${counts[2]} sounds`);
-    console.log(`  Tier 3: ${counts[3]} sounds`);
-    console.log(`  Total: ${counts[1] + counts[2] + counts[3]} sounds`);
-    return;
+    logger.log("\nSound definition counts by tier:");
+    logger.log(`  Tier 1: ${counts[1]}`);
+    logger.log(`  Tier 2: ${counts[2]}`);
+    logger.log(`  Tier 3: ${counts[3]}`);
+    logger.log(`  Total: ${counts[1] + counts[2] + counts[3]}`);
+    return 0;
   }
 
-  const tierIndex = args.indexOf("--tier");
-  if (tierIndex !== -1 && args[tierIndex + 1]) {
-    const tier = parseInt(args[tierIndex + 1]);
-    await generateByTier(tier, forceRegenerate);
-    return;
-  }
-
-  const categoryIndex = args.indexOf("--category");
-  if (categoryIndex !== -1 && args[categoryIndex + 1]) {
-    const categoryName = args[categoryIndex + 1];
-    if (SOUNDS[categoryName]) {
-      await generateCategory(
-        categoryName,
-        SOUNDS[categoryName],
-        forceRegenerate
-      );
-    } else {
-      console.error(`Unknown category: ${categoryName}`);
-      console.log("Available categories:", Object.keys(SOUNDS).join(", "));
-    }
-    return;
-  }
-
-  const singleIndex = args.indexOf("--single");
-  if (singleIndex !== -1 && args[singleIndex + 1]) {
-    await generateSingle(args[singleIndex + 1], forceRegenerate);
-    return;
-  }
-
-  // Default: generate Tier 1 sounds
-  console.log(
-    "\nNo arguments provided. Generating Tier 1 (essential) sounds..."
+  const selections = ["--collection", "--category", "--single", "--tier"].filter(
+    (option) => args.includes(option)
   );
-  console.log("Use --help for options.\n");
+  if (selections.length !== 1) {
+    logger.error("Choose exactly one generation selection.");
+    printHelp(logger);
+    return 1;
+  }
 
-  await generateByTier(1, forceRegenerate);
+  const outputBase = optionValue(args, "--output-dir");
+  if (args.includes("--output-dir") && !outputBase) {
+    logger.error("--output-dir requires a path");
+    return 1;
+  }
+
+  const options = getRuntimeOptions({
+    ...overrides,
+    outputBase: outputBase ? path.resolve(outputBase) : overrides.outputBase,
+    forceRegenerate: args.includes("--force"),
+    dryRun: args.includes("--dry-run"),
+    includeVariations: !args.includes("--base-only"),
+    logger,
+  });
+
+  try {
+    let results;
+    if (selections[0] === "--collection") {
+      const collectionName = optionValue(args, "--collection");
+      if (!COLLECTIONS[collectionName]) {
+        logger.error(`Unknown collection: ${collectionName || "(missing)"}`);
+        return 1;
+      }
+      results = await generateCollection(collectionName, options);
+    } else if (selections[0] === "--category") {
+      const categoryName = optionValue(args, "--category");
+      if (!SOUNDS[categoryName]) {
+        logger.error(`Unknown category: ${categoryName || "(missing)"}`);
+        return 1;
+      }
+      results = await generateCategories([categoryName], options);
+    } else if (selections[0] === "--single") {
+      results = await generateSingle(optionValue(args, "--single"), options);
+    } else {
+      const tier = Number(optionValue(args, "--tier"));
+      if (![1, 2, 3].includes(tier)) {
+        logger.error("--tier must be 1, 2, or 3");
+        return 1;
+      }
+      results = await generateByTier(tier, options);
+    }
+    return results.failed > 0 ? 1 : 0;
+  } catch (error) {
+    logger.error(error.message);
+    return 1;
+  }
 }
 
-// Show help
-if (process.argv.includes("--help") || process.argv.includes("-h")) {
-  console.log(`
-Usage: node generate.js [options]
+module.exports = {
+  CATEGORY_OUTPUT_MAP,
+  COLLECTIONS,
+  SOUNDS,
+  buildApiRequest,
+  countSounds,
+  expandSoundAssets,
+  findSound,
+  generateCategory,
+  generateCollection,
+  generateSingle,
+  generateSound,
+  getCategoryAssets,
+  getRuntimeOptions,
+  looksLikeMp3,
+  main,
+  requestAudio,
+  trimMp3ToActiveDuration,
+  validateCatalog,
+  writeFileAtomically,
+};
 
-Options:
-  --list              List all sound definitions
-  --count             Show sound counts by tier
-  --tier <n>          Generate all sounds of tier n (1, 2, or 3)
-  --category <name>   Generate specific category
-  --single <id>       Generate a single sound by ID
-  --force             Regenerate even if files exist
-  --help, -h          Show this help
-
-Categories: ${Object.keys(SOUNDS).join(", ")}
-
-Examples:
-  node generate.js                    # Generate Tier 1 sounds
-  node generate.js --tier 2           # Generate Tier 2 sounds
-  node generate.js --category weapons # Generate weapon sounds
-  node generate.js --single queen_roar # Generate single sound
-  node generate.js --force --tier 1   # Force regenerate Tier 1
-`);
-  process.exit(0);
+if (require.main === module) {
+  main()
+    .then((exitCode) => {
+      process.exitCode = exitCode;
+    })
+    .catch((error) => {
+      console.error(error.message);
+      process.exitCode = 1;
+    });
 }
-
-main().catch(console.error);

@@ -123,6 +123,13 @@
 /* Portrait mode is now supported - rotation prompt disabled */
 /* Game canvas and UI container remain visible in portrait */
 
+/* Custom game/radar gestures own these surfaces. Keep terminal content and
+   ordinary controls available to native browser scrolling and zoom. */
+body.is-mobile #gameCanvas,
+body.is-mobile #radar-canvas {
+  touch-action: none;
+}
+
 /* Legacy: rotation prompt can be re-enabled if needed
 body.is-mobile.is-portrait .rotation-prompt {
   display: flex;
@@ -149,8 +156,8 @@ body.is-mobile .virtual-joystick {
 }
 
 .virtual-joystick .joystick-base {
-  width: 120px;
-  height: 120px;
+  width: var(--joystick-size, 120px);
+  height: var(--joystick-size, 120px);
   border-radius: 50%;
   background: rgba(68, 102, 255, 0.15);
   border: 2px solid rgba(68, 102, 255, 0.4);
@@ -168,8 +175,8 @@ body.is-mobile .virtual-joystick {
   top: 50%;
   left: 50%;
   transform: translate(-50%, -50%);
-  width: 50px;
-  height: 50px;
+  width: var(--joystick-knob-size, 50px);
+  height: var(--joystick-knob-size, 50px);
   border-radius: 50%;
   background: radial-gradient(circle at 30% 30%,
     rgba(136, 170, 255, 0.9),

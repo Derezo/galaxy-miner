@@ -63,7 +63,7 @@ function isValidMessage(message) {
  * @returns {boolean}
  */
 function isPositiveInteger(value) {
-  return Number.isInteger(value) && value > 0;
+  return Number.isSafeInteger(value) && value > 0;
 }
 
 /**
@@ -76,12 +76,19 @@ function isValidCoordinate(value) {
 }
 
 /**
- * Validates rotation value (in radians, -PI to PI range is typical but allow any finite)
+ * Validates a normalized rotation value in radians.
  * @param {*} value
  * @returns {boolean}
  */
 function isValidRotation(value) {
-  return typeof value === 'number' && Number.isFinite(value);
+  return typeof value === 'number' &&
+    Number.isFinite(value) &&
+    Math.abs(value) <= Math.PI * 2;
+}
+
+function normalizeRotation(value) {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return 0;
+  return Math.atan2(Math.sin(value), Math.cos(value));
 }
 
 /**
@@ -90,7 +97,7 @@ function isValidRotation(value) {
  * @returns {boolean}
  */
 function isValidPrice(value) {
-  return Number.isInteger(value) && value >= 0;
+  return Number.isSafeInteger(value) && value >= 0;
 }
 
 /**
@@ -99,7 +106,7 @@ function isValidPrice(value) {
  * @returns {boolean}
  */
 function isValidQuantity(value) {
-  return Number.isInteger(value) && value > 0;
+  return Number.isSafeInteger(value) && value > 0;
 }
 
 // ============================================
@@ -187,6 +194,10 @@ function validatePlayerInput(data) {
   // Validate rotation
   if (!isValidRotation(data.rotation)) {
     return { valid: false, error: 'Invalid rotation value' };
+  }
+
+  if (data.boostActive !== undefined && typeof data.boostActive !== 'boolean') {
+    return { valid: false, error: 'Invalid boost state' };
   }
 
   // Sanity check on velocity magnitude
@@ -400,6 +411,7 @@ module.exports = {
   isPositiveInteger,
   isValidCoordinate,
   isValidRotation,
+  normalizeRotation,
   isValidPrice,
   isValidQuantity,
 

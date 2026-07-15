@@ -262,9 +262,9 @@ const ChatUI = {
     }
 
     const radarTier = Player.radarTier || 1;
-    const baseRange = CONSTANTS.BASE_RADAR_RANGE || 500;
-    const tierMult = CONSTANTS.TIER_MULTIPLIER || 1.5;
-    const radarRange = baseRange * Math.pow(tierMult, radarTier - 1);
+    const radarRange = (typeof Utils !== 'undefined' && typeof Utils.getRadarRange === 'function')
+      ? Utils.getRadarRange(radarTier)
+      : (CONSTANTS.RADAR_TIERS?.[radarTier]?.range || CONSTANTS.BASE_RADAR_RANGE);
     const broadcastRange = radarRange * 2;
 
     this.addLocalMessage('=== Radar Info ===');

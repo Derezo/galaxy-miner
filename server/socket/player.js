@@ -8,7 +8,112 @@
 const config = require('../config');
 const { statements } = require('../database');
 const combat = require('../game/combat');
+const { normalizeRotation, validatePlayerInput } = require('../validators');
+const {
+  setPlayerBoostAuthority,
+  clearPlayerBoostAuthority
+} = require('./boost-authority');
 const logger = require('../../shared/logger');
+
+const MOVEMENT_PREDICTION_CUSHION = 1.25;
+const MOVEMENT_BURST_WINDOW_MS = 250;
+const BOOST_INERTIA_GRACE_MS = 2000;
+
+function getPlayerTier(player, key) {
+  return Math.max(
+    1,
+    Math.min(config.MAX_TIER || 5, Number(player[key]) || 1)
+  );
+}
+
+function playerHasWarpDrive(player) {
+  if (Array.isArray(player.relicTypes) && player.relicTypes.includes('SUBSPACE_WARP_DRIVE')) {
+    return true;
+  }
+
+  try {
+    return !!statements.hasRelic?.get(player.id, 'SUBSPACE_WARP_DRIVE');
+  } catch (_error) {
+    return false;
+  }
+}
+
+function updateBoostAuthority(player, requested, now) {
+  if (now < (player.serverBoostRecoveryEndAt || 0)) return true;
+  if (!requested || now < (player.serverBoostCooldownEndAt || 0)) return false;
+
+  const energyCoreTier = getPlayerTier(player, 'energyCoreTier');
+  const boostConfig = config.ENERGY_CORE?.BOOST || {};
+  let duration = Number(boostConfig.DURATION?.[energyCoreTier]) || 1000;
+  let cooldown = Number(boostConfig.COOLDOWN?.[energyCoreTier]) || 15000;
+
+  if (playerHasWarpDrive(player)) {
+    const effects = config.RELIC_TYPES?.SUBSPACE_WARP_DRIVE?.effects || {};
+    duration *= Number(effects.boostDurationMultiplier) || 2.5;
+    cooldown *= Number(effects.boostCooldownMultiplier) || 0.75;
+  }
+
+  duration = Math.max(0, Math.round(duration));
+  cooldown = Math.max(duration, Math.round(cooldown));
+  player.serverBoostEndAt = now + duration;
+  player.serverBoostRecoveryEndAt = player.serverBoostEndAt + BOOST_INERTIA_GRACE_MS;
+  player.serverBoostCooldownEndAt = now + cooldown;
+  setPlayerBoostAuthority(player.id, {
+    boostEndAt: player.serverBoostEndAt,
+    recoveryEndAt: player.serverBoostRecoveryEndAt,
+    cooldownEndAt: player.serverBoostCooldownEndAt
+  });
+  return true;
+}
+
+function getMovementSpeedLimit(player, boostEnvelopeActive) {
+  const engineTier = Math.max(
+    1,
+    Math.min(config.MAX_TIER || 5, Number(player.engineTier) || 1)
+  );
+  const energyCoreTier = Math.max(
+    1,
+    Math.min(config.MAX_TIER || 5, Number(player.energyCoreTier) || 1)
+  );
+  const boostMultipliers = config.ENERGY_CORE?.BOOST?.SPEED_MULTIPLIER || [];
+  const maximumBoostMultiplier = Math.max(
+    1,
+    Number(boostMultipliers[energyCoreTier]) || 1
+  );
+  const boostMultiplier = boostEnvelopeActive ? maximumBoostMultiplier : 1;
+
+  return (config.BASE_SPEED || 150) *
+    Math.pow(config.TIER_MULTIPLIER || 1.5, engineTier - 1) * boostMultiplier;
+}
+
+/**
+ * Token-bucket movement envelope. Time refills a bounded displacement budget;
+ * packets never receive a fresh minimum allowance merely by arriving.
+ */
+function consumeMovementBudget(player, displacement, maxSpeed, now) {
+  const syncInterval = config.POSITION_SYNC_RATE || 50;
+  const tolerance = config.POSITION_SYNC_TOLERANCE || 30;
+  const refillRate = maxSpeed * MOVEMENT_PREDICTION_CUSHION;
+  const capacity = refillRate * (MOVEMENT_BURST_WINDOW_MS / 1000) + tolerance;
+  const initialBudget = refillRate * (syncInterval / 1000) + tolerance;
+  const previousBudgetAt = Number.isFinite(player.movementBudgetAt)
+    ? player.movementBudgetAt
+    : now;
+  const elapsedMs = Math.max(0, Math.min(1000, now - previousBudgetAt));
+  const previousBudget = Number.isFinite(player.movementBudget)
+    ? player.movementBudget
+    : initialBudget;
+  const available = Math.min(capacity, previousBudget + refillRate * (elapsedMs / 1000));
+
+  player.movementBudgetAt = now;
+  if (displacement > available) {
+    player.movementBudget = available;
+    return false;
+  }
+
+  player.movementBudget = Math.max(0, available - displacement);
+  return true;
+}
 
 /**
  * Register player socket event handlers
@@ -27,21 +132,47 @@ function register(socket, deps) {
     const player = connectedPlayers.get(socket.id);
     if (!player) return;
 
-    // Validate and update position
-    // For MVP, we trust the client position with basic sanity checks
-    const maxSpeed = config.BASE_SPEED * Math.pow(config.TIER_MULTIPLIER, 5); // Max possible speed
+    const validation = validatePlayerInput(data);
+    if (!validation.valid) {
+      logger.warn(`Rejected invalid movement input from ${player.username}: ${validation.error}`);
+      return;
+    }
 
-    // Basic sanity check on velocity
-    const speed = Math.sqrt(data.vx * data.vx + data.vy * data.vy);
-    if (speed > maxSpeed * 2) {
-      logger.warn(`Player ${player.username} moving too fast: ${speed}`);
+    // Dead players and players being moved by the wormhole system cannot
+    // overwrite their authoritative server position with client prediction.
+    if (player.isDead || deps.wormhole.isInTransit(authenticatedUserId)) {
+      return;
+    }
+
+    const now = Date.now();
+    const displacement = Math.hypot(
+      data.x - player.position.x,
+      data.y - player.position.y
+    );
+    const boostEnvelopeActive = updateBoostAuthority(player, data.boostActive === true, now);
+    const slowModifier = typeof deps.engine.getSlowModifier === 'function'
+      ? Math.max(0.1, Math.min(1, deps.engine.getSlowModifier(authenticatedUserId)))
+      : 1;
+    const movementSpeedLimit = getMovementSpeedLimit(player, boostEnvelopeActive) * slowModifier;
+    const reportedSpeed = Math.hypot(data.vx, data.vy);
+    if (reportedSpeed > movementSpeedLimit * MOVEMENT_PREDICTION_CUSHION * 1.5) {
+      logger.warn(`Rejected impossible velocity from ${player.username}: ${reportedSpeed.toFixed(1)}`);
+      return;
+    }
+
+    if (!consumeMovementBudget(player, displacement, movementSpeedLimit, now)) {
+      logger.warn(
+        `Rejected teleport displacement from ${player.username}: ` +
+        `${displacement.toFixed(1)} exceeds accumulated movement budget`
+      );
       return;
     }
 
     // Update player state
     player.position = { x: data.x, y: data.y };
     player.velocity = { x: data.vx, y: data.vy };
-    player.rotation = data.rotation;
+    player.rotation = normalizeRotation(data.rotation);
+    player.lastMovementAt = now;
 
     // Update player spatial hash for efficient broadcast queries
     deps.engine.updatePlayerInHash(socket.id, player);
@@ -62,7 +193,7 @@ function register(socket, deps) {
 
     if (!player.lastSave || Date.now() - player.lastSave > saveInterval) {
       statements.updateShipPosition.run(
-        data.x, data.y, data.rotation,
+        data.x, data.y, player.rotation,
         data.vx, data.vy,
         sectorX, sectorY,
         authenticatedUserId
@@ -76,9 +207,11 @@ function register(socket, deps) {
       username: player.username,
       x: data.x,
       y: data.y,
-      rotation: data.rotation,
+      rotation: player.rotation,
       hull: player.hull,
+      hullMax: player.hullMax,
       shield: player.shield,
+      shieldMax: player.shieldMax,
       status: getPlayerStatus(authenticatedUserId),
       colorId: player.colorId || 'green'
     });
@@ -98,6 +231,7 @@ function register(socket, deps) {
     const player = connectedPlayers.get(socket.id);
     if (!player) {
       logger.warn('[RESPAWN] Player not found in connectedPlayers');
+      socket.emit('respawn:error', { message: 'Player session is not ready' });
       return;
     }
 
@@ -106,13 +240,40 @@ function register(socket, deps) {
     // Validate player is actually dead
     if (!player.isDead) {
       logger.warn(`[RESPAWN] Player ${player.username} tried to respawn but isDead=${player.isDead}`);
+      socket.emit('respawn:error', { message: 'You are not awaiting respawn' });
+      return;
+    }
+
+    if (!data || typeof data !== 'object') {
+      logger.warn(`[RESPAWN] Player ${player.username} sent an invalid selection`);
+      socket.emit('respawn:error', { message: 'Invalid respawn selection' });
       return;
     }
 
     const { type, targetId } = data;
 
     // Apply respawn at selected location
-    const respawnResult = combat.applyRespawn(authenticatedUserId, type, targetId);
+    let respawnResult;
+    let respawnInventory;
+    try {
+      // Inventory does not change during respawn. Read and validate it before
+      // committing the respawn so a snapshot failure cannot leave the server
+      // alive while the client is still waiting for player:respawn.
+      respawnInventory = statements.getInventory.all(authenticatedUserId);
+      if (!Array.isArray(respawnInventory)) {
+        throw new Error('Respawn inventory snapshot failed');
+      }
+      respawnResult = combat.applyRespawn(
+        authenticatedUserId,
+        type,
+        targetId,
+        player.respawnOptions || null
+      );
+    } catch (error) {
+      logger.error(`[RESPAWN] Failed for player ${player.username}:`, error);
+      socket.emit('respawn:error', { message: 'Respawn failed; please try again' });
+      return;
+    }
 
     // Update player state
     player.position = respawnResult.position;
@@ -122,6 +283,14 @@ function register(socket, deps) {
     player.isDead = false;
     player.deathTime = null;
     player.deathPosition = null;
+    player.respawnOptions = null;
+    player.lastMovementAt = Date.now();
+    player.movementBudget = null;
+    player.movementBudgetAt = player.lastMovementAt;
+    player.serverBoostEndAt = 0;
+    player.serverBoostRecoveryEndAt = 0;
+    player.serverBoostCooldownEndAt = 0;
+    clearPlayerBoostAuthority(player.id);
 
     // Update player spatial hash for new respawn position
     deps.engine.updatePlayerInHash(socket.id, player);
@@ -131,6 +300,7 @@ function register(socket, deps) {
       position: respawnResult.position,
       hull: respawnResult.hull,
       shield: respawnResult.shield,
+      inventory: respawnInventory,
       locationName: respawnResult.locationName,
       // Include hive destruction info if applicable
       hiveDestruction: respawnResult.hiveDestruction || null
@@ -140,19 +310,20 @@ function register(socket, deps) {
     if (respawnResult.hiveDestruction) {
       const destruction = respawnResult.hiveDestruction;
 
-      // Broadcast hive implosion to all players (dramatic effect visible from far away)
-      io.emit('hive:coreImplosion', {
+      // Hive Core effects reveal authoritative world positions, so deliver
+      // them only to recipients whose radar broadcast range reaches the AoE.
+      deps.broadcasts?.emitNear(destruction.hivePosition, 'hive:coreImplosion', {
         hiveId: destruction.hiveId,
         position: destruction.hivePosition,
         destructionRadius: destruction.destructionRadius,
         killedNpcCount: destruction.killedNpcs.length,
         playerId: authenticatedUserId,
         playerName: player.username
-      });
+      }, destruction.destructionRadius);
 
       // Broadcast each spawned wreckage
       for (const wreckage of destruction.spawnedWreckage) {
-        io.emit('wreckage:spawn', {
+        deps.broadcasts?.emitNear(wreckage.position, 'wreckage:spawn', {
           id: wreckage.id,
           x: wreckage.position.x,
           y: wreckage.position.y,
@@ -162,12 +333,12 @@ function register(socket, deps) {
           npcType: wreckage.npcType,
           npcName: wreckage.npcName,
           contentCount: wreckage.contents?.length || 0
-        });
+        }, Number(wreckage.size) || 0);
       }
 
       // Broadcast each NPC death
       for (const killedNpc of destruction.killedNpcs) {
-        io.emit('npc:destroyed', {
+        deps.broadcasts?.emitNear(killedNpc.position, 'npc:destroyed', {
           id: killedNpc.id,
           destroyedBy: authenticatedUserId,
           faction: 'swarm',

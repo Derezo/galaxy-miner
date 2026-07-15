@@ -125,12 +125,23 @@ const FleetPanel = {
     let healthPercent = 100;
     if (typeof Entities !== 'undefined' && !isMe) {
       const entityPlayer = Entities.players.get(member.id);
-      if (entityPlayer && entityPlayer.hull) {
-        healthPercent = Math.round((entityPlayer.hull.current / entityPlayer.hull.max) * 100);
+      if (entityPlayer && entityPlayer.hull !== undefined) {
+        const current = typeof entityPlayer.hull === 'number'
+          ? entityPlayer.hull
+          : entityPlayer.hull.current;
+        const maximum = typeof entityPlayer.hull === 'number'
+          ? (entityPlayer.hullMax || entityPlayer.maxHull || 100)
+          : entityPlayer.hull.max;
+        healthPercent = maximum > 0 ? Math.round((current / maximum) * 100) : 0;
       }
     } else if (isMe && typeof Player !== 'undefined') {
-      healthPercent = Math.round((Player.hull / Player.hullMax) * 100);
+      healthPercent = Player.hull?.max > 0
+        ? Math.round((Player.hull.current / Player.hull.max) * 100)
+        : 0;
     }
+    healthPercent = Number.isFinite(healthPercent)
+      ? Math.max(0, Math.min(100, healthPercent))
+      : 0;
 
     return `
       <div class="fleet-member ${isMe ? 'is-me' : ''} ${isMemberLeader ? 'is-leader' : ''}">

@@ -12,13 +12,16 @@ const MobileGestures = {
       return;
     }
 
-    const canvas = document.getElementById('game-canvas');
+    const canvas = document.getElementById('gameCanvas');
     if (!canvas) {
       Logger.warn('MobileGestures: Canvas not found');
       return;
     }
 
-    GestureHandler.init(canvas, {
+    // Radar and terminal controls are siblings of the game canvas. Listen at
+    // the document boundary so their gestures are reachable as well; the
+    // gesture handler filters native interactive controls.
+    GestureHandler.init(document, {
       onSwipe: this.handleSwipe.bind(this),
       onPinch: this.handlePinch.bind(this),
       onLongPress: this.handleLongPress.bind(this),
@@ -34,6 +37,7 @@ const MobileGestures = {
    * - Left swipe on right edge: Open terminal
    */
   handleSwipe(data) {
+    if (!this._isGameplayAvailable()) return;
     const { direction, startX, startY, endX, endY } = data;
 
     // Check if swipe started on terminal panel
@@ -73,6 +77,7 @@ const MobileGestures = {
    * - Pinch on radar: Zoom radar in/out
    */
   handlePinch(data) {
+    if (!this._isGameplayAvailable()) return;
     const { scale, center, isZoomIn, isZoomOut } = data;
 
     // Check if pinch is on radar area
@@ -91,6 +96,7 @@ const MobileGestures = {
    * - Long press on entity: Show info/target
    */
   handleLongPress(data) {
+    if (!this._isGameplayAvailable()) return;
     const { x, y } = data;
 
     // Check if on radar - could show entity details
@@ -98,6 +104,9 @@ const MobileGestures = {
       // Future: show radar entity tooltip
       return;
     }
+
+    // UI interactions must never leak through into a gameplay boost.
+    if (this._isOnTerminal(x, y) || this._isOnHUD(x, y)) return;
 
     // Long press on game area - could auto-target nearest enemy
     if (typeof Combat !== 'undefined' && typeof Player !== 'undefined') {
@@ -110,6 +119,7 @@ const MobileGestures = {
    * - Double tap: Auto-fire toggle or boost
    */
   handleDoubleTap(data) {
+    if (!this._isGameplayAvailable()) return;
     const { x, y } = data;
 
     // Double tap on radar - toggle sector map
@@ -122,15 +132,23 @@ const MobileGestures = {
       return;
     }
 
-    // Double tap on game area - activate boost
-    if (typeof Input !== 'undefined' && typeof Player !== 'undefined') {
-      if (Player.boost > 20) {
-        // Trigger boost
-        Input.keys.boost = true;
-        setTimeout(() => {
-          Input.keys.boost = false;
-        }, 100);
-      }
+    // UI interactions must never leak through into a gameplay boost.
+    if (this._isOnTerminal(x, y) || this._isOnHUD(x, y)) return;
+
+    // Double tap on game area - activate the real player ability. Going through
+    // Player keeps duration, audio, relic modifiers, and cooldown state in sync.
+    if (typeof Player === 'undefined' || typeof Player.activateBoost !== 'function') return;
+    if (Player.isDead || Player.inWormholeTransit) return;
+
+    const boostActive = typeof Player.isBoostActive === 'function'
+      ? Player.isBoostActive()
+      : Player.boostActive;
+    const boostOnCooldown = typeof Player.isBoostOnCooldown === 'function'
+      ? Player.isBoostOnCooldown()
+      : Date.now() < (Player.boostCooldownEnd || 0);
+
+    if (!boostActive && !boostOnCooldown) {
+      Player.activateBoost();
     }
   },
 
@@ -144,6 +162,11 @@ const MobileGestures = {
     const rect = terminal.getBoundingClientRect();
     return x >= rect.left && x <= rect.right &&
            y >= rect.top && y <= rect.bottom;
+  },
+
+  _isGameplayAvailable() {
+    if (typeof GalaxyMiner === 'undefined') return true;
+    return GalaxyMiner.gameStarted === true && GalaxyMiner.connectionPaused !== true;
   },
 
   /**
@@ -162,11 +185,13 @@ const MobileGestures = {
    * Check if coordinates are within HUD bounds
    */
   _isOnHUD(x, y) {
-    const hud = document.getElementById('hud');
-    if (!hud) return false;
+    if (typeof document.elementFromPoint !== 'function') return false;
+    const target = document.elementFromPoint(x, y);
+    if (!target || typeof target.closest !== 'function') return false;
 
-    // HUD elements are at top-left
-    return x < 200 && y < 150;
+    // #hud itself covers the full viewport with pointer-events disabled. Test
+    // the actual hit element so empty gameplay canvas remains boost-capable.
+    return !!target.closest('#hud, .mobile-action-buttons, .virtual-joystick');
   }
 };
 

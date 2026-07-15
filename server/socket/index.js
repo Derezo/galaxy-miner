@@ -44,10 +44,14 @@ const connectionHandlers = require('./connection');
 
 module.exports = function(io) {
   // Create broadcast functions bound to io instance
-  const broadcasts = createBroadcasts(io);
+  const broadcasts = createBroadcasts(io, helpers.connectedPlayers);
 
   io.on('connection', (socket) => {
     logger.log(`Client connected: ${socket.id}`);
+
+    // Install before any application listeners so both synchronous exceptions
+    // and asynchronous rejections are contained at the socket boundary.
+    helpers.installSafeSocketBoundary(socket, logger);
 
     // Per-socket authenticated user state (closure)
     let authenticatedUserId = null;
@@ -124,8 +128,8 @@ module.exports = function(io) {
         broadcastToNearby: helpers.broadcastToNearby,
 
         // Team loot distribution (pass io for team notifications)
-        distributeTeamCredits: (credits, contributors, collectorId) =>
-          helpers.distributeTeamCredits(io, credits, contributors, collectorId),
+        distributeTeamCredits: (credits, contributors, collectorId, pendingCredits) =>
+          helpers.distributeTeamCredits(io, credits, contributors, collectorId, pendingCredits),
         distributeTeamResources: (contents, contributors, collectorId) =>
           helpers.distributeTeamResources(io, contents, contributors, collectorId),
         processCollectedLoot: (userId, contents) =>
@@ -165,6 +169,8 @@ module.exports = function(io) {
     io,
     connectedPlayers: helpers.connectedPlayers,
     userSockets: helpers.userSockets,
+    setPlayerStatus: helpers.setPlayerStatus,
+    getPlayerStatus: helpers.getPlayerStatus,
     // Swarm broadcasts
     broadcastDroneSacrifice: broadcasts.broadcastDroneSacrifice,
     broadcastAssimilationProgress: broadcasts.broadcastAssimilationProgress,
@@ -174,6 +180,8 @@ module.exports = function(io) {
     broadcastQueenAura: broadcasts.broadcastQueenAura,
     // Tesla cannon broadcasts
     broadcastChainLightning: broadcasts.broadcastChainLightning,
-    broadcastTeslaCoil: broadcasts.broadcastTeslaCoil
+    broadcastTeslaCoil: broadcasts.broadcastTeslaCoil,
+    // Scavenger boss telegraphs
+    broadcastDrillCharge: broadcasts.broadcastDrillCharge
   };
 };

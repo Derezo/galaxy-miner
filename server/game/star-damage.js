@@ -6,7 +6,8 @@ const combat = require('./combat');
 const Physics = require('../../shared/physics');
 const config = require('../config');
 const loot = require('./loot');
-const { statements } = require('../database');
+const mining = require('./mining');
+const wormhole = require('./wormhole');
 
 // Track last zone for each player (to detect zone changes)
 const playerZones = new Map();
@@ -16,15 +17,23 @@ const playerZones = new Map();
  * @param {Map} connectedPlayers - Map of socket ID to player data
  * @param {Object} io - Socket.io server instance
  * @param {number} deltaTime - Time since last update in milliseconds
+ * @param {Function|null} setPlayerStatus - Authoritative status updater
+ * @param {Function|null} deathHandler - Canonical engine death handler
  */
-function update(connectedPlayers, io, deltaTime) {
+function update(
+  connectedPlayers,
+  io,
+  deltaTime,
+  setPlayerStatus = null,
+  deathHandler = null
+) {
   if (!connectedPlayers || connectedPlayers.size === 0) return;
 
   const dt = deltaTime / 1000; // Convert to seconds
 
   for (const [socketId, player] of connectedPlayers) {
-    // Skip dead players - they can't take damage
-    if (player.isDead) continue;
+    // Wormhole selection/transit is an invulnerable, out-of-world state.
+    if (player.isDead || wormhole.isInTransit(player.id)) continue;
 
     const damage = checkStarDamage(player, dt);
 
@@ -45,7 +54,16 @@ function update(connectedPlayers, io, deltaTime) {
 
     // Check if player died from star damage
     if (player.hull <= 0) {
-      handlePlayerDeath(player, io, socketId, damage.starId);
+      if (typeof deathHandler === 'function') {
+        deathHandler(player, 'Stellar radiation', socketId, {
+          cause: 'star',
+          type: 'environment',
+          name: 'Star',
+          starId: damage.starId
+        });
+      } else {
+        handlePlayerDeath(player, io, socketId, damage.starId, setPlayerStatus);
+      }
     }
   }
 }
@@ -146,11 +164,7 @@ function applyDamage(player, shieldDrain, hullDamage, io, socketId) {
 
   // Persist damage to database (critical for reconnection handling)
   // This ensures hull/shield state survives socket reconnects
-  statements.updateShipHealth.run(
-    Math.floor(player.hull),
-    Math.floor(player.shield),
-    player.id
-  );
+  combat.syncExternalHealth(player.id, player.hull, player.shield, true);
 
   // Notify player of damage
   io.to(socketId).emit('star:damage', {
@@ -169,12 +183,39 @@ function applyDamage(player, shieldDrain, hullDamage, io, socketId) {
  * @param {string} socketId - Player's socket ID
  * @param {string} starId - ID of the star that killed them
  */
-function handlePlayerDeath(player, io, socketId, starId) {
+function handlePlayerDeath(player, io, socketId, starId, setPlayerStatus = null) {
   // Get death position
   const deathPosition = { x: player.position.x, y: player.position.y };
 
+  // Fail closed before any fallible settlement/loot work. Production supplies
+  // the canonical engine handler above; this keeps standalone use equally safe.
+  if (player.isDead) return;
+  player.isDead = true;
+  player.deathTime = Date.now();
+  player.deathPosition = deathPosition;
+  mining.cancelMining(player.id);
+  if (typeof setPlayerStatus === 'function') {
+    setPlayerStatus(player.id, 'idle');
+  }
+  if (typeof loot.cancelCollectionsForPlayer === 'function') {
+    loot.cancelCollectionsForPlayer(player.id);
+  }
+  wormhole.cleanupPlayer(player.id);
+
   // Handle death with deferred respawn (no immediate respawn)
-  const deathResult = combat.handleDeath(player.id, deathPosition);
+  let deathResult;
+  try {
+    deathResult = combat.handleDeath(player.id, deathPosition);
+  } catch (_error) {
+    deathResult = {
+      droppedCargo: [],
+      wreckageContents: [],
+      respawnOptions: { type: 'graveyard', message: 'Returning to The Graveyard...' },
+      playerName: player.username || 'Unknown',
+      inventory: null
+    };
+  }
+  player.respawnOptions = deathResult.respawnOptions;
 
   // Spawn player wreckage if there's anything to drop
   if (deathResult.wreckageContents && deathResult.wreckageContents.length > 0) {
@@ -206,14 +247,10 @@ function handlePlayerDeath(player, io, socketId, starId) {
     starId: starId,
     deathPosition,
     droppedCargo: deathResult.droppedCargo,
+    inventory: deathResult.inventory,
     wreckageSpawned: deathResult.wreckageContents && deathResult.wreckageContents.length > 0,
     respawnOptions: deathResult.respawnOptions
   });
-
-  // Mark player as dead - DON'T respawn immediately, wait for respawn:select event
-  player.isDead = true;
-  player.deathTime = Date.now();
-  player.deathPosition = deathPosition;
 
   // Clear zone state
   playerZones.delete(player.id);

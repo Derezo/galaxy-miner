@@ -389,7 +389,7 @@ class MiningStrategy {
    * Trigger rage for all rogue miners in range
    * Called when ANY rogue miner is attacked
    */
-  triggerRage(attackedNpc, attackerId, allNPCs) {
+  triggerRage(attackedNpc, attackerId, allNPCs, attackerType = 'player') {
     const results = [];
 
     // Find all rogue miners within rage spread range
@@ -402,10 +402,12 @@ class MiningStrategy {
         if (!this.enragedNPCs.has(npcId)) {
           this.enragedNPCs.set(npcId, {
             targetId: attackerId,
+            targetType: attackerType,
             enragedAt: Date.now()
           });
           npc.state = 'enraged';
-          npc.targetPlayer = attackerId;
+          npc.targetPlayer = attackerType === 'player' ? attackerId : null;
+          npc.targetNPC = attackerType === 'npc' ? attackerId : null;
 
           // Clear any mining state
           this.clearAllState(npc);
@@ -423,7 +425,7 @@ class MiningStrategy {
       this.rageTargets.get(attackerId).add(npcId);
     }
 
-    logger.log(`[ROGUE_MINER] Rage triggered! ${results.length} miners enraged against player ${attackerId}`);
+    logger.log(`[ROGUE_MINER] Rage triggered! ${results.length} miners enraged against ${attackerType} ${attackerId}`);
 
     return {
       action: 'rogueMiner:rage',
@@ -445,7 +447,14 @@ class MiningStrategy {
     }
 
     // Find the target
-    const target = nearbyPlayers.find(p => p.id === rageData.targetId);
+    const playerTarget = nearbyPlayers.find(p =>
+      p?.id !== null && p?.id !== undefined &&
+      String(p.id) === String(rageData.targetId)
+    );
+    const npcTarget = rageData.targetType === 'npc' && context.allNPCs instanceof Map
+      ? context.allNPCs.get(rageData.targetId)
+      : null;
+    const target = playerTarget || (npcTarget?.hull > 0 ? npcTarget : null);
 
     if (!target) {
       // Target left area - clear rage
@@ -576,8 +585,38 @@ class MiningStrategy {
   /**
    * Called when NPC takes damage - triggers rage for all nearby
    */
-  onDamaged(npc, attackerId, allNPCs) {
-    return this.triggerRage(npc, attackerId, allNPCs);
+  onDamaged(npc, attackerId, allNPCs, attackerType = 'player') {
+    return this.triggerRage(npc, attackerId, allNPCs, attackerType);
+  }
+
+  /**
+   * Claim-wide player rage persists beyond ordinary aggro, bounded by the
+   * strategy's own clear range. NPC attackers use the all-NPC context instead.
+   */
+  getPlayerTargetRetentionRange(npc) {
+    const rageData = this.enragedNPCs.get(npc?.id);
+    if (!rageData || rageData.targetType !== 'player' ||
+        npc.targetPlayer === null || npc.targetPlayer === undefined ||
+        String(rageData.targetId) !== String(npc.targetPlayer)) {
+      return 0;
+    }
+    return this.RAGE_CLEAR_RANGE;
+  }
+
+  /**
+   * Release claim-wide rage when its player target is no longer eligible for
+   * simulation. clearRage also removes the reverse rageTargets membership.
+   */
+  clearRetainedPlayerTarget(npc) {
+    const rageData = this.enragedNPCs.get(npc?.id);
+    if (!rageData || rageData.targetType !== 'player' ||
+        npc.targetPlayer === null || npc.targetPlayer === undefined ||
+        String(rageData.targetId) !== String(npc.targetPlayer)) {
+      return false;
+    }
+
+    this.clearRage(npc);
+    return true;
   }
 
   /**
@@ -621,6 +660,7 @@ class MiningStrategy {
     this.enragedNPCs.delete(npc.id);
     npc.state = 'idle';
     npc.targetPlayer = null;
+    npc.targetNPC = null;
   }
 
   /**
@@ -636,6 +676,12 @@ class MiningStrategy {
     this.returningNPCs.delete(npcId);
     this.depositingNPCs.delete(npcId);
     this.enragedNPCs.delete(npcId);
+    for (const [targetId, targetSet] of this.rageTargets) {
+      targetSet.delete(npcId);
+      if (targetSet.size === 0) {
+        this.rageTargets.delete(targetId);
+      }
+    }
   }
 
   /**

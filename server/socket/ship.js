@@ -22,13 +22,20 @@ function register(socket, deps) {
   socket.on('ship:upgrade', (data) => {
     const authenticatedUserId = getAuthenticatedUserId();
     logger.log('[UPGRADE] Received upgrade request:', data, 'from user:', authenticatedUserId);
+    let player;
+    let component;
+    let result;
+
+    // Everything in this block either rejects before mutation or executes in
+    // the atomic upgrade transaction. Once it returns success, later cache or
+    // delivery failures must never be translated into upgrade:error.
     try {
       if (!authenticatedUserId) {
         socket.emit('upgrade:error', { message: 'Not authenticated' });
         return;
       }
 
-      const player = connectedPlayers.get(socket.id);
+      player = connectedPlayers.get(socket.id);
       if (!player) {
         socket.emit('upgrade:error', { message: 'Player not found' });
         return;
@@ -40,7 +47,7 @@ function register(socket, deps) {
         return;
       }
 
-      const { component } = data;
+      ({ component } = data);
 
       if (!VALID_COMPONENTS.has(component)) {
         socket.emit('upgrade:error', { message: 'Invalid component' });
@@ -75,22 +82,32 @@ function register(socket, deps) {
       }
 
       // Use transaction to perform upgrade atomically (checks credits + resources)
-      const result = performUpgrade(authenticatedUserId, component, requirements, config.MAX_TIER);
+      result = performUpgrade(authenticatedUserId, component, requirements, config.MAX_TIER);
 
       if (!result.success) {
         socket.emit('upgrade:error', { message: result.error });
         return;
       }
+    } catch (err) {
+      logger.error(`[UPGRADE ERROR] User ${getAuthenticatedUserId()} upgrading ${data?.component}:`, err.message);
+      logger.error(err.stack);
+      socket.emit('upgrade:error', { message: 'Upgrade failed due to a server error. Please try again.' });
+      return;
+    }
 
-      // Get updated ship and inventory
-      const updatedShip = statements.getShipByUserId.get(authenticatedUserId);
-      const updatedInventory = statements.getInventory.all(authenticatedUserId);
+    const updatedShip = result.ship;
+    const updatedInventory = result.inventory;
+    const updatedCredits = getSafeCredits(updatedShip);
 
-      // Update player state cache
-      player.credits = getSafeCredits(updatedShip);
+    // Cache synchronization is best-effort after commit. The authoritative DB
+    // snapshot below remains a success even if an in-memory side effect fails.
+    try {
+      player.credits = updatedCredits;
+      if (component === 'engine') player.engineTier = result.newTier;
       if (component === 'radar') player.radarTier = result.newTier;
       if (component === 'mining') player.miningTier = result.newTier;
       if (component === 'weapon') player.weaponTier = result.newTier;
+      if (component === 'cargo') player.cargoTier = result.newTier;
       if (component === 'energy_core') player.energyCoreTier = result.newTier;
       if (component === 'hull') {
         player.hullTier = result.newTier;
@@ -99,13 +116,24 @@ function register(socket, deps) {
       if (component === 'shield') {
         player.shieldTier = result.newTier;
         player.shieldMax = updatedShip.shield_max;
+        deps.combat.invalidateShieldRechargeState(authenticatedUserId);
       }
+    } catch (err) {
+      logger.error(
+        `[UPGRADE CACHE ERROR] User ${authenticatedUserId} upgraded ${component}, ` +
+        `but live cache synchronization failed: ${err.message}`
+      );
+    }
 
-      // Send upgrade success with updated max values for shield/hull
+    // A successful transaction always gets success semantics. If transport
+    // delivery itself throws, log it and let reconnect authentication supply
+    // the same authoritative snapshot; never send a contradictory rejection.
+    try {
       socket.emit('upgrade:success', {
         component,
         newTier: result.newTier,
-        credits: player.credits,
+        credits: updatedCredits,
+        inventory: updatedInventory,
         shieldMax: updatedShip.shield_max,
         hullMax: updatedShip.hull_max
       });
@@ -113,12 +141,13 @@ function register(socket, deps) {
       // Also send updated inventory since resources were consumed
       socket.emit('inventory:update', {
         inventory: updatedInventory,
-        credits: player.credits
+        credits: updatedCredits
       });
     } catch (err) {
-      logger.error(`[UPGRADE ERROR] User ${getAuthenticatedUserId()} upgrading ${data?.component}:`, err.message);
-      logger.error(err.stack);
-      socket.emit('upgrade:error', { message: 'Upgrade failed due to a server error. Please try again.' });
+      logger.error(
+        `[UPGRADE DELIVERY ERROR] User ${authenticatedUserId} upgraded ${component}, ` +
+        `but the authoritative response could not be delivered: ${err.message}`
+      );
     }
   });
 
@@ -129,6 +158,7 @@ function register(socket, deps) {
 
     const ship = statements.getShipByUserId.get(authenticatedUserId);
     if (ship) {
+      const inventory = statements.getInventory.all(authenticatedUserId);
       socket.emit('ship:data', {
         engine_tier: ship.engine_tier,
         weapon_type: ship.weapon_type,
@@ -140,6 +170,7 @@ function register(socket, deps) {
         energy_core_tier: ship.energy_core_tier || 1,
         hull_tier: ship.hull_tier || 1,
         credits: ship.credits,
+        inventory,
         ship_color_id: ship.ship_color_id || 'green',
         profile_id: ship.profile_id || 'pilot'
       });
@@ -154,6 +185,10 @@ function register(socket, deps) {
     const player = connectedPlayers.get(socket.id);
     if (!player) return;
 
+    if (!data || typeof data !== 'object') {
+      socket.emit('ship:colorError', { message: 'Invalid color selection' });
+      return;
+    }
     const { colorId } = data;
 
     // Validate color ID against available options (O(1) Set lookup)
@@ -192,6 +227,10 @@ function register(socket, deps) {
     const player = connectedPlayers.get(socket.id);
     if (!player) return;
 
+    if (!data || typeof data !== 'object') {
+      socket.emit('ship:profileError', { message: 'Invalid profile selection' });
+      return;
+    }
     const { profileId } = data;
 
     // Validate profile ID against available options (O(1) Set lookup)

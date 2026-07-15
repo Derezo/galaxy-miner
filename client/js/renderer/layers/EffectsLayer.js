@@ -39,10 +39,17 @@ const EffectsLayer = {
     if (typeof VoidEffects !== 'undefined') {
       VoidEffects.draw(ctx, camera);
     }
+    if (typeof LeviathanSpawn !== 'undefined') {
+      LeviathanSpawn.draw(ctx, camera);
+    }
 
     // Draw linked damage effect (formation damage sharing)
     if (typeof LinkedDamageEffect !== 'undefined') {
       LinkedDamageEffect.draw(ctx, camera);
+    }
+
+    if (typeof QueenVisuals !== 'undefined') {
+      QueenVisuals.drawPhaseTransitions(ctx, camera);
     }
 
     // Draw formation succession effect

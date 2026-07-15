@@ -62,6 +62,15 @@ const GestureHandler = {
    * Handle touch start
    */
   onTouchStart(e) {
+    // The joystick listener is registered first and claims its canvas touch by
+    // preventing the event. Never reinterpret thrust as a swipe/double-tap.
+    if (e.defaultPrevented) return;
+    if (this.shouldIgnoreTarget(e.target)) {
+      this.cancelLongPress();
+      this._lastTapTime = 0;
+      this._lastTapPosition = null;
+      return;
+    }
     const now = Date.now();
 
     for (const touch of e.changedTouches) {
@@ -91,6 +100,7 @@ const GestureHandler = {
 
         if (distance < 30) {
           // Double tap detected
+          touch.consumed = true;
           this.cancelLongPress();
           this.triggerDoubleTap(touch.startX, touch.startY);
           this._lastTapTime = 0;
@@ -108,6 +118,17 @@ const GestureHandler = {
       this.cancelLongPress();
       this._initialPinchDistance = this.getPinchDistance();
     }
+  },
+
+  /**
+   * Preserve native behavior for controls that own their touch interaction.
+   */
+  shouldIgnoreTarget(target) {
+    if (!target || typeof target.closest !== 'function') return false;
+    return !!target.closest(
+      'button, input, textarea, select, a, [contenteditable="true"], ' +
+      '.mobile-action-buttons, .virtual-joystick, [data-gesture-ignore]'
+    );
   },
 
   /**
@@ -168,7 +189,7 @@ const GestureHandler = {
       }
 
       // Track for double-tap detection (only if not moved)
-      if (!tracked.moved && duration < 200) {
+      if (!tracked.moved && !tracked.consumed && duration < 200) {
         this._lastTapTime = now;
         this._lastTapPosition = { x: tracked.startX, y: tracked.startY };
       }

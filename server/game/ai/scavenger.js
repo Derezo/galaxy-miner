@@ -46,6 +46,27 @@ class ScavengerStrategy {
   }
 
   /**
+   * Scavengers may only consume completely unreserved wreckage. Pending credit
+   * shares are bound to specific players and cannot be deposited in a yard.
+   */
+  isWreckageAvailable(wreckage) {
+    if (!wreckage || wreckage.beingCollectedBy) return false;
+    return !Array.isArray(wreckage.pendingCredits) || !wreckage.pendingCredits.some(reward => {
+      const playerId = Number(reward?.playerId);
+      const credits = Number(reward?.credits);
+      return Number.isSafeInteger(playerId) && playerId > 0 &&
+        Number.isFinite(credits) && credits > 0;
+    });
+  }
+
+  abandonWreckage(npc) {
+    this.collectingNPCs.delete(npc.id);
+    npc.collectingWreckagePos = null;
+    npc.targetWreckageId = null;
+    npc.state = 'idle';
+  }
+
+  /**
    * Main update for scavenger behavior
    */
   update(npc, nearbyPlayers, nearbyAllies, deltaTime, context) {
@@ -104,12 +125,7 @@ class ScavengerStrategy {
     const wreckageInRange = loot.getWreckageInRange(npc.position, this.WRECKAGE_SEARCH_RANGE);
 
     // Filter out wreckage being collected by others
-    const available = wreckageInRange.filter(w => {
-      // Skip if being collected by a player
-      if (w.beingCollectedBy) return false;
-      // Skip if already targeted by another scavenger (could add tracking later)
-      return true;
-    });
+    const available = wreckageInRange.filter(w => this.isWreckageAvailable(w));
 
     if (available.length === 0) return null;
 
@@ -123,6 +139,15 @@ class ScavengerStrategy {
    * Move toward wreckage
    */
   seekWreckage(npc, wreckage, deltaTime, context) {
+    // Re-read the authoritative object on every seek tick. A player may have
+    // reserved it after this scavenger selected its target.
+    const currentWreckage = loot.getWreckage(wreckage?.id);
+    if (!this.isWreckageAvailable(currentWreckage)) {
+      this.abandonWreckage(npc);
+      return null;
+    }
+    wreckage = currentWreckage;
+
     const dx = wreckage.position.x - npc.position.x;
     const dy = wreckage.position.y - npc.position.y;
     const dist = Math.sqrt(dx * dx + dy * dy);
@@ -148,6 +173,13 @@ class ScavengerStrategy {
    * Start collecting wreckage
    */
   startCollecting(npc, wreckage) {
+    const currentWreckage = loot.getWreckage(wreckage?.id);
+    if (!this.isWreckageAvailable(currentWreckage)) {
+      this.abandonWreckage(npc);
+      return null;
+    }
+    wreckage = currentWreckage;
+
     npc.state = 'collecting';
     // Store wreckage position on NPC for tractor beam rendering
     npc.collectingWreckagePos = {
@@ -187,7 +219,7 @@ class ScavengerStrategy {
 
       // Get the wreckage
       const wreckage = loot.getWreckage(collectData.wreckageId);
-      if (wreckage) {
+      if (this.isWreckageAvailable(wreckage)) {
         // Store wreckage contents on NPC
         if (!npc.carriedWreckage) {
           npc.carriedWreckage = [];
@@ -230,8 +262,9 @@ class ScavengerStrategy {
         return collectedAction;
       }
 
-      // Wreckage was taken - go back to seeking
-      npc.state = 'idle';
+      // Wreckage was taken, reserved by a player, or now contains an
+      // owner-bound credit retry. Leave it intact and choose another target.
+      this.abandonWreckage(npc);
     }
 
     return null;
@@ -354,15 +387,17 @@ class ScavengerStrategy {
   /**
    * Trigger rage for this NPC and nearby allies
    */
-  triggerRage(npc, targetId, nearbyAllies, reason = 'attack') {
+  triggerRage(npc, targetId, nearbyAllies, reason = 'attack', targetType = 'player') {
     // Enrage this NPC
     this.enragedNPCs.set(npc.id, {
       targetId,
+      targetType,
       enragedAt: Date.now(),
       reason
     });
     npc.state = 'enraged';
-    npc.targetPlayer = targetId;
+    npc.targetPlayer = targetType === 'player' ? targetId : null;
+    npc.targetNPC = targetType === 'npc' ? targetId : null;
 
     // Spread rage to nearby allies
     for (const ally of nearbyAllies) {
@@ -375,11 +410,13 @@ class ScavengerStrategy {
       if (dist <= this.RAGE_SPREAD_RANGE) {
         this.enragedNPCs.set(ally.id, {
           targetId,
+          targetType,
           enragedAt: Date.now(),
           reason: 'spread'
         });
         ally.state = 'enraged';
-        ally.targetPlayer = targetId;
+        ally.targetPlayer = targetType === 'player' ? targetId : null;
+        ally.targetNPC = targetType === 'npc' ? targetId : null;
       }
     }
 
@@ -414,7 +451,14 @@ class ScavengerStrategy {
     }
 
     // Find the target
-    const target = nearbyPlayers.find(p => p.id === rageData.targetId);
+    const playerTarget = nearbyPlayers.find(p =>
+      p?.id !== null && p?.id !== undefined &&
+      String(p.id) === String(rageData.targetId)
+    );
+    const npcTarget = rageData.targetType === 'npc' && context.allNPCs instanceof Map
+      ? context.allNPCs.get(rageData.targetId)
+      : null;
+    const target = playerTarget || (npcTarget?.hull > 0 ? npcTarget : null);
 
     if (!target) {
       // Target left area - check if should clear rage
@@ -423,6 +467,7 @@ class ScavengerStrategy {
         this.enragedNPCs.delete(npc.id);
         npc.state = 'idle';
         npc.targetPlayer = null;
+        npc.targetNPC = null;
         return {
           action: 'scavenger:rageClear',
           npcId: npc.id
@@ -440,6 +485,7 @@ class ScavengerStrategy {
         this.enragedNPCs.delete(npc.id);
         npc.state = 'idle';
         npc.targetPlayer = null;
+        npc.targetNPC = null;
         return {
           action: 'scavenger:rageClear',
           npcId: npc.id
@@ -619,8 +665,42 @@ class ScavengerStrategy {
   /**
    * Called when NPC takes damage - triggers rage
    */
-  onDamaged(npc, attackerId, nearbyAllies) {
-    return this.triggerRage(npc, attackerId, nearbyAllies, 'attack');
+  onDamaged(npc, attackerId, nearbyAllies, attackerType = 'player') {
+    return this.triggerRage(npc, attackerId, nearbyAllies, 'attack', attackerType);
+  }
+
+  /**
+   * Player retaliation deliberately outlives passive detection, but only while
+   * this strategy owns an active player-rage record for the NPC.
+   */
+  getPlayerTargetRetentionRange(npc) {
+    const rageData = this.enragedNPCs.get(npc?.id);
+    if (!rageData || rageData.targetType !== 'player' ||
+        npc.targetPlayer === null || npc.targetPlayer === undefined ||
+        String(rageData.targetId) !== String(npc.targetPlayer)) {
+      return 0;
+    }
+    return this.RAGE_CLEAR_RANGE;
+  }
+
+  /**
+   * Release rage immediately when its retained player is no longer alive and
+   * connected. Waiting for a spatial AI update can preserve stale aggression
+   * indefinitely when there are no eligible players left to simulate it.
+   */
+  clearRetainedPlayerTarget(npc) {
+    const rageData = this.enragedNPCs.get(npc?.id);
+    if (!rageData || rageData.targetType !== 'player' ||
+        npc.targetPlayer === null || npc.targetPlayer === undefined ||
+        String(rageData.targetId) !== String(npc.targetPlayer)) {
+      return false;
+    }
+
+    this.enragedNPCs.delete(npc.id);
+    npc.state = 'idle';
+    npc.targetPlayer = null;
+    npc.targetNPC = null;
+    return true;
   }
 
   /**

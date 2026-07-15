@@ -26,9 +26,18 @@ const Network = {
       }
     });
 
-    this.socket.on('disconnect', () => {
+    this.socket.on('disconnect', (reason) => {
       Logger.log('Disconnected from server');
       this.connected = false;
+      if (typeof GalaxyMiner !== 'undefined') GalaxyMiner.handleDisconnect();
+
+      // Socket.IO deliberately disables automatic reconnection after a
+      // server-forced disconnect. Re-open the transport so a displaced
+      // session can log in again without requiring a page reload.
+      if (reason === 'io server disconnect' &&
+          this.socket && typeof this.socket.connect === 'function') {
+        this.socket.connect();
+      }
     });
 
     // Auth events - handled in /client/js/network/auth.js
@@ -70,6 +79,17 @@ const Network = {
     this.token = null;
     this.socket.emit('auth:logout');
     GalaxyMiner.stopGame();
+    if (typeof ShipUpgradePanel !== 'undefined' &&
+        typeof ShipUpgradePanel.reset === 'function') {
+      ShipUpgradePanel.reset();
+    } else if (typeof UpgradesUI !== 'undefined' &&
+        typeof UpgradesUI.reset === 'function') {
+      UpgradesUI.reset();
+    }
+    if (typeof HUD !== 'undefined' &&
+        typeof HUD.clearUpgradeIndicator === 'function') {
+      HUD.clearUpgradeIndicator();
+    }
   },
 
   sendMovement(input) {
@@ -121,8 +141,9 @@ const Network = {
   },
 
   sendUpgrade(component) {
-    if (!this.connected) return;
+    if (!this.connected || !this.socket) return false;
     this.socket.emit('ship:upgrade', { component });
+    return true;
   },
 
   ping() {

@@ -31,8 +31,10 @@ function register(socket, deps) {
     }
     player.lastChat = Date.now();
 
-    // Validate message
-    let message = (data.message || '').trim();
+    // Validate message without invoking string methods on attacker-controlled
+    // objects.
+    if (!data || typeof data.message !== 'string') return;
+    const message = data.message.trim();
     if (!message || message.length > config.CHAT_MAX_LENGTH) return;
 
     // Save to database

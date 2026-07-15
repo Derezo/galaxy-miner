@@ -24,7 +24,7 @@ Galaxy Miner uses a **lightweight component-based UI architecture** built on van
 - **Reactive State Store**: Pub/sub pattern for automatic UI updates
 - **Component Factory**: Reusable UI components with lifecycle hooks
 - **Modal Controller**: Centralized modal management with stacking
-- **Icon System**: Parameterized SVG icons for 26 resource types
+- **Icon System**: Parameterized SVG icons for 27 resource types
 - **Panel System**: Modular panels for Terminal UI (Cargo, Market, Upgrades, etc.)
 - **CSS Custom Properties**: Themeable design system
 
@@ -333,7 +333,7 @@ const el = createElement('div', { className: 'card', dataset: { id: '123' } }, [
 
 ### 4. IconFactory (`icons/IconFactory.js`)
 
-Generates parameterized SVG icons for all 26 resource types.
+Generates parameterized SVG icons for all 27 resource types.
 
 #### API
 

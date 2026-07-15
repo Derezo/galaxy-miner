@@ -807,7 +807,7 @@ const NPCShipGeometry = {
     // Use special spider visuals for swarm queen
     if (npcType === 'swarm_queen' && typeof QueenVisuals !== 'undefined') {
       // Pass world position for eye tracking
-      QueenVisuals.draw(ctx, screenPos.x, screenPos.y, rotation, time || Date.now(), null, position);
+      QueenVisuals.draw(ctx, screenPos.x, screenPos.y, rotation, time || Date.now(), npc, position);
       return;
     }
 
@@ -821,7 +821,8 @@ const NPCShipGeometry = {
     const variantNum = this.getVariant(npcType);
     const actualFaction = faction || this.getFaction(npcType);
     const colors = this.FACTION_COLORS[actualFaction] || this.FACTION_COLORS.pirate;
-    const scale = this.SIZE_SCALE[variantNum] || 1;
+    const scale = (this.SIZE_SCALE[variantNum] || 1) *
+      Math.max(0.5, Number(npc?.sizeMultiplier) || 1);
 
     const shipPath = this.cachedPaths[variant];
     if (!shipPath) {

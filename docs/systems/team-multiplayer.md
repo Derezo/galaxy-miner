@@ -20,7 +20,7 @@ Galaxy Miner implements a **team loot system** where players who contribute dama
 
 - **Automatic Teaming**: Players who damage the same NPC become temporary teammates
 - **Damage Tracking**: Server tracks each player's damage contribution
-- **Shared Credits**: Credits distributed proportionally based on damage dealt
+- **Shared Credits**: The multiplied credit pool is split equally among valid damage contributors
 - **Rarity-Based Resource Distribution**: Common/uncommon split, rare/ultrarare to collector only
 - **Team Bonus Multipliers**: More participants = higher total rewards
 
@@ -46,7 +46,7 @@ When an NPC dies, it creates **wreckage** containing:
 
 | Item Type | Distribution Method |
 |-----------|---------------------|
-| Credits | Proportional to damage dealt (with team multiplier) |
+| Credits | Equal contributor shares (with team multiplier and owner-specific relic bonus) |
 | Common Resources | Split equally among all contributors |
 | Uncommon Resources | Split equally among all contributors |
 | Rare Resources | Collector only (teammates notified) |
@@ -67,15 +67,15 @@ When an NPC dies, it creates **wreckage** containing:
 **Distribution:**
 1. **Credits** (with 2.0x team multiplier for 3 players):
    - Total pool: 100 × 2.0 = 200 credits
-   - Player A: 200 × 0.50 = 100 credits
-   - Player B: 200 × 0.30 = 60 credits
-   - Player C: 200 × 0.20 = 40 credits
+   - Player A: 67 credits
+   - Player B: 67 credits
+   - Player C: 66 credits
 
 2. **Iron (common, split equally)**:
    - Player A: 3 Iron (4 if rounding)
    - Player B: 3 Iron
    - Player C: 3 Iron
-   - (10 total: 3+3+4 = 10, extra to player with highest damage)
+   - (10 total: 4+3+3 = 10; the deterministic remainder recipient gets one extra)
 
 3. **Platinum (rare, collector only)**:
    - Whoever collects wreckage gets 5 Platinum
@@ -155,166 +155,54 @@ TEAM_MULTIPLIERS: {
 - Total: 150 credits
 - Each player gets: 75 credits
 
-**Trio Kill (3 players, 40-40-20 damage):**
+**Trio Kill (3 contributors):**
 - Base reward: 100 credits
 - Multiplier: 2.0x
 - Total: 200 credits
-- Player A: 200 × 0.40 = 80 credits
-- Player B: 200 × 0.40 = 80 credits
-- Player C: 200 × 0.20 = 40 credits
+- Player A: 67 credits
+- Player B: 67 credits
+- Player C: 66 credits
 
 **Squad Kill (4+ players):**
 - Base reward: 100 credits
 - Multiplier: 2.5x (capped at 4)
 - Total: 250 credits
-- Distributed proportionally
+- Split equally, with deterministic whole-credit remainders
 
 ### Rationale
 
 Team multipliers **encourage cooperation** without punishing solo players:
 
 - Solo players get 100% of base reward (no penalty)
-- Teams get bonus total rewards split proportionally
-- High-contribution players still earn more than low-contribution
+- Teams get a bonus total pool split equally among contributors
+- Every contributor receives a predictable share once they helped earn the kill
 - 4+ players capped to prevent exploitation
 
 ## Credit Distribution
 
 ### Implementation
 
-```javascript
-// /server/handlers/loot.js - distributeTeamCredits()
-function distributeTeamCredits(baseCredits, damageContributors, collectorId, io, userSockets) {
-  const participants = Object.keys(damageContributors);
-  const participantCount = participants.length;
+`server/socket/helpers.js::distributeTeamCredits()` normalizes contributor IDs, applies the team multiplier, and splits the whole-credit pool without rounding inflation. Pirate Treasure is evaluated separately for each reward owner. A collector who did not contribute receives no team-credit share. If no contribution record exists, the collector is treated as the solo owner.
 
-  // Apply team multiplier
-  const teamMultiplier = config.TEAM_MULTIPLIERS[Math.min(participantCount, 4)] || 2.5;
-  const totalCredits = Math.floor(baseCredits * teamMultiplier);
+Base-destruction credits follow the same whole-credit invariant: the declared
+`totalCredits` pool is divided across validated contributors with deterministic
+remainders. The sum of `base:reward` awards can never exceed that pool.
 
-  // Calculate total damage
-  const totalDamage = Object.values(damageContributors).reduce((sum, dmg) => sum + dmg, 0);
-
-  const distributed = [];
-
-  for (const [userIdStr, damage] of Object.entries(damageContributors)) {
-    const userId = parseInt(userIdStr, 10);
-    const proportion = damage / totalDamage;
-    const playerCredits = Math.floor(totalCredits * proportion);
-
-    // Add credits to database
-    const ship = statements.getShipByUserId.get(userId);
-    if (ship) {
-      const newCredits = getSafeCredits(ship) + playerCredits;
-      safeUpdateCredits(newCredits, userId);
-
-      distributed.push({ playerId: userId, credits: playerCredits });
-
-      // Notify player
-      const socketId = userSockets.get(userId);
-      if (socketId && userId !== collectorId) {
-        io.to(socketId).emit('loot:teamShare', {
-          credits: playerCredits,
-          yourDamage: damage,
-          totalDamage: totalDamage,
-          teamSize: participantCount
-        });
-      }
-    }
-  }
-
-  return {
-    total: totalCredits,
-    collectorCredits: distributed.find(d => d.playerId === collectorId)?.credits || 0,
-    distributed
-  };
-}
-```
+Every successful SQLite write is reported in `distributed`. A failed write is returned in `pendingCredits` as an exact `{ playerId, credits }` share. A later collection retries that exact amount without applying the team or relic multiplier again.
 
 ### Player Notification
 
 When a teammate contributes to a kill, they receive:
 
-```javascript
-socket.on('loot:teamShare', ({ credits, yourDamage, totalDamage, teamSize }) => {
-  console.log(`Team kill! You earned ${credits} credits (${yourDamage}/${totalDamage} damage, ${teamSize} players)`);
-});
-```
+Online non-collector recipients receive `team:creditReward`; offline recipients still receive the durable database award and will see the new balance at their next authentication.
 
 ## Resource Distribution
 
 ### By Rarity
 
-```javascript
-// /server/handlers/loot.js - distributeTeamResources()
-function distributeTeamResources(contents, damageContributors, collectorId, io, userSockets) {
-  const participants = Object.keys(damageContributors);
-  const participantCount = participants.length;
+`server/socket/helpers.js::distributeTeamResources()` splits common and uncommon units equally among normalized contributors. Whole-unit remainders go to a deterministic recipient, preferring a contributing collector. Rare and ultrarare resources, buffs, components, and relics are assigned to the collector.
 
-  const collectorLoot = [];
-  const teamNotifications = [];
-
-  for (const item of contents) {
-    if (item.type === 'resource') {
-      const rarity = getRarity(item.resourceType);
-
-      if (rarity === 'common' || rarity === 'uncommon') {
-        // Split equally among all contributors
-        const perPlayer = Math.floor(item.quantity / participantCount);
-        const remainder = item.quantity % participantCount;
-
-        for (const [userIdStr, damage] of Object.entries(damageContributors)) {
-          const userId = parseInt(userIdStr, 10);
-          let share = perPlayer;
-
-          // Give remainder to highest damage contributor
-          if (remainder > 0 && userId === getHighestDamagePlayer(damageContributors)) {
-            share += remainder;
-          }
-
-          // Add to inventory
-          safeUpsertInventory(userId, item.resourceType, share);
-
-          if (userId === collectorId) {
-            collectorLoot.push({ type: 'resource', resourceType: item.resourceType, quantity: share });
-          }
-        }
-      } else if (rarity === 'rare' || rarity === 'ultrarare') {
-        // Collector only, notify teammates
-        collectorLoot.push(item);
-
-        teamNotifications.push({
-          type: 'rare_drop',
-          resourceType: item.resourceType,
-          quantity: item.quantity,
-          rarity
-        });
-      }
-    } else {
-      // Buffs, components, relics always go to collector
-      collectorLoot.push(item);
-    }
-  }
-
-  // Notify teammates of rare drops
-  for (const [userIdStr] of Object.entries(damageContributors)) {
-    const userId = parseInt(userIdStr, 10);
-    if (userId !== collectorId) {
-      const socketId = userSockets.get(userId);
-      if (socketId) {
-        io.to(socketId).emit('loot:teamNotification', {
-          rareDrops: teamNotifications
-        });
-      }
-    }
-  }
-
-  return {
-    collectorLoot,
-    rareDropNotifications: teamNotifications
-  };
-}
-```
+Before each resource write, the helper reads that recipient's ship tier and total inventory. It grants at most the remaining `CARGO_CAPACITY`; overflow or a rejected write is returned in `remainingLoot` for `finalizeCollection()` to leave on the wreckage. `teamShares` contains only resources that were actually persisted.
 
 ### Rationale
 
@@ -349,29 +237,25 @@ function distributeTeamResources(contents, damageContributors, collectorId, io, 
 
 4. Collection completes
    ├─ Calculate team multiplier (based on contributor count)
-   ├─ Distribute credits proportionally
+   ├─ Split the multiplied credit pool equally among contributors
    ├─ Distribute common/uncommon resources equally
    ├─ Give rare/ultrarare to collector only
-   ├─ Update all player inventories/credits in database
+   ├─ Cap every resource recipient to current cargo capacity
+   ├─ Update player inventories/credits in database
    ├─ Notify all contributors via socket events
-   └─ Remove wreckage from world
+   └─ Remove only empty wreckage; preserve overflow/rejected rewards
 ```
 
-### Database Transactions
+### Durable two-phase settlement
 
-Credit and resource distribution uses **atomic transactions** to prevent:
+Wreckage collection uses an exclusive claim followed by two-phase settlement:
 
-- Race conditions (multiple collectors)
-- Partial updates (credit transfer but not resources)
-- Data loss (server crash during distribution)
+1. The server clock reaches the collection duration while the wreckage remains locked and present.
+2. Credit and inventory writes run synchronously through SQLite.
+3. Only successful awards are removed from the wreckage. Resource overflow and rejected items remain in `contents`; failed credits remain as exact owner-bound `pendingCredits`.
+4. `finalizeCollection()` removes the wreckage only when no value remains, otherwise it unlocks it with a fresh claim window.
 
-```javascript
-// /server/database.js - Transaction helpers
-const distributeLoot = db.transaction((wreckage, collectorId) => {
-  // All credit updates and inventory inserts happen atomically
-  // Either all succeed or all rollback
-});
-```
+This prevents duplicate collectors and avoids deleting rewards before durable writes. Notification failures do not roll back or retry an already successful database award.
 
 ### Edge Cases
 
@@ -385,7 +269,7 @@ const distributeLoot = db.transaction((wreckage, collectorId) => {
 **2. Contributor offline when collected:**
 
 - Credits and resources added to offline player's account
-- Notification queued for next login (not implemented in MVP)
+- No transient socket notification is queued; authentication loads the durable balances
 
 **3. NPC despawns before collection:**
 
@@ -395,8 +279,8 @@ const distributeLoot = db.transaction((wreckage, collectorId) => {
 **4. Solo player collects team kill:**
 
 - Receives full rare/ultrarare loot
-- Credits/common resources already distributed to contributors
-- Only gets collector's proportional share
+- Credits/common resources are distributed to recorded contributors during settlement
+- A non-contributing collector gets no team credit or common/uncommon share
 
 ## Configuration
 
@@ -493,7 +377,8 @@ socket.on('loot:teamShare', ({ credits }) => {
 
 ## Related Files
 
-- `/server/handlers/loot.js` - Team distribution logic
+- `/server/socket/helpers.js` - Team distribution and cargo-aware persistence
+- `/server/socket/loot.js` - Collection orchestration and two-phase settlement
 - `/server/handlers/combat.js` - Damage contribution tracking
 - `/server/game/npc.js` - Wreckage creation
 - `/server/game/engine.js` - NPC state management

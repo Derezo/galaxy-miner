@@ -6,13 +6,18 @@ Galaxy Miner features 5 distinct NPC factions, each with unique behaviors, AI st
 
 ## Faction Roster
 
-| Faction | AI Strategy | Retreat Threshold | Spawn Hub | Spawn Rate |
-|---------|-------------|-------------------|-----------|------------|
-| Pirates | Flanking | 40% | Pirate Outpost | 1 per 15 sectors |
-| Scavengers | Retreat | 20% | Scavenger Yard | 1 per 25 sectors |
-| Swarm | Swarm (never retreat) | 0% | Swarm Hive | 1 per 50 sectors (rare) |
-| Void Entities | Formation | 30% | Void Rift | 1 per 40 sectors |
-| Rogue Miners | Territorial | 50% | Mining Claim | 1 per 20 sectors |
+| Faction | Live strategy | Signature behavior | Spawn hub | Spawn rate |
+|---------|---------------|--------------------|-----------|------------|
+| Pirates | Pirate role strategy | Scouts gather intel; fighters dive; captains raid; Dreadnoughts rampage | Pirate Outpost | 1 per 15 sectors |
+| Scavengers | Scavenging strategy | Collect wreckage while passive; rage when provoked | Scavenger Yard | 1 per 25 sectors |
+| Swarm | Swarm strategy | Never retreats; linked health, assimilation, Queen phases | Swarm Hive | 1 per 50 sectors (rare) |
+| Void Entities | Formation strategy | Formation succession, coordinated fire, Leviathan abilities | Void Rift | 1 per 40 sectors |
+| Rogue Miners | Mining strategy | Mine and deposit resources; claim-wide rage when attacked | Mining Claim | 1 per 20 sectors |
+
+`server/game/ai/index.js` is the strategy router. The older generic flanking,
+retreat, and territorial strategies remain available as reusable modules, but
+Pirates, Scavengers, and Rogue Miners use their dedicated `pirate`,
+`scavenger`, and `mining` strategies in live faction dispatch.
 
 ## Pirates
 
@@ -25,42 +30,48 @@ Galaxy Miner features 5 distinct NPC factions, each with unique behaviors, AI st
 - **Weapon Visual**: Orange cannon projectiles with trails
 - **Death Effect**: Violent explosion with orange/red particles
 
-### AI Strategy: Flanking
+### AI Strategy: Espionage and Raids
 
-**Behavior** (`/server/game/ai/flanking.js`):
-1. **Target Selection**: Focus fire on targets already being attacked by allies
-2. **Positioning**: Distribute around target in 270° arc on opposite side from base
-3. **Movement**: Approach to 80% of weapon range, then hold position
-4. **Coordination**: Attack angle spacing based on number of attackers
-5. **Retreat**: Fall back to base when health drops below 40%
-
-**Tactical Patterns**:
-- Solo pirate: Direct frontal assault
-- 2-3 pirates: Pincer attack from sides
-- 4+ pirates: Full surround with front/back coverage
+**Behavior** (`/server/game/ai/pirate.js`):
+1. **Scouts** patrol away from the outpost, observe targets, and return with
+   short-lived intel.
+2. **Fighters** use circling and boost-dive attack phases against reported or
+   nearby targets.
+3. **Captains** spawn from delivered intel, raid aggressively, and return to
+   their base to heal when badly damaged.
+4. **Dreadnoughts** spawn once per outpost lifecycle at 25% base health, have a
+   35% damage-negation chance, and enter a permanent enraged rampage if their
+   outpost is destroyed.
+5. Every Pirate weapon bypasses 10% of shields. Pirates can also steal from
+   Scavenger scrap piles and Rogue Miner claim-credit reserves.
+6. Scout and Captain intel retains an explicit player/NPC target type. Fighters
+   and Scouts close to a range derived from their equipped weapon before firing,
+   so non-player raids use the same authoritative combat path as player raids.
+7. Player snapshots are distance-ranked before direct engagement. Captains
+   refresh moving base coordinates and abandon destroyed or exhausted,
+   undefended raid targets after the bounded target-memory window.
 
 **Combat Stats** (example: Pirate Captain):
 ```javascript
 {
   hull: 200,
   shield: 100,
-  speed: 80,
-  weaponType: 'kinetic',
-  weaponDamage: 20,
+  speed: 90,
+  weaponType: 'pirate_heavy_blaster',
+  weaponDamage: 22,
   weaponRange: 300,
-  aggroRange: 600,
-  retreatThreshold: 0.4
+  aggroRange: 600
 }
 ```
 
 ### NPC Progression
 
-| Type | Tier | Hull | Shield | Speed | Damage | Credits | Description |
-|------|------|------|--------|-------|--------|---------|-------------|
-| Pirate Scout | Low | 50 | 25 | 120 | 5 | 30 | Fast harassment unit |
-| Pirate Fighter | Mid | 100 | 50 | 100 | 10 | 80 | Standard combat ship |
-| Pirate Captain | High | 200 | 100 | 80 | 20 | 220 | Elite officer vessel |
-| Pirate Dreadnought | Boss | 400 | 200 | 60 | 52 | 550 | Heavily armed battleship |
+| Type | Tier | Hull | Shield | Speed | Damage | Range | Credits |
+|------|------|------|--------|-------|--------|-------|---------|
+| Pirate Scout | Low | 40 | 20 | 130 | 5 | 200 | 30 |
+| Pirate Fighter | Mid | 100 | 50 | 110 | 12 | 280 | 80 |
+| Pirate Captain | High | 200 | 100 | 90 | 22 | 300 | 220 |
+| Pirate Dreadnought | Boss | 600 | 0 | 180 | 65 | 1,400 | 800 |
 
 ### Spawn Mechanics
 
@@ -69,15 +80,16 @@ Galaxy Miner features 5 distinct NPC factions, each with unique behaviors, AI st
 - Size: 150 units
 - Patrol Radius: 5 sectors (5000 units)
 - Respawn Time: 5 minutes after destruction
-- Initial Spawn: 3 NPCs
-- Max NPCs: 5 concurrent
-- Spawn Cooldown: 30 seconds
+- Initial Spawn: 2 Fighters
+- Max regular population: 4 Fighters
+- Regular Spawn Cooldown: 30 seconds
 - Strategic Placement: Outer asteroid belts (ambush points)
 
-**Spawn Pool**:
-- 50% Scouts (fast scouts)
-- 35% Fighters (mainline)
-- 15% Captains (elites)
+**Role Spawns**:
+- Up to 2 Scouts spawn 600 units from the outpost, with a 45-second cooldown.
+- Up to 2 Captains can be created when Scouts return with valid intel.
+- One Dreadnought can spawn per base lifecycle when the outpost reaches 25%
+  health.
 
 ### Loot Drops
 
@@ -87,7 +99,7 @@ Galaxy Miner features 5 distinct NPC factions, each with unique behaviors, AI st
 - Rare: Platinum, Dark Matter, Quantum Crystals
 - Ultrarare: Exotic Matter, Antimatter
 
-**Special**: Shield Boost, Speed Burst, Damage Amp buffs; Engine Core, Weapon Matrix components; Pirate Treasure relic
+**Special**: Shield Boost, Speed Burst, Damage Amp buffs; Engine Core, Weapon Matrix components; Pirate Treasure and Skull and Bones boss-relic pool. Pirate Dreadnought loot guarantees Skull and Bones, and a destroyed Pirate Outpost has an additional 5% Pirate Treasure roll.
 
 ## Scavengers
 
@@ -100,45 +112,60 @@ Galaxy Miner features 5 distinct NPC factions, each with unique behaviors, AI st
 - **Weapon Visual**: Flickering yellow jury-rigged lasers
 - **Death Effect**: Breaking apart into scrap debris
 
-### AI Strategy: Retreat
+### AI Strategy: Scavenging and Provocation
 
-**Behavior** (`/server/game/ai/retreat.js`):
-1. **Aggression**: Only attacks if player is significantly weaker
-2. **Flee Threshold**: Retreats at 20% health (earliest of all factions)
-3. **Evasion**: Runs at 130% normal speed when fleeing
-4. **Return**: Cautiously returns to patrol after fleeing to safety
-5. **Target Priority**: Prefers damaged targets (finish-off strategy)
+**Behavior** (`/server/game/ai/scavenger.js`):
+1. **Salvage loop**: Passive units seek unreserved wreckage, collect it, return
+   to their yard, and deposit the contents into its finite scrap pile.
+2. **Provocation**: Attacking a Scavenger, or collecting nearby wreckage
+   without Scrap Siphon immunity, enrages its local group. A player attacker is
+   retained beyond passive detection only while the explicit 1,000-unit rage
+   contract remains active; leaving that range clears the target.
+3. **Hauler lifecycle**: Three deposited wreckages start a four-second Hauler
+   transformation at the yard. A Hauler grows as it collects wreckage and
+   becomes the Barnacle King after five pieces.
+4. **Reservation safety**: Scavengers cannot consume wreckage that still has a
+   player-bound pending credit share.
+5. **Boss telegraph**: The Barnacle King's lethal boring drill has a 1.5-second
+   server-authoritative charge broadcast to nearby clients.
 
 **Tactical Patterns**:
-- Keep distance, fire from range
-- Flee immediately when damaged
-- Circle back after player moves away
-- Gang up on low-health targets
+- Ignore neutral players while harvesting the battlefield
+- Spread rage through the nearby Scavenger group when provoked
+- Use the Hauler's close-range loader slam only after it becomes hostile
+- Give the Barnacle King charge telegraph space instead of staying in drill range
 
 **Combat Stats** (example: Scavenger Hauler):
 ```javascript
 {
   hull: 180,
-  shield: 40,
+  shield: 0,
   speed: 50,
   weaponType: 'energy',
-  weaponDamage: 12,
-  weaponRange: 250,
-  aggroRange: 450,
-  retreatThreshold: 0.2  // Earliest retreat
+  weaponDamage: 50,
+  weaponRange: 35,
+  aggroRange: 450
 }
 ```
 
 ### NPC Progression
 
-| Type | Tier | Hull | Shield | Speed | Damage | Credits | Description |
-|------|------|------|--------|-------|--------|---------|-------------|
-| Scavenger Scrapper | Low | 40 | 10 | 90 | 4 | 20 | Weak scavenger |
-| Scavenger Salvager | Low | 70 | 20 | 80 | 6 | 45 | Cargo hauler |
-| Scavenger Collector | Mid | 100 | 30 | 70 | 8 | 90 | Industrial collector |
-| Scavenger Hauler | High | 180 | 40 | 50 | 12 | 180 | Heavy salvage vessel (flees, not boss) |
+| Type | Tier | Hull | Shield | Speed | Damage | Range | Credits |
+|------|------|------|--------|-------|--------|-------|---------|
+| Scavenger Scrapper | Low | 40 | 0 | 90 | 4 | 180 | 20 |
+| Scavenger Salvager | Low | 70 | 0 | 80 | 6 | 200 | 45 |
+| Scavenger Collector | Mid | 100 | 0 | 70 | 8 | 220 | 90 |
+| Scavenger Hauler | High | 180 | 0 | 50 | 50 | 35 | 180 |
+| Barnacle King | Boss | 25,000 | 0 | 15 | Lethal drill | 50 | 5,000 |
 
-**Note**: Hauler is high-tier but NOT a boss (flees instead of fighting)
+**Note**: The Hauler is high-tier but is not a boss. The Barnacle King
+transformation replaces that same live base-population slot and preserves its
+carried wreckage.
+
+The Barnacle King is the faction boss. Its lethal boring-drill attack has a
+1.5-second server-authoritative charge; nearby clients receive a spatial
+`scavenger:drillCharge` telegraph with the king and target IDs so the attack is
+avoidable on both desktop and mobile.
 
 ### Spawn Mechanics
 
@@ -148,7 +175,7 @@ Galaxy Miner features 5 distinct NPC factions, each with unique behaviors, AI st
 - Patrol Radius: 2 sectors (2000 units)
 - Respawn Time: 3 minutes
 - Initial Spawn: 2 NPCs
-- Max NPCs: 3 concurrent
+- Max regular population: 3 NPCs, plus one Hauler/Barnacle King lifecycle slot
 - Spawn Cooldown: 45 seconds
 - Strategic Placement: Between star systems (debris fields)
 
@@ -165,7 +192,7 @@ Galaxy Miner features 5 distinct NPC factions, each with unique behaviors, AI st
 - Rare: Gold, Platinum, Iridium
 - Ultrarare: Exotic Matter
 
-**Special**: Shield Boost, Speed Burst buffs; Mining Capacitor, Engine Core components; Pirate Treasure, Ancient Star Map relics
+**Special**: Shield Boost, Speed Burst buffs; Mining Capacitor, Engine Core components; Pirate Treasure, Ancient Star Map, and Scrap Siphon boss-relic pool. Barnacle King loot guarantees Scrap Siphon.
 
 ## The Swarm
 
@@ -192,6 +219,11 @@ Galaxy Miner features 5 distinct NPC factions, each with unique behaviors, AI st
 - Drones seek enemy bases when no players nearby
 - 3 drones attach to base simultaneously to convert it
 - Assimilated base spawns swarm units and keeps original position
+- Converted defenders immediately receive their complete Swarm identity/stats;
+  old faction AI, Void formation authority, and persistent Void effects are
+  retired instead of waiting for a periodic client refresh
+- Attached worms remain targetable but non-combat, and preserve their local
+  offset as an assimilated orbital base moves
 - 3+ assimilated bases within 10km spawns Swarm Queen
 
 **Tactical Patterns**:
@@ -203,7 +235,7 @@ Galaxy Miner features 5 distinct NPC factions, each with unique behaviors, AI st
 **Combat Stats** (example: Swarm Warrior):
 ```javascript
 {
-  hull: 158,        // +50% from linked health bonus
+  hull: 158,
   shield: 39,
   speed: 110,
   weaponType: 'explosive',
@@ -222,9 +254,12 @@ Galaxy Miner features 5 distinct NPC factions, each with unique behaviors, AI st
 | Swarm Drone | Low | 53 | 0 | 150 | 3 | 12 | Scouts for assimilation |
 | Swarm Worker | Low | 92 | 0 | 130 | 5 | 28 | Standard unit |
 | Swarm Warrior | Mid | 158 | 39 | 110 | 10 | 70 | Elite combat unit |
-| Swarm Queen | Boss | 788 | 263 | 80-200 | 37 | 800 | Phase-based boss, spawns minions |
+| Swarm Queen | Boss | 788 | 263 | 48-200 by phase | 37 | 800 | Phase-based boss, spawns minions |
 
-**Hull/Shield Note**: All swarm units have +162.5% hull/shield from baseline (75% base + 50% buff)
+Drone, Worker, and Warrior hull/shield values are the live authored values in
+`NPC_TYPES`; there is no additional blanket faction-health multiplier applied
+after spawning. Linked units instead spread 20% of incoming hull damage to
+other linked Swarm units within 300 units.
 
 ### Swarm Queen Boss
 
@@ -298,8 +333,8 @@ Galaxy Miner features 5 distinct NPC factions, each with unique behaviors, AI st
 ### Loot Drops
 
 **Resources**: Organic/biological materials
-- Common: Carbon, Phosphorus, Nitrogen, Hydrogen
-- Uncommon: Helium-3, Sulfur, Ice Crystals
+- Common: Carbon, Phosphorus, Nitrogen, Hydrogen, Sulfur
+- Uncommon: Helium-3, Ice Crystals
 - Rare: Dark Matter, Quantum Crystals
 - Ultrarare: Exotic Matter, Antimatter, Void Crystals
 
@@ -340,26 +375,24 @@ Galaxy Miner features 5 distinct NPC factions, each with unique behaviors, AI st
 **Combat Stats** (example: Void Phantom):
 ```javascript
 {
-  hull: 150,
-  shield: 120,
+  hull: 200,
+  shield: 150,
   speed: 100,
   weaponType: 'energy',
-  weaponDamage: 18,
+  weaponDamage: 15,
   weaponRange: 320,
-  aggroRange: 550,
-  retreatThreshold: 0.3,
-  formationMember: true
+  aggroRange: 550
 }
 ```
 
 ### NPC Progression
 
-| Type | Tier | Hull | Shield | Speed | Damage | Credits | Description |
-|------|------|------|--------|-------|--------|---------|-------------|
-| Void Whisper | Low | 45 | 35 | 140 | 7 | 40 | Scout entity |
-| Void Shadow | Mid | 80 | 60 | 120 | 12 | 100 | Standard entity |
-| Void Phantom | High | 150 | 120 | 100 | 18 | 200 | Elite entity |
-| Void Leviathan | Boss | 500 | 300 | 50 | 60 | 1200 | Massive formation leader |
+| Type | Tier | Hull | Shield | Speed | Damage | Range | Credits |
+|------|------|------|--------|-------|--------|-------|---------|
+| Void Whisper | Low | 60 | 40 | 140 | 5 | 250 | 60 |
+| Void Shadow | Mid | 120 | 80 | 120 | 9 | 280 | 150 |
+| Void Phantom | High | 200 | 150 | 100 | 15 | 320 | 300 |
+| Void Leviathan | Boss | 1,500 | 900 | 50 | 60 | 400 | 2,500 |
 
 ### Spawn Mechanics
 
@@ -368,9 +401,10 @@ Galaxy Miner features 5 distinct NPC factions, each with unique behaviors, AI st
 - Size: 120 units
 - Patrol Radius: 4 sectors
 - Respawn Time: 8 minutes
-- Initial Spawn: 2 NPCs
-- Max NPCs: 4 concurrent
-- Spawn Cooldown: 40 seconds
+- Initial Spawn: 4 NPCs
+- Max NPCs: 8 concurrent
+- Spawn Cooldown: 20 seconds
+- NPC Respawn Delay: 2 minutes
 - Strategic Placement: Deep space (1.5+ sectors from stars)
 
 **Spawn Pool**:
@@ -378,20 +412,29 @@ Galaxy Miner features 5 distinct NPC factions, each with unique behaviors, AI st
 - 35% Shadows
 - 15% Phantoms
 
+Leviathan minion waves use server-selected rift coordinates. The
+`void:spawnMinions` warning and the delayed `npc:spawn` events reuse those same
+positions so the emergence animation matches authoritative gameplay. Explicit
+spawn visibility is tracked just like batched updates, and dead or in-transit
+players are excluded, so a delayed Leviathan cannot remain as an unretired
+client-side entity after respawn.
+
 ### Loot Drops
 
 **Resources**: Exotic dimensional materials (NO COMMONS)
 - Common: NONE (void entities never drop commons)
-- Uncommon: Xenon, Dark Matter, Neon
-- Rare: Quantum Crystals, Exotic Matter
-- Ultrarare: Antimatter, Neutronium, Void Crystals
+- Uncommon: Neon
+- Rare: Xenon, Dark Matter, Quantum Crystals
+- Ultrarare: Exotic Matter, Antimatter, Neutronium, Void Crystals
 
-**Special**: Damage Amp, Radar Pulse buffs; Weapon Matrix, Shield Cell components; Void Crystal, Wormhole Gem, Ancient Star Map relics
+**Special**: Damage Amp, Radar Pulse buffs; Weapon Matrix, Shield Cell components; Void Crystal, Wormhole Gem, Ancient Star Map, and Subspace Warp Drive boss-relic pool. Void Leviathan loot has an additional independent 25% Subspace Warp Drive roll.
 
 ## Rogue Miners
 
 ### Identity
-**Territorial claim defenders** who warn intruders before attacking. Defend resource-rich sectors with industrial mining equipment repurposed as weapons.
+**Industrial claim operators** that mine nearby world objects, build a finite
+claim-credit reserve, and defend the operation as a coordinated group when any
+member is attacked.
 
 ### Visual Design
 - **Colors**: Orange/yellow (primary: #ff9900, accent: #ffcc00)
@@ -399,53 +442,46 @@ Galaxy Miner features 5 distinct NPC factions, each with unique behaviors, AI st
 - **Weapon Visual**: Orange mining laser beams with particles
 - **Death Effect**: Industrial explosion with sparks
 
-### AI Strategy: Territorial
+### AI Strategy: Mining Economy and Claim Rage
 
-**Behavior** (`/server/game/ai/territorial.js`):
-1. **Warning Phase**: Flash weapons for 3 seconds before firing
-2. **Territory Defense**: Won't chase beyond 500-unit claim radius
-3. **Mining Priority**: Immediately attacks anyone mining in territory
-4. **Defender Bonus**: +20% damage when defending claim
-5. **Retreat**: Fall back to claim center at 50% health
+**Behavior** (`/server/game/ai/mining.js`):
+1. Each miner claims a unique asteroid, planet, or derelict within 2,000 units,
+   mines for three seconds, and returns its haul to the claim.
+2. A deposit adds 2 credits to the claim reserve, or 6 while a Foreman is
+   present.
+3. Prospector and Driller deposits have a 5-10% chance to add an Excavator;
+   Excavator deposits have a 10% chance to add the single Foreman.
+4. Damaging any Rogue Miner enrages every Rogue Miner within 3,000 units
+   against that player. Rage clears after the target leaves that range, even
+   when a spread-rage miner first sees the attacker outside normal aggro.
+5. A Foreman triples same-claim movement and shortens the enraged fire cooldown
+   from 1,000 ms to 300 ms.
 
-**Warning System**:
-- Intruders get 3-second warning on first entry
-- Warning skipped if player is actively mining
-- After warning expires, becomes aggressive
-- Returns to warning mode if intruder leaves and re-enters
-
-**Territory Mechanics**:
-- Define 500-unit radius around mining claim
-- Patrol within 60% of radius (300 units)
-- Won't leave territory even when chasing
-- Stop at territory edge if target outside
+The generic `territorial.js` warning strategy remains in the repository for
+reuse, but it is not the live Rogue Miner faction route.
 
 **Combat Stats** (example: Rogue Excavator):
 ```javascript
 {
   hull: 140,
-  shield: 70,
+  shield: 875,
   speed: 70,
   weaponType: 'energy',
-  weaponDamage: 16,        // 19.2 with defender bonus
+  weaponDamage: 20,
   weaponRange: 270,
   aggroRange: 450,
-  retreatThreshold: 0.5,
-  territorial: true,
-  defenderBonus: true
+  territorial: true
 }
 ```
 
 ### NPC Progression
 
-| Type | Tier | Hull | Shield | Speed | Damage | Credits | Description |
-|------|------|------|--------|-------|--------|---------|-------------|
-| Rogue Prospector | Low | 60 | 30 | 100 | 6 (7.2) | 35 | Scout miner |
-| Rogue Driller | Mid | 90 | 45 | 85 | 10 (12) | 75 | Industrial driller |
-| Rogue Excavator | High | 140 | 70 | 70 | 16 (19.2) | 160 | Heavy excavator |
-| Rogue Foreman | Boss | 250 | 120 | 55 | 42 (50.4) | 450 | Claim supervisor |
-
-**Note**: Damage values in parentheses include +20% defender bonus
+| Type | Tier | Hull | Shield | Speed | Damage | Range | Credits |
+|------|------|------|--------|-------|--------|-------|---------|
+| Rogue Prospector | Low | 60 | 300 | 100 | 6 | 200 | 35 |
+| Rogue Driller | Mid | 90 | 450 | 85 | 10 | 230 | 75 |
+| Rogue Excavator | High | 140 | 875 | 70 | 20 | 270 | 160 |
+| Rogue Foreman | Boss | 250 | 1,200 | 55 | 42 | 320 | 450 |
 
 ### Spawn Mechanics
 
@@ -456,8 +492,8 @@ Galaxy Miner features 5 distinct NPC factions, each with unique behaviors, AI st
 - Territory Radius: 500 units (strict boundary)
 - Respawn Time: 4 minutes
 - Initial Spawn: 2 NPCs
-- Max NPCs: 3 concurrent
-- Spawn Cooldown: 60 seconds (slowest, territorial)
+- Max regular population: 5 NPCs; the Foreman may occupy one additional slot
+- Spawn Cooldown: 60 seconds (slowest regular cadence)
 - Strategic Placement: Inner asteroid belts with rare resources
 
 **Spawn Pool**:
@@ -468,12 +504,12 @@ Galaxy Miner features 5 distinct NPC factions, each with unique behaviors, AI st
 ### Loot Drops
 
 **Resources**: Mining claim riches
-- Common: Iron, Copper, Silicon
-- Uncommon: Titanium, Cobalt, Lithium
-- Rare: Gold, Uranium, Iridium, Platinum
-- Ultrarare: Exotic Matter, Quantum Crystals
+- Common: Iron, Silicon
+- Uncommon: Copper, Titanium, Cobalt, Lithium
+- Rare: Gold, Uranium, Iridium, Platinum, Quantum Crystals
+- Ultrarare: Exotic Matter
 
-**Special**: Shield Boost, Radar Pulse buffs; Mining Capacitor, Shield Cell components; Ancient Star Map, Pirate Treasure relics
+**Special**: Shield Boost, Radar Pulse buffs; Mining Capacitor, Shield Cell components; Ancient Star Map, Pirate Treasure, and Mining Rites boss-relic pool. Rogue Foreman loot guarantees Mining Rites.
 
 ## Common Mechanics
 
@@ -481,29 +517,32 @@ Galaxy Miner features 5 distinct NPC factions, each with unique behaviors, AI st
 
 All factions use same base-spawned NPC system:
 
-1. **Activation**: Base activates when player within patrol radius
+1. **Activation**: Base discovery runs every 500 ms and activates hubs inside a
+   player-specific server range (at least three sectors, extended for high-tier
+   radar and Ancient Star Map contacts). This range always exceeds ordinary NPC
+   delivery range, preventing a visible population from unloading underneath a
+   high-tier radar client.
 2. **Initial Spawn**: Spawns starting NPCs immediately
-3. **Respawn Tracking**: Dead NPCs added to respawn queue with 5-minute timer
+3. **Respawn Tracking**: Dead NPCs enter the delay configured for their hub.
 4. **Spawn Cooldown**: Minimum time between any spawns (prevents spam)
-5. **Max NPCs**: Hard cap on concurrent units per base
-6. **Deactivation**: Base deactivates when no players nearby for extended period
+5. **Population Caps**: Each regular pool has a hard cap; documented special
+   lifecycle slots (Hauler/King and Foreman) are counted separately.
+6. **Dormancy**: After 60 seconds without a nearby living player, the NPC
+   population unloads from the tick loop. Health, damage contributors, pending
+   respawns, scrap reserves, and assimilation state remain in a dormant base
+   snapshot and are restored on reactivation.
 
-**Respawn System**:
-```javascript
-// When NPC dies
-base.pendingRespawns.push({
-  respawnAt: Date.now() + 300000  // 5 minutes
-});
-
-// Check for ready respawns
-if (now >= pendingRespawn.respawnAt && base.spawnedNPCs.length < maxNPCs) {
-  spawnNPCFromBase(baseId);
-}
-```
+| Hub | Initial population | Population cap | Spawn cooldown | NPC respawn delay |
+| --- | ---: | ---: | ---: | ---: |
+| Pirate Outpost | 2 Fighters | 4 regular Fighters | 30 s | 5 min |
+| Scavenger Yard | 2 | 3 regular units | 45 s | 5 min |
+| Swarm Hive | 10 | 20 | 3 s | 15 s |
+| Void Rift | 4 | 8 | 20 s | 2 min |
+| Mining Claim | 2 | 5 regular units (+1 Foreman) | 60 s | 5 min |
 
 ### Orphan Rage Mode
 
-When base is destroyed, surviving NPCs enter rage mode:
+When a base is destroyed, ordinary surviving NPCs enter bounded rage mode:
 
 - **Duration**: 90 seconds
 - **Aggro Range**: +50% (1.5x normal)
@@ -511,38 +550,66 @@ When base is destroyed, surviving NPCs enter rage mode:
 - **Behavior**: Aggressive, seek revenge
 - **Despawn**: After 90 seconds, NPCs disappear
 
+The Pirate Dreadnought is the deliberate exception: it enters a permanent
+`enraged` rampage with a 1.5× damage multiplier after its outpost is destroyed.
+Living Void defenders orphaned by rift destruction keep their existing
+formation registry; leader succession runs only for an actual leader death.
+
+Scripted removals use the same lifecycle registry cleanup as combat deaths.
+Leviathan-consumed Void-rift units and neighboring-hive defenders lost to a
+Hive Core implosion therefore retain their configured replacement timers;
+Hive defenders outside the 500-unit implosion radius survive as orphans.
+
 **Purpose**: Gives players brief challenge after base destruction, then cleans up stragglers
 
 ### Damage Contributors & Team Rewards
 
-All NPCs and bases track damage from each attacker:
+All NPCs and bases track player damage contributors for rewards:
 
 ```javascript
 npc.damageContributors = new Map();  // playerId -> totalDamage
 damageContributors.set(attackerId, currentDamage + newDamage);
 ```
 
+NPC attackers keep a separate source identity for retaliation without entering
+the player reward map. Passive Scavengers and Rogue Miners can consequently
+retain and fire back at a Pirate NPC, and Pirate shield piercing applies to
+their real hull/shield totals rather than only the projectile visual.
+
+Player-target retention is an explicit faction-strategy contract rather than a
+generic `targetPlayer` exception. Provoked Scavengers, enraged Rogue Miners,
+and active Pirate raids may retain an attacker up to their documented clear
+range. Swarm and Void NPCs still disengage at ordinary aggro range. The engine
+runs one cleanup tick when a retained player crosses its limit, delivers the
+attacker to that target throughout the strategy-owned chase range, and clears
+rage, raids, and Pirate intel immediately when the player dies or disconnects,
+including identities preserved inside dormant base populations.
+
 **Team Credit Distribution**:
-- Credits multiplied by team size bonus (1x/1.5x/2x/2.5x)
-- Total credits split evenly among all participants
-- Resources/loot go to ONE player (highest damage contributor)
+- Damage contributors define the reward team; the collector is treated as the solo owner only when no contributor record exists.
+- Credits use a 1×/1.5×/2×/2.5× team pool for one/two/three/four-or-more contributors, then split without rounding inflation.
+- Pirate Treasure is applied independently to each owner's own credit share.
+- Common and uncommon resources split across contributors; the contributing collector receives any integer remainder.
+- Rare and ultrarare resources plus buffs, components, and relics go to the collector, with rare-drop notifications sent to teammates.
+- Each resource award is capped to that recipient's cargo space. Overflow or failed durable writes remain in the wreckage settlement.
 
 **Example**: 3-player team kills 100-credit NPC
 - Total: 100 × 2.0 = 200 credits
-- Per player: 200 ÷ 3 = 66 credits each
-- Loot: All items to player with most damage
+- Shares: 67, 67, and 66 credits before any owner-specific Pirate Treasure bonus
+- Common/uncommon stacks split across contributors; rare and special items remain with the collector
 
 ## Related Files
 
 ### Core Systems
-- `/server/game/npc.js` - NPC spawning, base management, lifecycle (2357 lines)
+- `/server/game/npc.js` - NPC spawning, base management, lifecycle
 - `/server/game/ai/` - AI strategy implementations:
-  - `flanking.js` - Pirates (237 lines)
-  - `retreat.js` - Scavengers (201 lines)
-  - `swarm.js` - Swarm + Queen boss AI (949 lines)
-  - `formation.js` - Void entities (252 lines)
-  - `territorial.js` - Rogue miners (291 lines)
-  - `index.js` - AI router (183 lines)
+  - `pirate.js` - Live Pirate roles, intel, dives, raids, and Dreadnought state
+  - `scavenger.js` - Live Scavenger salvage economy and provocation behavior
+  - `swarm.js` - Swarm, linked units, and Queen behavior
+  - `formation.js` and `void-leviathan.js` - Void formations and boss behavior
+  - `mining.js` - Live Rogue Miner economy and rage behavior
+  - `flanking.js`, `retreat.js`, and `territorial.js` - Reusable generic strategies
+  - `index.js` - AI router
 
 ### Loot & Combat
 - `/server/game/loot-pools.js` - Faction loot definitions
@@ -564,7 +631,8 @@ damageContributors.set(attackerId, currentDamage + newDamage);
 
 Each faction has unique identity through:
 
-1. **AI Behavior**: Flanking vs retreat vs formation vs swarm
+1. **AI Behavior**: Pirate roles, salvage/provocation, Swarm coordination,
+   Void formations, and Rogue Miner economy/rage
 2. **Combat Stats**: Speed/damage/health trade-offs
 3. **Visual Design**: Colors, ships, weapons, death effects
 4. **Loot Tables**: Thematic resource pools

@@ -11,6 +11,10 @@ const Input = {
     document.addEventListener('mousemove', (e) => this.onMouseMove(e));
     document.addEventListener('mousedown', (e) => this.onMouseDown(e));
     document.addEventListener('mouseup', (e) => this.onMouseUp(e));
+    window.addEventListener('blur', () => this.reset());
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) this.reset();
+    });
 
     Logger.log('Input system initialized');
   },
@@ -19,10 +23,10 @@ const Input = {
     // Ignore if typing in an input field
     if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
 
+    // Do not latch movement or create local action feedback while the
+    // authoritative simulation is unavailable.
+    if (!GalaxyMiner.gameStarted || GalaxyMiner.connectionPaused) return;
     this.keys[e.code] = true;
-
-    // Handle UI shortcuts
-    if (!GalaxyMiner.gameStarted) return;
 
     switch (e.code) {
       case 'KeyT':
@@ -108,6 +112,17 @@ const Input = {
     return this.keys[code] === true;
   },
 
+  reset() {
+    this.keys = {};
+    this.mouseDown = false;
+    if (typeof VirtualJoystick !== 'undefined' && typeof VirtualJoystick.reset === 'function') {
+      VirtualJoystick.reset();
+    }
+    if (typeof MobileHUD !== 'undefined' && typeof MobileHUD.stopFiring === 'function') {
+      MobileHUD.stopFiring();
+    }
+  },
+
   /**
    * Get mobile movement input from virtual joystick
    * @returns {Object|null} Mobile input or null if not on mobile/no input
@@ -132,7 +147,7 @@ const Input = {
         down: false,
         left: false,
         right: false,
-        boost: false,
+        boost: mobileInput.boost === true,
         // Mobile-specific analog values
         targetRotation: mobileInput.targetRotation,
         thrustMagnitude: mobileInput.thrustMagnitude,

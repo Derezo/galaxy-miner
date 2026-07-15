@@ -31,7 +31,7 @@ const Radar = {
   },
 
   // Main draw function called by HUD
-  draw(ctx, radarRange, radarTier) {
+  draw(ctx, radarRange, radarTier, visibleWorldObjects = null) {
     if (!ctx) return;
 
     const size = this.size;
@@ -39,8 +39,17 @@ const Radar = {
     const playerPos = Player.position;
     const playerRotation = Player.rotation;
 
-    // Calculate scale (pixels per world unit)
-    const scale = center / radarRange;
+    // Calculate pixels per world unit. Mobile pinch zoom changes presentation
+    // only; the authoritative sensor range still controls which contacts may
+    // be rendered.
+    const requestedZoom = typeof RadarAdvanced !== 'undefined' &&
+      typeof RadarAdvanced.getZoomScale === 'function'
+      ? RadarAdvanced.getZoomScale()
+      : 1;
+    const zoomScale = Number.isFinite(requestedZoom)
+      ? Math.max(0.5, Math.min(2, requestedZoom))
+      : 1;
+    const scale = (center / radarRange) * zoomScale;
 
     // Check for sector map mode (Tier 5)
     if (radarTier >= 5 && typeof RadarAdvanced !== 'undefined' && RadarAdvanced.sectorMapMode) {
@@ -66,10 +75,15 @@ const Radar = {
       RadarTooltips.updateParams(center, scale, radarRange, playerPos);
     }
 
-    // Get world objects
-    const objects = typeof World !== 'undefined'
-      ? World.getVisibleObjects(playerPos, radarRange)
-      : null;
+    // The query argument is a diameter. Ancient Star Map bearings arrive in a
+    // separate sparse server snapshot and do not expand this procedural scan.
+    const worldQueryDiameter = this.getWorldQueryDiameter(radarRange);
+
+    // Get world objects. The game loop supplies its shared frame snapshot;
+    // direct radar callers retain the old standalone behavior.
+    const objects = visibleWorldObjects || (typeof World !== 'undefined'
+      ? World.getVisibleObjects(playerPos, worldQueryDiameter)
+      : null);
 
     // Draw layers in order (back to front):
 
@@ -95,11 +109,26 @@ const Radar = {
 
     // 5. Entities (bases, NPCs, players) - foreground
     if (typeof RadarEntities !== 'undefined') {
-      RadarEntities.draw(ctx, center, scale, radarRange, radarTier, playerPos, playerRotation);
+      RadarEntities.draw(
+        ctx,
+        center,
+        scale,
+        radarRange,
+        radarTier,
+        playerPos,
+        playerRotation,
+        objects
+      );
     }
 
     // Draw radar border
     this.drawBorder(ctx, center, radarTier);
+  },
+
+  getWorldQueryDiameter(radarRange) {
+    // Strategic Star Map bearings arrive as a sparse authoritative socket
+    // snapshot; they must not expand the per-frame procedural world query.
+    return radarRange * 2;
   },
 
   drawRangeCircles(ctx, center) {

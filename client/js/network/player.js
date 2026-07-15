@@ -1,6 +1,51 @@
 // Galaxy Miner - Player Network Handlers
 
 /**
+ * Applies an inventory snapshot supplied by an authoritative player event and
+ * refreshes every upgrade-affordability consumer.
+ * @param {Object} data - Event payload containing inventory and optional credits
+ * @returns {boolean} Whether an authoritative inventory snapshot was applied
+ */
+function applyAuthoritativeInventory(data) {
+  const authoritativeInventory = Array.isArray(data.inventory)
+    ? data.inventory
+    : (Array.isArray(data.remainingInventory) ? data.remainingInventory : null);
+  if (!authoritativeInventory) return false;
+
+  Player.updateInventory({
+    inventory: authoritativeInventory,
+    credits: data.credits
+  });
+
+  if (typeof UIState !== 'undefined') {
+    UIState.set({
+      inventory: Player.inventory,
+      credits: Player.credits
+    });
+  }
+  if (typeof CargoPanel !== 'undefined') CargoPanel.refresh();
+  if (typeof ShipUpgradePanel !== 'undefined') {
+    ShipUpgradePanel.updateData({
+      ship: Player.ship,
+      inventory: Player.inventory,
+      credits: Player.credits
+    }, { authoritativeInventory: true });
+  } else if (typeof UpgradesUI !== 'undefined') {
+    if (typeof UpgradesUI.applyAuthoritativeSnapshot === 'function') {
+      UpgradesUI.applyAuthoritativeSnapshot();
+    } else {
+      UpgradesUI.refresh();
+    }
+  }
+  if (typeof HUD !== 'undefined' &&
+      typeof HUD.updateUpgradeIndicator === 'function') {
+    HUD.updateUpgradeIndicator();
+  }
+
+  return true;
+}
+
+/**
  * Registers player-related socket event handlers
  * @param {Socket} socket - Socket.io client instance
  */
@@ -34,6 +79,11 @@ function register(socket) {
 
   socket.on('player:death', (data) => {
     window.Logger.log('Player died:', data.cause, data.killedBy);
+
+    // Death cargo settlement is authoritative. Applying the remaining
+    // inventory before rendering the death UI prevents upgrade affordances
+    // from surviving after their required resources were dropped.
+    applyAuthoritativeInventory(data);
 
     // Play player death sound (non-spatial, always audible)
     if (typeof AudioManager !== 'undefined' && AudioManager.isReady && AudioManager.isReady()) {
@@ -94,6 +144,10 @@ function register(socket) {
 
     // Apply respawn to player
     Player.onRespawn(respawnData);
+
+    // Re-apply the server snapshot at respawn as a final guard against stale
+    // pre-death cargo enabling upgrade controls or the terminal indicator.
+    applyAuthoritativeInventory(data);
   });
 
   socket.on('player:debuff', (data) => {
@@ -126,6 +180,13 @@ function register(socket) {
 
   socket.on('player:dot', (data) => {
     window.Logger.log('DoT tick:', data.type, data.damage, 'damage');
+
+    // Apply the authoritative health snapshot immediately. Waiting for the
+    // periodic health event leaves HUD and death feedback visibly stale.
+    if (typeof Player !== 'undefined') {
+      if (Number.isFinite(data.hull) && Player.hull) Player.hull.current = data.hull;
+      if (Number.isFinite(data.shield) && Player.shield) Player.shield.current = data.shield;
+    }
 
     // Visual effect at player position
     if (typeof Player !== 'undefined' && typeof ParticleSystem !== 'undefined') {

@@ -992,6 +992,12 @@
   text-shadow: 0 0 5px rgba(153, 0, 255, 0.5);
 }
 
+.badge-legendary {
+  background: linear-gradient(135deg, #d49a17 0%, #7a2ebd 100%);
+  color: #ffffff;
+  text-shadow: 0 0 6px rgba(255, 214, 107, 0.65);
+}
+
 .badge-rare {
   background: linear-gradient(135deg, #4488ff 0%, #2266cc 100%);
   color: #ffffff;

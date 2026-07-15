@@ -8,19 +8,26 @@
     "generate": "node generate.js",
     "generate:tier1": "node generate.js --tier 1",
     "generate:tier2": "node generate.js --tier 2",
-    "generate:weapons": "node generate.js --category weapons",
+    "generate:weapons": "node generate.js --collection weapons",
     "generate:impacts": "node generate.js --category impacts",
     "generate:destruction": "node generate.js --category destruction",
     "generate:bosses": "node generate.js --category bosses",
     "generate:mining": "node generate.js --category mining",
     "generate:movement": "node generate.js --category movement",
-    "generate:ui": "node generate.js --category ui",
+    "generate:ui": "node generate.js --collection ui",
+    "generate:weapon-ui": "node generate.js --collection weapon-ui",
     "generate:loot": "node generate.js --category loot",
     "generate:environment": "node generate.js --category environment",
     "generate:rewards": "node generate.js --category rewards",
     "generate:base-destruction": "node generate.js --category base_destruction",
     "list": "node generate.js --list",
-    "count": "node generate.js --count"
+    "count": "node generate.js --count",
+    "validate": "node generate.js --validate",
+    "dry-run:weapon-ui": "node generate.js --dry-run --collection weapon-ui",
+    "smoke": "node generate.js --single weapon_t1 --base-only --force --output-dir /tmp/galaxy-miner-elevenlabs-smoke",
+    "postprocess:weapon-ui": "node postprocess-assets.js --collection weapon-ui",
+    "verify:weapon-ui": "node verify-assets.js --collection weapon-ui",
+    "test": "../../../node_modules/.bin/vitest run --root ../../.. tests/unit/tools/elevenlabs-generator.test.js"
   },
   "keywords": [
     "elevenlabs",
@@ -29,7 +36,7 @@
     "procedural-audio"
   ],
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=22.0.0"
   },
   "author": "Galaxy Miner Team",
   "license": "MIT"

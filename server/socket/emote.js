@@ -25,7 +25,8 @@ function register(socket, deps) {
     if (!player) return;
 
     // Validate emote type
-    if (!config.EMOTES || !config.EMOTES[data.emoteType]) return;
+    if (!data || typeof data.emoteType !== 'string' ||
+        !config.EMOTES || !config.EMOTES[data.emoteType]) return;
 
     // Broadcast to nearby players
     broadcastToNearby(socket, player, 'emote:broadcast', {

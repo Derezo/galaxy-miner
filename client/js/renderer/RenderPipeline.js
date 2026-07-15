@@ -24,7 +24,7 @@ const RenderPipeline = {
     // Get visible world objects
     const objects = World.getVisibleObjects(
       Player.position,
-      Math.max(RenderContext.canvas.width, RenderContext.canvas.height)
+      Math.max(RenderContext.width, RenderContext.height)
     );
 
     // Layer 1: Background (BackgroundSystem handles this in clear())
@@ -61,7 +61,7 @@ const RenderPipeline = {
     const camera = RenderContext.camera;
     const objects = World.getVisibleObjects(
       Player.position,
-      Math.max(RenderContext.canvas.width, RenderContext.canvas.height)
+      Math.max(RenderContext.width, RenderContext.height)
     );
     WorldLayer.draw(ctx, camera, objects);
   },

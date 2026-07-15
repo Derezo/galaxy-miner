@@ -244,6 +244,12 @@
   animation: badge-glow 2s ease-in-out infinite;
 }
 
+.badge-legendary {
+  background: linear-gradient(135deg, rgba(255, 190, 40, 0.32), rgba(170, 70, 255, 0.3));
+  color: #ffd66b;
+  animation: badge-glow 1.6s ease-in-out infinite;
+}
+
 @keyframes badge-glow {
   0%, 100% {
     box-shadow: 0 0 5px rgba(255, 136, 170, 0.3);

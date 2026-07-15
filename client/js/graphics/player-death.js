@@ -246,9 +246,24 @@ const PlayerDeathEffect = {
       Network.sendRespawnSelect(this.respawnType, targetId);
     } else {
       Logger.error('[PlayerDeathEffect] Network not available for respawn!');
+      this.onRespawnError({ message: 'Connection unavailable' });
     }
 
     // Cleanup will happen when server confirms respawn via onRespawnConfirmed()
+  },
+
+  /**
+   * Restore the respawn controls after a rejected or failed server request.
+   * The button is removed optimistically on click, so without this callback a
+   * transient validation/database failure strands the death overlay forever.
+   * @param {Object} data - Respawn error payload
+   */
+  onRespawnError(data = {}) {
+    if (!this.active || (typeof Player !== 'undefined' && !Player.isDead)) return;
+
+    this.phase = 'respawn_waiting';
+    this.showRespawnButton();
+    Logger.log('[PlayerDeathEffect] Respawn failed; controls restored:', data.message);
   },
 
   /**

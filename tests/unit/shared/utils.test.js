@@ -133,19 +133,22 @@ describe('shared/utils', () => {
   });
 
   describe('getShieldRechargeRate', () => {
-    it('should return base rate for tier 1', () => {
-      // SHIELD_RECHARGE_RATE is 2 in constants
-      expect(utils.getShieldRechargeRate(1)).toBe(CONSTANTS.SHIELD_RECHARGE_RATE);
+    it('should include the tier-1 energy-core bonus', () => {
+      expect(utils.getShieldRechargeRate(1)).toBe(
+        CONSTANTS.SHIELD_RECHARGE_RATE + CONSTANTS.ENERGY_CORE.SHIELD_REGEN_BONUS[1]
+      );
     });
 
-    it('should increase rate with tier', () => {
-      const expected = CONSTANTS.SHIELD_RECHARGE_RATE * utils.getTierMultiplier(2);
+    it('should use the shared energy-core bonus rather than shield scaling', () => {
+      const expected = CONSTANTS.SHIELD_RECHARGE_RATE +
+        CONSTANTS.ENERGY_CORE.SHIELD_REGEN_BONUS[2];
       expect(utils.getShieldRechargeRate(2)).toBe(expected);
     });
 
-    it('should have high rate for tier 5', () => {
-      const expected = CONSTANTS.SHIELD_RECHARGE_RATE * utils.getTierMultiplier(5);
-      expect(utils.getShieldRechargeRate(5)).toBeCloseTo(expected);
+    it('should include the full tier-5 energy-core bonus', () => {
+      const expected = CONSTANTS.SHIELD_RECHARGE_RATE +
+        CONSTANTS.ENERGY_CORE.SHIELD_REGEN_BONUS[5];
+      expect(utils.getShieldRechargeRate(5)).toBe(expected);
     });
   });
 

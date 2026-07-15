@@ -58,8 +58,8 @@ const WorldLayer = {
       x: camera.x,
       y: camera.y,
       zoom: 1,
-      width: RenderContext.canvas.width,
-      height: RenderContext.canvas.height
+      width: RenderContext.width,
+      height: RenderContext.height
     };
     const orbitTime = Physics.getOrbitTime();
 

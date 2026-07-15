@@ -138,7 +138,7 @@ For the primary event reference (all events, payloads, and handler mappings), se
      │                               │  (Player health <= 0)           │
      │                               │                                 │
      │                               ├── Mark player dead              │
-     │                               ├── Drop cargo (random)           │
+     │                               ├── Settle inventory + escrow     │
      │                               ├── Spawn wreckage                │
      │                               ├── Calculate respawn options     │
      │                               │                                 │
@@ -157,6 +157,13 @@ For the primary event reference (all events, payloads, and handler mappings), se
      ├── Show respawn UI             │                                 │
      │                               │                                 │
 ```
+
+Death settlement is one database transaction. For each resource, inventory
+and marketplace escrow are combined before calculating
+`floor(combined * 0.5)` as the loss; `floor(loss * 0.5)` becomes collectible
+wreckage. If the settlement reduces or removes a listing, the server broadcasts
+`market:update {action: 'death_settlement'}`. Production star fatalities enter
+this same canonical death flow.
 
 ### Respawn Selection
 ```
@@ -297,8 +304,7 @@ For the primary event reference (all events, payloads, and handler mappings), se
      │                               │  (Mining timer complete)        │
      │                               │                                 │
      │                               ├── Calculate resource yield      │
-     │                               ├── Add to inventory              │
-     │                               ├── Check depletion               │
+     │                               ├── Atomically grant + deplete    │
      │                               │                                 │
      │   mining:complete             │                                 │
      │   {resourceType, quantity}    │                                 │
@@ -317,6 +323,16 @@ For the primary event reference (all events, payloads, and handler mappings), se
      │                               │────────────────────────────────►│
      │                               │                                 │
 ```
+
+The completion transaction counts both inventory and marketplace escrow
+toward cargo capacity. It either grants the cargo and records depletion
+together, or persists neither operation.
+
+All terminal mining paths use the same authoritative cleanup rule. Explicit
+cancellation, death, wormhole entry/transit, missing sessions, and completion
+failures clear the mining timer and change status from `mining` to `idle` before
+broadcasting `mining:playerStopped`. A newer status such as `wormhole` is not
+overwritten by stale timer cleanup.
 
 ---
 
@@ -404,9 +420,10 @@ For the primary event reference (all events, payloads, and handler mappings), se
      │   {resourceType, qty, price}  │                                 │
      │──────────────────────────────►│                                 │
      │                               │                                 │
+     │                               ├── Require alive/out of transit  │
      │                               ├── Validate inventory            │
      │                               ├── Remove from inventory         │
-     │                               ├── Create listing                │
+     │                               ├── Create cargo-counted escrow   │
      │                               │                                 │
      │   market:listed               │                                 │
      │   {listingId}                 │                                 │

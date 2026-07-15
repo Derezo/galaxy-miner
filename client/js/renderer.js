@@ -13,6 +13,15 @@ const Renderer = {
   width: 0, // Logical width (CSS pixels)
   height: 0, // Logical height (CSS pixels)
   MAX_GAME_WIDTH: 800, // Cap desktop viewport width for cinematic framing
+  _resizeHandler: null,
+  _settingsUnsubscribe: null,
+  _bossNpcTypes: new Set([
+    'pirate_dreadnought',
+    'scavenger_barnacle_king',
+    'swarm_queen',
+    'void_leviathan',
+    'rogue_foreman'
+  ]),
 
   // Screen shake system
   screenShake: {
@@ -27,7 +36,7 @@ const Renderer = {
     this.ctx = this.canvas.getContext("2d");
 
     // Set DPI scaling (cap at 2 for performance on high-DPI mobile)
-    this.dpr = Math.min(window.devicePixelRatio || 1, 2);
+    this.dpr = this.getCappedDpr();
 
     // Set render scale from GraphicsSettings (persisted), or default by device type
     if (typeof GraphicsSettings !== 'undefined') {
@@ -37,7 +46,10 @@ const Renderer = {
     }
 
     // Handle resize
-    window.addEventListener("resize", () => this.resize());
+    if (!this._resizeHandler) {
+      this._resizeHandler = () => this.resize();
+      window.addEventListener("resize", this._resizeHandler);
+    }
     this.resize();
 
     // Sync shared state to RenderContext for modular layer access
@@ -55,12 +67,27 @@ const Renderer = {
     // Initialize gradient cache (before other graphics systems that use it)
     if (typeof GradientCache !== 'undefined') {
       GradientCache.init(this.ctx);
-      // Clear gradient cache on quality/LOD changes
-      if (typeof GraphicsSettings !== 'undefined') {
-        GraphicsSettings.addListener(() => {
+    }
+
+    // Render-scale changes require a backing-store resize. Other quality changes
+    // only invalidate cached gradients.
+    if (this._settingsUnsubscribe) {
+      this._settingsUnsubscribe();
+      this._settingsUnsubscribe = null;
+    }
+    if (typeof GraphicsSettings !== 'undefined' &&
+        typeof GraphicsSettings.addListener === 'function') {
+      this._settingsUnsubscribe = GraphicsSettings.addListener(() => {
+        const nextRenderScale = GraphicsSettings.getRenderScale();
+        const resolutionChanged = nextRenderScale !== this._renderScale ||
+          this.getCappedDpr() !== this.dpr;
+
+        if (resolutionChanged) {
+          this.resize();
+        } else if (typeof GradientCache !== 'undefined') {
           GradientCache.clear();
-        });
-      }
+        }
+      });
     }
 
     // Initialize graphics systems
@@ -70,6 +97,9 @@ const Renderer = {
     // Initialize NPC ship geometry if available
     if (typeof NPCShipGeometry !== "undefined") {
       NPCShipGeometry.init();
+    }
+    if (typeof QueenVisuals !== "undefined") {
+      QueenVisuals.init();
     }
 
     // Initialize death effects if available
@@ -141,10 +171,15 @@ const Renderer = {
     Logger.log("Renderer initialized with advanced graphics");
   },
 
+  getCappedDpr() {
+    const deviceDpr = Number(window.devicePixelRatio);
+    return Math.min(Number.isFinite(deviceDpr) && deviceDpr > 0 ? deviceDpr : 1, 2);
+  },
+
   resize() {
     // Get CSS (logical) dimensions
-    const cssWidth = window.innerWidth;
-    const cssHeight = window.innerHeight;
+    const cssWidth = Math.max(1, window.innerWidth || 1);
+    const cssHeight = Math.max(1, window.innerHeight || 1);
 
     // Cap game viewport width on desktop for focused, cinematic view
     const isMobile = typeof DeviceDetect !== 'undefined' && DeviceDetect.isMobile;
@@ -156,18 +191,31 @@ const Renderer = {
       this._renderScale = GraphicsSettings.getRenderScale();
     }
 
+    // DPR can change when the window moves between displays or browser zoom changes.
+    this.dpr = this.getCappedDpr();
+
     // Set canvas buffer size (scaled by DPR and renderScale)
     // renderScale < 1 produces a smaller buffer that the browser upscales
     const bufferScale = this.dpr * this._renderScale;
-    this.canvas.width = gameWidth * bufferScale;
-    this.canvas.height = gameHeight * bufferScale;
+    const bufferWidth = Math.max(1, Math.round(gameWidth * bufferScale));
+    const bufferHeight = Math.max(1, Math.round(gameHeight * bufferScale));
+    this.canvas.width = bufferWidth;
+    this.canvas.height = bufferHeight;
 
     // CSS display size (centered via CSS transform)
     this.canvas.style.width = gameWidth + 'px';
     this.canvas.style.height = gameHeight + 'px';
 
-    // Scale context to match combined DPR + renderScale
-    this.ctx.setTransform(bufferScale, 0, 0, bufferScale, 0, 0);
+    // Use the realized integer buffer dimensions so the transformed drawing space
+    // ends exactly at the logical CSS width/height, even with fractional scaling.
+    this.ctx.setTransform(
+      bufferWidth / gameWidth,
+      0,
+      0,
+      bufferHeight / gameHeight,
+      0,
+      0
+    );
 
     // Enable bilinear filtering for smooth upscale when renderScale < 1
     this.ctx.imageSmoothingEnabled = true;
@@ -187,6 +235,9 @@ const Renderer = {
 
     // Sync to RenderContext
     if (typeof RenderContext !== 'undefined') {
+      RenderContext.canvas = this.canvas;
+      RenderContext.ctx = this.ctx;
+      RenderContext.dpr = this.dpr;
       RenderContext.renderScale = this._renderScale;
       RenderContext.width = this.width;
       RenderContext.height = this.height;
@@ -349,7 +400,7 @@ const Renderer = {
   /**
    * Update graphics systems (call once per frame before drawing)
    */
-  update(dt) {
+  update(dt, visibleWorldObjects = null) {
     this.lastDt = dt;
 
     // Sync to RenderContext
@@ -387,10 +438,16 @@ const Renderer = {
     if (typeof VoidEffects !== "undefined") {
       VoidEffects.update(dt);
     }
+    if (typeof LeviathanSpawn !== "undefined") {
+      LeviathanSpawn.update(dt);
+    }
 
     // Update linked damage effect
     if (typeof LinkedDamageEffect !== "undefined") {
       LinkedDamageEffect.update(dt);
+    }
+    if (typeof QueenVisuals !== "undefined") {
+      QueenVisuals.update(dt);
     }
 
     // Update formation succession effect
@@ -415,9 +472,9 @@ const Renderer = {
 
     // Update star effects (corona flares, heat overlay)
     if (typeof StarEffects !== "undefined" && typeof Player !== "undefined") {
-      const objects = World.getVisibleObjects(
+      const objects = visibleWorldObjects || World.getVisibleObjects(
         Player.position,
-        Math.max(this.canvas.width, this.canvas.height)
+        Math.max(this.width, this.height)
       );
       StarEffects.update(dt, objects.stars, Player.position);
     }
@@ -457,12 +514,12 @@ const Renderer = {
     }
   },
 
-  clear() {
+  clear(visibleWorldObjects = null) {
     // Use new background system if available
     if (typeof BackgroundSystem !== "undefined" && BackgroundSystem.initialized) {
       // Get visible objects for zone sampling
       if (typeof Player !== "undefined" && Player.position && typeof World !== "undefined") {
-        const objects = World.getVisibleObjects(
+        const objects = visibleWorldObjects || World.getVisibleObjects(
           Player.position,
           Math.max(this.width, this.height) * 2
         );
@@ -495,8 +552,8 @@ const Renderer = {
     const offsetY = (this.camera.y * 0.1) % 100;
 
     for (let i = 0; i < 100; i++) {
-      const x = ((i * 73) % this.canvas.width) - offsetX;
-      const y = ((i * 137) % this.canvas.height) - offsetY;
+      const x = ((i * 73) % this.width) - offsetX;
+      const y = ((i * 137) % this.height) - offsetY;
       const size = (i % 3) + 1;
       ctx.globalAlpha = 0.3 + (i % 5) * 0.1;
       ctx.fillRect(x, y, size, size);
@@ -546,7 +603,7 @@ const Renderer = {
     );
   },
 
-  drawWorld() {
+  drawWorld(visibleWorldObjects = null) {
     this.updateCamera();
 
     // DEBUG: Draw sector grid first (background layer)
@@ -554,9 +611,9 @@ const Renderer = {
       this.drawSectorGrid();
     }
 
-    const objects = World.getVisibleObjects(
+    const objects = visibleWorldObjects || World.getVisibleObjects(
       Player.position,
-      Math.max(this.canvas.width, this.canvas.height)
+      Math.max(this.width, this.height)
     );
 
     // Draw stars (background layer)
@@ -589,12 +646,14 @@ const Renderer = {
       typeof CelestialRenderer !== "undefined" &&
       typeof Physics !== "undefined"
     ) {
+      // CelestialRenderer's camera contract uses a world-space center, while the
+      // main renderer stores the world-space top-left corner.
       const camera = {
-        x: this.camera.x,
-        y: this.camera.y,
+        x: this.camera.x + this.width / 2,
+        y: this.camera.y + this.height / 2,
         zoom: 1, // Adjust if game has zoom
-        width: this.canvas.width,
-        height: this.canvas.height,
+        width: this.width,
+        height: this.height,
       };
       const orbitTime = Physics.getOrbitTime();
       for (const comet of objects.comets) {
@@ -1312,7 +1371,6 @@ const Renderer = {
 
   drawWreckage() {
     const ctx = this.ctx;
-    const dt = this.lastDt;
     const now = Date.now();
 
     // Faction colors for wreckage
@@ -1342,9 +1400,6 @@ const Renderer = {
     // Despawn fade constants
     const FADE_START_MS = 10000; // Start fading 10 seconds before despawn
     const FADE_PULSE_SPEED = 3; // Pulses per second when fading
-
-    // Update wreckage rotation
-    Entities.updateWreckageRotation(dt);
 
     // Mobile draw budget: limit wreckage drawn per frame to maintain performance
     const isMobileWreckage = typeof DeviceDetect !== 'undefined' && DeviceDetect.isMobile;
@@ -1765,7 +1820,8 @@ const Renderer = {
 
     // Draw tractor beam first (behind everything)
     if (Player.miningTarget && Player.miningProgress > 0) {
-      const resourceType = Player.miningTarget.resources?.[0] || "default";
+      const resourceType = Player.miningTarget.activeResourceType ||
+        Player.miningTarget.resources?.[0] || "default";
       TractorBeamRenderer.draw(
         ctx,
         Player.position,
@@ -1831,21 +1887,15 @@ const Renderer = {
     const isMobileNpc = typeof DeviceDetect !== 'undefined' && DeviceDetect.isMobile;
     let npcEntries = Array.from(Entities.npcs.entries());
     if (isMobileNpc && typeof Player !== 'undefined' && Player.position) {
-      const px = Player.position.x;
-      const py = Player.position.y;
       const viewportDiag = Math.sqrt(this.width * this.width + this.height * this.height);
       const maxDrawDist = viewportDiag * 0.8;
       const maxDrawDistSq = maxDrawDist * maxDrawDist;
-      npcEntries = npcEntries
-        .map(([id, npc]) => {
-          const dx = npc.position.x - px;
-          const dy = npc.position.y - py;
-          return [id, npc, dx * dx + dy * dy];
-        })
-        .filter(([, , distSq]) => distSq <= maxDrawDistSq)
-        .sort((a, b) => a[2] - b[2])
-        .slice(0, 15)
-        .map(([id, npc]) => [id, npc]);
+      npcEntries = this.selectMobileNpcEntries(
+        npcEntries,
+        Player.position,
+        maxDrawDistSq,
+        15
+      );
     }
 
     for (const [id, npc] of npcEntries) {
@@ -2054,6 +2104,10 @@ const Renderer = {
       }
     }
 
+    if (typeof QueenVisuals !== "undefined") {
+      QueenVisuals.drawPhaseTransitions(ctx, this.camera);
+    }
+
     // Draw weapon projectiles
     WeaponRenderer.draw(ctx, this.camera);
 
@@ -2091,6 +2145,9 @@ const Renderer = {
     if (typeof VoidEffects !== "undefined") {
       VoidEffects.draw(ctx, this.camera);
     }
+    if (typeof LeviathanSpawn !== "undefined") {
+      LeviathanSpawn.draw(ctx, this.camera);
+    }
 
     // Draw Tesla cannon effects
     if (typeof ChainLightningEffect !== "undefined") {
@@ -2110,8 +2167,8 @@ const Renderer = {
     ParticleSystem.draw(
       ctx,
       this.camera,
-      this.canvas.width,
-      this.canvas.height
+      this.width,
+      this.height
     );
 
     // Draw graveyard metallic glint particles
@@ -2131,6 +2188,56 @@ const Renderer = {
 
     // Draw legacy effects
     this.drawEffects();
+  },
+
+  /**
+   * Apply the mobile NPC draw budget without dropping an active target or boss
+   * solely because closer low-priority contacts filled the cap.
+   */
+  selectMobileNpcEntries(entries, playerPosition, maxDrawDistSq, limit) {
+    const targetId = typeof AutoFire !== 'undefined' && AutoFire.currentTarget
+      ? AutoFire.currentTarget.id
+      : null;
+    const px = playerPosition.x;
+    const py = playerPosition.y;
+
+    return entries
+      .map(([id, npc]) => {
+        const position = npc && npc.position;
+        if (!position || !Number.isFinite(position.x) || !Number.isFinite(position.y)) {
+          return null;
+        }
+
+        const dx = position.x - px;
+        const dy = position.y - py;
+        const distSq = dx * dx + dy * dy;
+        const priority = id === targetId
+          ? 0
+          : (npc.isBoss || this._bossNpcTypes.has(npc.type) ? 1 : 2);
+        return [id, npc, distSq, priority];
+      })
+      .filter(entry => entry !== null && entry[2] <= maxDrawDistSq)
+      .sort((a, b) => {
+        const priorityDelta = a[3] - b[3];
+        if (priorityDelta !== 0) return priorityDelta;
+
+        const distanceDelta = a[2] - b[2];
+        if (distanceDelta !== 0) return distanceDelta;
+
+        const aId = String(a[0]);
+        const bId = String(b[0]);
+        return aId < bId ? -1 : (aId > bId ? 1 : 0);
+      })
+      .slice(0, limit)
+      // Preserve the previous near-to-far paint order after selecting contacts.
+      .sort((a, b) => {
+        const distanceDelta = a[2] - b[2];
+        if (distanceDelta !== 0) return distanceDelta;
+        const aId = String(a[0]);
+        const bId = String(b[0]);
+        return aId < bId ? -1 : (aId > bId ? 1 : 0);
+      })
+      .map(([id, npc]) => [id, npc]);
   },
 
   drawPlayer() {
@@ -2413,8 +2520,8 @@ const Renderer = {
     ctx.textAlign = "center";
     ctx.fillText(
       this.miningNotification.text,
-      this.canvas.width / 2,
-      this.canvas.height / 2 + yOffset
+      this.width / 2,
+      this.height / 2 + yOffset
     );
     ctx.restore();
   },
@@ -2424,13 +2531,13 @@ const Renderer = {
     if (typeof StarEffects !== "undefined") {
       StarEffects.drawHeatOverlay(
         this.ctx,
-        this.canvas.width,
-        this.canvas.height
+        this.width,
+        this.height
       );
       StarEffects.drawZoneWarning(
         this.ctx,
-        this.canvas.width,
-        this.canvas.height
+        this.width,
+        this.height
       );
     }
 
@@ -2441,7 +2548,7 @@ const Renderer = {
 
     // Draw player death effect overlay (on top of everything)
     if (typeof PlayerDeathEffect !== "undefined") {
-      PlayerDeathEffect.draw(this.ctx, this.canvas.width, this.canvas.height);
+      PlayerDeathEffect.draw(this.ctx, this.width, this.height);
     }
   },
 
@@ -2628,10 +2735,10 @@ const Renderer = {
     const SECTOR_SIZE = 1000;
 
     // Calculate visible area in world coordinates
-    const viewLeft = this.camera.x - this.canvas.width / 2;
-    const viewRight = this.camera.x + this.canvas.width / 2;
-    const viewTop = this.camera.y - this.canvas.height / 2;
-    const viewBottom = this.camera.y + this.canvas.height / 2;
+    const viewLeft = this.camera.x;
+    const viewRight = this.camera.x + this.width;
+    const viewTop = this.camera.y;
+    const viewBottom = this.camera.y + this.height;
 
     // Find first/last sector boundaries in view
     const firstSectorX = Math.floor(viewLeft / SECTOR_SIZE) * SECTOR_SIZE;
@@ -2650,19 +2757,19 @@ const Renderer = {
 
     // Draw vertical lines
     for (let worldX = firstSectorX; worldX <= lastSectorX; worldX += SECTOR_SIZE) {
-      const screenX = worldX - this.camera.x + this.canvas.width / 2;
+      const screenX = worldX - this.camera.x;
       ctx.beginPath();
       ctx.moveTo(screenX, 0);
-      ctx.lineTo(screenX, this.canvas.height);
+      ctx.lineTo(screenX, this.height);
       ctx.stroke();
     }
 
     // Draw horizontal lines
     for (let worldY = firstSectorY; worldY <= lastSectorY; worldY += SECTOR_SIZE) {
-      const screenY = worldY - this.camera.y + this.canvas.height / 2;
+      const screenY = worldY - this.camera.y;
       ctx.beginPath();
       ctx.moveTo(0, screenY);
-      ctx.lineTo(this.canvas.width, screenY);
+      ctx.lineTo(this.width, screenY);
       ctx.stroke();
     }
 
@@ -2670,8 +2777,8 @@ const Renderer = {
     ctx.setLineDash([]);
     for (let worldX = firstSectorX; worldX <= lastSectorX; worldX += SECTOR_SIZE) {
       for (let worldY = firstSectorY; worldY <= lastSectorY; worldY += SECTOR_SIZE) {
-        const screenX = worldX - this.camera.x + this.canvas.width / 2;
-        const screenY = worldY - this.camera.y + this.canvas.height / 2;
+        const screenX = worldX - this.camera.x;
+        const screenY = worldY - this.camera.y;
         const sectorX = Math.floor(worldX / SECTOR_SIZE);
         const sectorY = Math.floor(worldY / SECTOR_SIZE);
         ctx.fillText(`(${sectorX}, ${sectorY})`, screenX + 5, screenY + 5);

@@ -131,27 +131,25 @@ function register(socket) {
   socket.on('scavenger:haulerGrow', (data) => {
     Logger.log('Hauler grew:', data);
 
+    const hauler = typeof Entities !== 'undefined'
+      ? Entities.npcs.get(data.npcId)
+      : null;
+    const position = data.position || hauler?.position;
+
     // Update Hauler size in entities
-    if (typeof Entities !== 'undefined') {
-      const npc = Entities.npcs.get(data.npcId);
-      if (npc) {
-        npc.sizeMultiplier = data.sizeMultiplier;
-        // Update actual size based on multiplier
-        const baseSize = 80; // Base hauler size
-        npc.size = baseSize * data.sizeMultiplier;
-      }
+    if (hauler) {
+      hauler.sizeMultiplier = Math.max(0.5, Number(data.sizeMultiplier) || 1);
     }
 
     // Visual feedback - growth particles
-    if (typeof ParticleSystem !== 'undefined') {
-      const npc = Entities.npcs.get(data.npcId);
-      if (npc) {
+    if (typeof ParticleSystem !== 'undefined' &&
+        Number.isFinite(position?.x) && Number.isFinite(position?.y)) {
         for (let i = 0; i < 10; i++) {
           const angle = Math.random() * Math.PI * 2;
           const speed = 20 + Math.random() * 40;
           ParticleSystem.spawn({
-            x: npc.x,
-            y: npc.y,
+            x: position.x,
+            y: position.y,
             vx: Math.cos(angle) * speed,
             vy: Math.sin(angle) * speed,
             life: 500 + Math.random() * 300,
@@ -162,7 +160,6 @@ function register(socket) {
             decay: 1
           });
         }
-      }
     }
   });
 

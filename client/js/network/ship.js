@@ -40,6 +40,7 @@ function register(socket) {
   // Ship data response (from ship:getData request)
   socket.on('ship:data', (data) => {
     window.Logger.log('Ship data received:', data);
+    const hasAuthoritativeInventory = Array.isArray(data.inventory);
 
     // Update player ship state
     if (typeof Player !== 'undefined') {
@@ -55,24 +56,57 @@ function register(socket) {
       Player.credits = data.credits;
       Player.colorId = data.ship_color_id;
       Player.ship.profileId = data.profile_id;
+
+      if (hasAuthoritativeInventory) {
+        Player.updateInventory({
+          inventory: data.inventory,
+          credits: data.credits
+        });
+      }
+    }
+
+    if (hasAuthoritativeInventory && typeof UIState !== 'undefined') {
+      UIState.set({
+        inventory: Player.inventory,
+        credits: Player.credits
+      });
+    }
+    if (hasAuthoritativeInventory && typeof CargoPanel !== 'undefined') {
+      CargoPanel.refresh();
     }
 
     // Refresh UI panels that depend on ship data
     if (typeof ShipUpgradePanel !== 'undefined') {
-      ShipUpgradePanel.updateData({
+      const panelData = {
         ship: Player.ship,
-        inventory: Player.inventory || [],
         credits: Player.credits
-      });
+      };
+      if (hasAuthoritativeInventory) panelData.inventory = Player.inventory || [];
+      ShipUpgradePanel.updateData(
+        panelData,
+        {
+          authoritativeInventory: hasAuthoritativeInventory,
+          authoritativeShip: true
+        }
+      );
+    } else if (typeof UpgradesUI !== 'undefined') {
+      if (hasAuthoritativeInventory &&
+          typeof UpgradesUI.applyAuthoritativeSnapshot === 'function') {
+        UpgradesUI.applyAuthoritativeSnapshot({ authoritativeShip: true });
+      } else {
+        UpgradesUI.refresh();
+      }
     }
-    if (typeof UpgradesUI !== 'undefined') {
-      UpgradesUI.refresh();
+    if (typeof HUD !== 'undefined' &&
+        typeof HUD.updateUpgradeIndicator === 'function') {
+      HUD.updateUpgradeIndicator();
     }
   });
 
   // Upgrade event handlers
   socket.on('upgrade:success', (data) => {
     window.Logger.log('Upgrade success:', data.component, 'to tier', data.newTier);
+    const hasAuthoritativeInventory = Array.isArray(data.inventory);
     if (typeof Player !== 'undefined') {
       // Map component key to Player.ship property name
       const componentToTierKey = {
@@ -90,30 +124,50 @@ function register(socket) {
         Player.ship[tierKey] = data.newTier;
       }
       // Update max HP values if provided (for shield/hull upgrades)
-      if (data.shieldMax !== undefined) {
-        Player.shieldMax = data.shieldMax;
+      if (data.shieldMax !== undefined && Player.shield) {
+        Player.shield.max = data.shieldMax;
+        Player.shield.current = Math.min(Player.shield.current, Player.shield.max);
       }
-      if (data.hullMax !== undefined) {
-        Player.hullMax = data.hullMax;
+      if (data.hullMax !== undefined && Player.hull) {
+        Player.hull.max = data.hullMax;
+        Player.hull.current = Math.min(Player.hull.current, Player.hull.max);
       }
       Player.credits = data.credits;
+      if (hasAuthoritativeInventory) {
+        Player.updateInventory({ inventory: data.inventory, credits: data.credits });
+      }
       // Sync credit animation with new balance
       if (typeof CreditAnimation !== 'undefined') {
         CreditAnimation.sync();
       }
     }
     if (typeof ShipUpgradePanel !== 'undefined') {
-      ShipUpgradePanel.updateData({
+      const panelData = {
         ship: Player.ship,
-        inventory: Player.inventory || [],
         credits: Player.credits
+      };
+      if (hasAuthoritativeInventory) panelData.inventory = Player.inventory || [];
+      ShipUpgradePanel.updateData(
+        panelData,
+        { authoritativeInventory: hasAuthoritativeInventory }
+      );
+      ShipUpgradePanel.onUpgradeSuccess(data, {
+        awaitingInventory: !hasAuthoritativeInventory
       });
-      ShipUpgradePanel.onUpgradeSuccess(data);
     } else if (typeof UpgradesUI !== 'undefined') {
-      UpgradesUI.refresh();
+      if (typeof UpgradesUI.onUpgradeSuccess === 'function') {
+        UpgradesUI.onUpgradeSuccess(data, {
+          awaitingInventory: !hasAuthoritativeInventory
+        });
+      } else {
+        UpgradesUI.refresh();
+      }
     }
     if (typeof HUD !== 'undefined') {
-      HUD.update();
+      const visibleWorldObjects = typeof Game !== 'undefined'
+        ? Game._visibleWorldObjects
+        : null;
+      HUD.update(visibleWorldObjects);
     }
     if (typeof Toast !== 'undefined') {
       // Get friendly component name
@@ -136,6 +190,23 @@ function register(socket) {
     console.error('Upgrade error:', data.message);
     if (typeof ShipUpgradePanel !== 'undefined') {
       ShipUpgradePanel.onUpgradeError(data.message);
+    } else if (typeof UpgradesUI !== 'undefined' &&
+        typeof UpgradesUI.onUpgradeError === 'function') {
+      UpgradesUI.onUpgradeError(data.message);
+    }
+    if (typeof HUD !== 'undefined' &&
+        typeof HUD.updateUpgradeIndicator === 'function') {
+      HUD.updateUpgradeIndicator();
+    }
+
+    // A rejection means the client and server disagreed about affordability.
+    // Request a complete authoritative ship/inventory snapshot and keep the UI
+    // disabled until it arrives.
+    if (typeof Network !== 'undefined' &&
+        typeof Network.requestShipData === 'function') {
+      Network.requestShipData();
+    } else if (socket && typeof socket.emit === 'function') {
+      socket.emit('ship:getData');
     }
     if (typeof NotificationManager !== 'undefined') {
       NotificationManager.error(data.message);

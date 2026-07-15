@@ -81,11 +81,13 @@ const MobileHUD = {
     this.elements.fireBtn.addEventListener('touchstart', (e) => {
       e.preventDefault();
       e.stopPropagation(); // Prevent canvas from seeing this touch
+      if (!this.isGameplayAvailable()) return;
+      if (this.fireTouchId !== null) return;
       // Track this touch for multi-touch support
       if (e.changedTouches.length > 0) {
         this.fireTouchId = e.changedTouches[0].identifier;
+        this.startFiring();
       }
-      this.startFiring();
     }, { passive: false });
 
     this.elements.fireBtn.addEventListener('touchend', (e) => {
@@ -103,8 +105,14 @@ const MobileHUD = {
 
     this.elements.fireBtn.addEventListener('touchcancel', (e) => {
       e.stopPropagation();
-      this.fireTouchId = null;
-      this.stopFiring();
+      const canceledOwner = Array.from(e.changedTouches || [])
+        .some(touch => touch.identifier === this.fireTouchId);
+      const ownerStillActive = Array.from(e.touches || [])
+        .some(touch => touch.identifier === this.fireTouchId);
+      if (canceledOwner || (e.touches && !ownerStillActive)) {
+        this.fireTouchId = null;
+        this.stopFiring();
+      }
     }, { passive: false });
 
     // Context action button (replaces M key)
@@ -123,6 +131,8 @@ const MobileHUD = {
   },
 
   startFiring() {
+    if (!this.isGameplayAvailable()) return;
+    if (this.firingInterval) return;
     // Mark manual firing as active (AutoFire checks this flag)
     this._manualFiringActive = true;
 
@@ -139,11 +149,14 @@ const MobileHUD = {
       if (typeof Player !== 'undefined' && !Player.isDead) {
         Player.fire();
       }
-    }, Math.max(cooldown, 100));
+    }, cooldown);
   },
 
   stopFiring() {
     this._manualFiringActive = false;
+    // A blur/disconnect/visibility reset may not deliver the owner's final
+    // touchend. Release ownership together with the firing interval.
+    this.fireTouchId = null;
 
     if (this.firingInterval) {
       clearInterval(this.firingInterval);
@@ -155,65 +168,84 @@ const MobileHUD = {
    * Get current weapon cooldown in ms
    */
   getWeaponCooldown() {
-    if (typeof Player === 'undefined' || typeof CONSTANTS === 'undefined') {
-      return 200; // Default fallback
+    if (typeof Player !== 'undefined' && typeof Player.getWeaponCooldown === 'function') {
+      return Player.getWeaponCooldown();
     }
 
-    const weaponTier = Player.tiers?.weapon || 1;
-    const baseCooldown = CONSTANTS.BASE_FIRE_RATE || 500;
-    const cooldownReduction = CONSTANTS.FIRE_RATE_REDUCTION_PER_TIER || 50;
+    if (typeof AutoFire !== 'undefined' && typeof AutoFire.getWeaponCooldown === 'function') {
+      return AutoFire.getWeaponCooldown();
+    }
 
-    return Math.max(100, baseCooldown - (weaponTier - 1) * cooldownReduction);
+    return 500;
   },
 
   triggerContextAction() {
-    if (typeof Player === 'undefined') return;
+    if (!this.isGameplayAvailable() || typeof Player === 'undefined' || Player.isDead) return;
 
-    // Priority order matches desktop M key behavior
-    // Mining/wreckage take precedence over plunder so players can interact near bases
-    // 1. Wormhole (if gem equipped and near wormhole)
-    if (Player._nearestWormhole && Player.hasRelic('WORMHOLE_GEM') && !Player.inWormholeTransit) {
-      Player.tryEnterWormhole();
-      return;
+    switch (this.getContextAction()) {
+      case 'wormhole':
+        Player.tryEnterWormhole();
+        break;
+      case 'mine':
+        Player.tryMine();
+        break;
+      case 'multiCollect':
+        Player.tryMultiCollectWreckage();
+        break;
+      case 'salvage':
+        Player.trySalvageDerelict();
+        break;
+      case 'plunder':
+        Player.tryPlunderBase();
+        break;
+      case 'collect':
+        Player.tryCollectWreckage();
+        break;
     }
+  },
 
-    // 2. Mining (if near mineable and not already mining)
+  isGameplayAvailable() {
+    if (typeof GalaxyMiner === 'undefined') return true;
+    return GalaxyMiner.gameStarted === true && GalaxyMiner.connectionPaused !== true;
+  },
+
+  /**
+   * Resolve the context action once so the visible label and touch behavior
+   * always share the desktop action priority.
+   */
+  getContextAction() {
+    if (typeof Player === 'undefined') return 'none';
+
+    const hasWormholeGem = Player.hasRelic('WORMHOLE_GEM');
+    const hasScrapSiphon = Player.hasRelic('SCRAP_SIPHON');
+    const hasSkullAndBones = Player.hasRelic('SKULL_AND_BONES');
+
+    if (Player._nearestWormhole && hasWormholeGem && !Player.inWormholeTransit) {
+      return 'wormhole';
+    }
     if (Player._nearestMineable && !Player.miningTarget) {
-      Player.tryMine();
-      return;
+      return 'mine';
     }
 
-    // 3. Multi-collect wreckage (if has Scrap Siphon and wreckage in range)
-    if (Player.hasRelic('SCRAP_SIPHON') && typeof Entities !== 'undefined' &&
-        Entities.hasNonDerelictWreckageInRange(Player.position, CONSTANTS.RELIC_TYPES?.SCRAP_SIPHON?.effects?.multiWreckageRange || 300)) {
-      Player.tryMultiCollectWreckage();
-      return;
+    const siphonRange = (typeof CONSTANTS !== 'undefined' &&
+      CONSTANTS.RELIC_TYPES?.SCRAP_SIPHON?.effects?.multiWreckageRange) || 300;
+    if (hasScrapSiphon && typeof Entities !== 'undefined' &&
+        Entities.hasNonDerelictWreckageInRange(Player.position, siphonRange)) {
+      return 'multiCollect';
     }
 
-    // 4. Single collect wreckage (if wreckage in range)
-    if (typeof Entities !== 'undefined' && Entities.getClosestWreckage(Player.position, CONSTANTS.MINING_RANGE || 100)) {
-      Player.tryCollectWreckage();
-      return;
+    const collectRange = (typeof CONSTANTS !== 'undefined' && CONSTANTS.MINING_RANGE) || 100;
+    if (typeof Entities !== 'undefined' && Entities.getClosestWreckage(Player.position, collectRange)) {
+      return 'collect';
     }
-
-    // 5. Derelict salvage
     if (Player._nearestDerelict) {
-      Player.trySalvageDerelict();
-      return;
+      return 'salvage';
+    }
+    if (Player._nearestBase && hasSkullAndBones) {
+      return 'plunder';
     }
 
-    // 6. Base plunder (if skull & bones equipped and near base)
-    if (Player._nearestBase && Player.hasRelic('SKULL_AND_BONES')) {
-      Player.tryPlunderBase();
-      return;
-    }
-
-    // 7. Fallback: try wreckage/siphon even if nothing detected in range
-    if (Player.hasRelic('SCRAP_SIPHON')) {
-      Player.tryMultiCollectWreckage();
-      return;
-    }
-    Player.tryCollectWreckage();
+    return hasScrapSiphon ? 'multiCollect' : 'collect';
   },
 
   openMenu() {
@@ -232,22 +264,37 @@ const MobileHUD = {
     const iconEl = this.elements.actionBtn.querySelector('.btn-icon');
     const labelEl = this.elements.actionBtn.querySelector('.btn-label');
 
-    let icon = '⛏';
-    let label = 'Action';
+    let icon;
+    let label;
 
-    // Check context in priority order
-    if (Player._nearestWormhole && Player.hasRelic('WORMHOLE_GEM') && !Player.inWormholeTransit) {
-      icon = '🌀';
-      label = 'Wormhole';
-    } else if (Player._nearestBase && Player.hasRelic('SKULL_AND_BONES')) {
-      icon = '💀';
-      label = 'Plunder';
-    } else if (Player._nearestMineable && !Player.miningTarget) {
-      icon = '⛏';
-      label = 'Mine';
-    } else if (this.checkNearbyWreckage()) {
-      icon = '📦';
-      label = 'Collect';
+    switch (this.getContextAction()) {
+      case 'wormhole':
+        icon = '🌀';
+        label = 'Wormhole';
+        break;
+      case 'mine':
+        icon = '⛏';
+        label = 'Mine';
+        break;
+      case 'multiCollect':
+        icon = '🧲';
+        label = 'Siphon';
+        break;
+      case 'salvage':
+        icon = '🛠';
+        label = 'Salvage';
+        break;
+      case 'plunder':
+        icon = '💀';
+        label = 'Plunder';
+        break;
+      case 'collect':
+        icon = '📦';
+        label = 'Collect';
+        break;
+      default:
+        icon = '⛏';
+        label = 'Action';
     }
 
     if (iconEl) iconEl.textContent = icon;

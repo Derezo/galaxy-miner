@@ -173,6 +173,10 @@ const FactionBases = {
 
     ctx.save();
     ctx.translate(screenX, screenY);
+    const authoredSize = Math.max(1, Number(config.size) || 1);
+    const authoritativeSize = Math.max(1, Number(base.size) || authoredSize);
+    const collisionScale = authoritativeSize / authoredSize;
+    ctx.scale(collisionScale, collisionScale);
 
     // Draw based on type
     switch (base.type) {

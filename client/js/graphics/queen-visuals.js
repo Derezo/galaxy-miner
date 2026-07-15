@@ -67,6 +67,7 @@ const QueenVisuals = {
   animationTime: 0,
   phaseTransitions: [],
   activeEffects: [],
+  queenPhases: new Map(),
 
   /**
    * Initialize the queen visuals module
@@ -75,6 +76,7 @@ const QueenVisuals = {
     this.animationTime = 0;
     this.phaseTransitions = [];
     this.activeEffects = [];
+    this.queenPhases.clear();
   },
 
   /**
@@ -191,7 +193,9 @@ const QueenVisuals = {
    */
   drawQueen(ctx, position, rotation, screenPos, time, npc) {
     const scale = this.SIZE * this.SCALE;
-    const phase = npc?.phaseManager?.currentPhase || 'HUNT';
+    const phase = npc?.phaseManager?.currentPhase ||
+      npc?.phase ||
+      this.queenPhases.get(npc?.id) || 'HUNT';
 
     ctx.save();
     ctx.translate(screenPos.x, screenPos.y);
@@ -223,7 +227,12 @@ const QueenVisuals = {
 
     // Draw phase transition effect if active
     if (npc?.phaseTransitionPending) {
-      this.triggerPhaseTransition(npc.id, screenPos.x, screenPos.y, npc.phaseTransitionPending);
+      this.triggerPhaseTransition(
+        npc.id,
+        position?.x ?? screenPos.x,
+        position?.y ?? screenPos.y,
+        npc.phaseTransitionPending
+      );
       npc.phaseTransitionPending = null;
     }
   },
@@ -613,6 +622,12 @@ const QueenVisuals = {
    * Trigger phase transition visual effect
    */
   triggerPhaseTransition(queenId, x, y, transitionData) {
+    if (!queenId || !Number.isFinite(x) || !Number.isFinite(y) ||
+        !transitionData || typeof transitionData.to !== 'string') {
+      return false;
+    }
+
+    this.queenPhases.set(queenId, transitionData.to);
     const phaseConfig = window.CONSTANTS?.SWARM_QUEEN_PHASES?.[transitionData.to];
 
     this.phaseTransitions.push({
@@ -644,6 +659,19 @@ const QueenVisuals = {
         });
       }
     }
+
+    return true;
+  },
+
+  setQueenPhase(queenId, phase) {
+    if (!queenId || typeof phase !== 'string') return false;
+    this.queenPhases.set(queenId, phase);
+    return true;
+  },
+
+  clearQueen(queenId) {
+    this.queenPhases.delete(queenId);
+    this.phaseTransitions = this.phaseTransitions.filter(t => t.queenId !== queenId);
   },
 
   /**
@@ -651,14 +679,16 @@ const QueenVisuals = {
    */
   drawPhaseTransitions(ctx, camera) {
     const now = Date.now();
+    const cameraX = Number(camera?.x) || 0;
+    const cameraY = Number(camera?.y) || 0;
 
     for (const transition of this.phaseTransitions) {
       const elapsed = now - transition.startTime;
       const progress = elapsed / transition.duration;
       if (progress >= 1) continue;
 
-      const screenX = transition.x;
-      const screenY = transition.y;
+      const screenX = transition.x - cameraX;
+      const screenY = transition.y - cameraY;
 
       // Expanding ring
       const ringRadius = 50 + progress * 150;

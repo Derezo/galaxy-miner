@@ -20,9 +20,10 @@ Mobile modules are initialized in `main.js` after core systems:
 
 ```javascript
 DeviceDetect.init();     // 1. Detect device type, set body classes
-VirtualJoystick.init();  // 2. Create joystick (only on mobile)
-AutoFire.init();         // 3. Set up auto-fire (only on mobile)
-MobileHUD.init();        // 4. Create action buttons (only on mobile)
+MobileSettingsPanel.init(); // 2. Load and apply saved control settings
+VirtualJoystick.init();  // 3. Create joystick (only on mobile)
+AutoFire.init();         // 4. Set up auto-fire (only on mobile)
+MobileHUD.init();        // 5. Create action buttons (only on mobile)
 ```
 
 All modules check `DeviceDetect.isMobile` before initializing.
@@ -152,6 +153,8 @@ AutoFire.setAimTolerance(rad)    // Set aim tolerance in radians
 4. Fires if angle difference < `aimTolerance`
 5. Respects weapon cooldown (tier + energy core scaled)
 6. Skips firing if `MobileHUD._manualFiringActive` is true
+7. Defaults to off and ignores passive/neutral NPCs until they are overtly hostile
+8. Ignores hatch, spawn, and retreat states
 
 ### Target Selection
 
@@ -161,6 +164,7 @@ AutoFire.setAimTolerance(rad)    // Set aim tolerance in radians
   id: string,         // NPC ID
   x: number,          // World X position
   y: number,          // World Y position
+  position: Object,   // Authoritative NPC position object
   distance: number,   // Distance from player
   faction: string,    // NPC faction
   npc: Object         // Full NPC entity
@@ -183,12 +187,16 @@ Touch-friendly action buttons displayed on mobile devices.
 
 ### Context Action Priority
 
-The context button label updates dynamically based on what's nearby:
+The context button label and touch action use the same priority as the desktop `M` key:
 
 1. **Wormhole** - Near wormhole + has Wormhole Gem relic
-2. **Plunder** - Near base + has Skull and Bones relic
-3. **Mine** - Near mineable asteroid + not already mining
+2. **Mine** - Near mineable asteroid + not already mining
+3. **Siphon** - Scrap Siphon equipped + eligible wreckage nearby
 4. **Collect** - Wreckage nearby
+5. **Salvage** - Derelict nearby
+6. **Plunder** - Near base + has Skull and Bones relic
+
+When no contextual target is detected, the button falls back to Siphon (when equipped) or Collect.
 
 ### API
 
@@ -353,8 +361,9 @@ GestureHandler.config = {
 ### API
 
 ```javascript
-// Initialize on element with callbacks
-GestureHandler.init(element, {
+// MobileGestures initializes at the document boundary so canvas, radar, and
+// terminal gestures share one tracker. Native form/button touches are ignored.
+GestureHandler.init(document, {
   onLongPress: ({ x, y }) => { },
   onSwipe: ({ direction, dx, dy, velocity }) => { },
   onPinch: ({ scale, center, isZoomIn, isZoomOut }) => { },
@@ -407,12 +416,16 @@ GestureHandler.destroy();
 { x: number, y: number }
 ```
 
-### Future Uses
+### Integrated Uses
 
-- Long-press: Context menu, target lock
-- Swipe: Panel dismiss, navigation
-- Pinch: Map zoom (when implemented)
-- Double-tap: Quick action shortcuts
+- Swipe: dismiss/open the terminal and toggle the Tier 5 sector map from the bottom edge
+- Pinch on radar: adjust radar zoom
+- Double-tap on the game canvas: activate boost when alive, out of transit, and off cooldown
+- Double-tap on the radar: toggle the Tier 5 sector map
+
+Long-press targeting and main-camera pinch zoom remain future extensions. The
+game and radar canvases use `touch-action: none`; terminal content retains
+native browser scrolling and zoom behavior.
 
 ---
 
@@ -426,7 +439,7 @@ Settings panel for customizing mobile controls (uses Modal system).
 |---------|-------|---------|
 | Joystick Size | 80-160px | 120px |
 | Joystick Deadzone | 5-30% | 15% |
-| Auto-Fire Enabled | on/off | on |
+| Auto-Fire Enabled | on/off | off |
 | Aim Tolerance | 15-60° | 30° |
 | Haptic Feedback | on/off | on |
 
@@ -449,7 +462,7 @@ Settings stored in localStorage:
 ### Integration
 
 Settings are automatically applied to:
-- `VirtualJoystick.config.size`
+- `VirtualJoystick.setSize()` (visual size, knob size, and input travel)
 - `VirtualJoystick.config.deadzone`
 - `AutoFire.enabled`
 - `AutoFire.aimTolerance`
@@ -465,22 +478,20 @@ Settings are automatically applied to:
 | iPadOS | Safari | Supported |
 | Android Tablets | Chrome | Supported |
 
-**Requirements:** Touch screen with multi-touch, landscape orientation, modern browser with ES6 and WebSocket support.
+**Requirements:** Touch screen with multi-touch and a modern browser with ES6 and WebSocket support. Portrait and landscape layouts are supported.
 
 ---
 
 ## Performance Notes
 
-- **Rendering**: Canvas DPR capped at 2.0 on mobile; 60 FPS target maintained
-- **Audio**: Spatial audio disabled on mobile (mono assumed); sound pool limited to 32 concurrent sounds
+- **Rendering**: Canvas DPR is capped at 2.0 on mobile; adaptive quality may lower the presentation target
+- **Audio**: Spatial falloff and stereo panning remain available; pooled sources cap concurrent playback
 - **Network**: Same update frequency as desktop; proximity-based updates reduce bandwidth
 
 ---
 
 ## Known Limitations
 
-1. **No portrait gameplay** -- landscape required
-2. **No reverse thrust** -- mobile joystick doesn't support backward movement
-3. **No double-tap boost** -- boost via max joystick thrust only
-4. **No gesture support in gameplay** -- pinch/swipe not wired to game actions yet
-5. **No haptic feedback** -- Vibration API not used
+1. **No reverse thrust** -- the mobile joystick does not support backward movement
+2. **No long-press target lock** -- long-press detection is present, but targeting is not yet assigned
+3. **No main-camera pinch zoom** -- pinch zoom is currently scoped to the radar

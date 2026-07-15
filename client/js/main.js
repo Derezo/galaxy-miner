@@ -3,6 +3,7 @@
 const GalaxyMiner = {
   initialized: false,
   gameStarted: false,
+  connectionPaused: false,
   _fullscreenPending: false,
 
   init() {
@@ -31,6 +32,12 @@ const GalaxyMiner = {
     AudioManager.init();
     if (typeof MusicManager !== 'undefined') MusicManager.init();
 
+    // Load saved control preferences before creating mobile controls.
+    if (typeof MobileSettingsPanel !== 'undefined' &&
+        typeof DeviceDetect !== 'undefined' && DeviceDetect.isMobile) {
+      MobileSettingsPanel.init();
+    }
+
     // Initialize mobile modules (only activate on mobile devices)
     if (typeof VirtualJoystick !== 'undefined') {
       VirtualJoystick.init();
@@ -49,15 +56,19 @@ const GalaxyMiner = {
   },
 
   startGame(playerData) {
-    if (this.gameStarted) return;
+    const reconnecting = this.gameStarted || this.connectionPaused;
+    const preserveLifeState = reconnecting && Player.id === playerData.id;
     this.gameStarted = true;
+    this.connectionPaused = false;
 
-    Logger.log('Starting game for player:', playerData.username);
+    Logger.log(reconnecting ? 'Resynchronizing game for player:' : 'Starting game for player:', playerData.username);
 
-    // Initialize player and world
-    Player.init(playerData);
-    World.init(CONSTANTS.GALAXY_SEED);
+    // Authentication snapshots are authoritative on both initial login and
+    // reconnect. Clear predicted/stale state before resuming simulation.
+    Player.init(playerData, { preserveLifeState });
+    World.init(CONSTANTS.GALAXY_SEED, Player.position);
     Entities.init();
+    if (typeof Input !== 'undefined' && typeof Input.reset === 'function') Input.reset();
 
     // Sync credit animation with loaded player credits
     if (typeof CreditAnimation !== 'undefined') {
@@ -68,15 +79,34 @@ const GalaxyMiner = {
     document.getElementById('auth-screen').classList.add('hidden');
     document.getElementById('hud').classList.remove('hidden');
 
-    // Request fullscreen on mobile
-    if (typeof DeviceDetect !== 'undefined' && DeviceDetect.isMobile) {
+    // Request fullscreen on the initial mobile login only.
+    if (!reconnecting && typeof DeviceDetect !== 'undefined' && DeviceDetect.isMobile) {
       this.requestFullscreen();
     }
 
-    // Start game loop
-    Game.start();
+    if (reconnecting) Game.resume();
+    else Game.start();
 
-    if (typeof MusicManager !== 'undefined') MusicManager.start();
+    if (!reconnecting && typeof MusicManager !== 'undefined') MusicManager.start();
+    if (reconnecting && typeof NotificationManager !== 'undefined') {
+      NotificationManager.success('Connection restored');
+    }
+  },
+
+  handleDisconnect() {
+    if (!this.gameStarted || this.connectionPaused) return;
+    this.connectionPaused = true;
+    Game.pause();
+    if (typeof Input !== 'undefined' && typeof Input.reset === 'function') Input.reset();
+    if (typeof MobileHUD !== 'undefined') MobileHUD.stopFiring();
+    if (typeof VirtualJoystick !== 'undefined') VirtualJoystick.reset();
+    if (typeof AutoFire !== 'undefined') AutoFire.currentTarget = null;
+    if (typeof AudioManager !== 'undefined' && typeof AudioManager.stopAllLoops === 'function') {
+      AudioManager.stopAllLoops();
+    }
+    if (typeof NotificationManager !== 'undefined') {
+      NotificationManager.warning('Connection lost — reconnecting…');
+    }
   },
 
   /**
@@ -107,7 +137,19 @@ const GalaxyMiner = {
 
   stopGame() {
     this.gameStarted = false;
+    this.connectionPaused = false;
     Game.stop();
+    if (typeof Input !== 'undefined' && typeof Input.reset === 'function') Input.reset();
+    if (typeof AutoFire !== 'undefined') AutoFire.currentTarget = null;
+    // The terminal is outside #hud. Close it explicitly so forced auth
+    // termination cannot leave the panel or upgrade-preview rAF over login.
+    if (typeof TerminalUI !== 'undefined' && typeof TerminalUI.hide === 'function') {
+      TerminalUI.hide({ silent: true });
+    } else if (typeof ShipUpgradePanel !== 'undefined' &&
+               typeof ShipUpgradePanel.setVisible === 'function') {
+      ShipUpgradePanel.setVisible(false);
+    }
+    if (typeof AudioManager !== 'undefined') AudioManager.stopAllLoops();
     if (typeof MusicManager !== 'undefined') MusicManager.stop();
 
     // Show auth, hide HUD

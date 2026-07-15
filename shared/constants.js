@@ -63,7 +63,7 @@ const CONSTANTS = {
   // Ship component tiers
   MAX_TIER: 5,
   TIER_MULTIPLIER: 1.4,
-  SHIELD_TIER_MULTIPLIER: 2.0,  // Shields scale 2x per tier (T5 = 800 HP base)
+  SHIELD_TIER_MULTIPLIER: 2.0,  // Shields scale 2x per tier (60 base -> 960 HP at T5)
 
   // Radar tier configuration - progressive feature unlocks
   RADAR_TIERS: {
@@ -159,6 +159,7 @@ const CONSTANTS = {
   // Mining
   BASE_MINING_TIME: 3000,
   BASE_MINING_YIELD: 1,
+  MINING_YIELD_BY_TIER: [0, 1, 2, 3, 5, 8],
   MINING_RANGE: 50,
   RESOURCE_RESPAWN_TIME_MIN: 30 * 60 * 1000,
   RESOURCE_RESPAWN_TIME_MAX: 60 * 60 * 1000,
@@ -306,7 +307,7 @@ const CONSTANTS = {
       rarity: 'common',
       baseValue: 4,
       category: 'gas',
-      description: 'Atmospheric gas crucial for life support and cooling systems.'
+      description: 'Atmospheric gas consumed by life-support loops and high-tier energy-core cooling systems.'
     },
     // Uncommon - New additions
     SILVER: {
@@ -432,8 +433,8 @@ const CONSTANTS = {
     },
     energy_core: {
       2: { credits: 100, resources: { HYDROGEN: 6, PHOSPHORUS: 3 } },
-      3: { credits: 400, resources: { HELIUM3: 8, LITHIUM: 6, URANIUM: 2 } },
-      4: { credits: 3000, resources: { URANIUM: 10, DARK_MATTER: 6, HELIUM3: 20 } },
+      3: { credits: 400, resources: { HELIUM3: 8, LITHIUM: 6, URANIUM: 2, NITROGEN: 8 } },
+      4: { credits: 3000, resources: { URANIUM: 10, DARK_MATTER: 6, HELIUM3: 20, NITROGEN: 18 } },
       5: { credits: 9000, resources: { ANTIMATTER: 5, EXOTIC_MATTER: 3, NEUTRONIUM: 2 } }
     },
     hull: {
@@ -1245,20 +1246,32 @@ const CONSTANTS = {
       name: 'Ancient Star Map',
       rarity: 'ultrarare',
       value: 500,
-      description: 'A weathered artifact containing coordinates to lost civilizations. The symbols shift when viewed from different angles.',
+      description: 'Reveals known faction bases and boss-class contacts just beyond normal radar range as strategic edge markers.',
       iconType: 'relic',
       glyphVariant: 'constellation',
-      glowColor: '#00aaff'
+      glowColor: '#00aaff',
+      effect: 'strategic_radar',
+      effects: {
+        strategicContactRangeMultiplier: 2,
+        maxStrategicContacts: 8,
+        strategicContactRefreshMs: 500,
+        strategicContactTypes: ['faction_bases', 'bosses']
+      }
     },
     VOID_CRYSTAL: {
       id: 'void_crystal',
       name: 'Void Crystal',
       rarity: 'ultrarare',
       value: 750,
-      description: 'A shard of crystallized void energy, pulsing with otherworldly power. It whispers of dimensions beyond our own.',
+      description: 'A shard tuned to extradimensional and hive signatures. Deals 10% more damage to Void and Swarm targets.',
       iconType: 'relic',
       glyphVariant: 'void',
-      glowColor: '#aa00ff'
+      glowColor: '#aa00ff',
+      effect: 'faction_damage',
+      effects: {
+        factionDamageBonus: 0.10,
+        targetFactions: ['void', 'swarm']
+      }
     },
     SWARM_HIVE_CORE: {
       id: 'swarm_hive_core',
@@ -1321,12 +1334,12 @@ const CONSTANTS = {
       name: 'Mining Rites',
       rarity: 'legendary',
       value: 2500,
-      description: 'An ancient amethyst pickaxe blessed by the Rogue Foremen. Multiplies mining yield by 5x.',
+      description: 'An ancient amethyst pickaxe blessed by the Rogue Foremen. Doubles mining yield without creating fractional cargo.',
       iconType: 'mining_rites',
       glyphVariant: 'mining',
       glowColor: '#9b59b6',
       effects: {
-        miningYieldMultiplier: 5
+        miningYieldMultiplier: 2
       }
     },
     SKULL_AND_BONES: {
@@ -1334,27 +1347,37 @@ const CONSTANTS = {
       name: 'Skull and Bones',
       rarity: 'ultrarare',
       value: 3000,
-      description: 'A cursed pirate banner that allows plundering faction bases without destroying them. Press M near any base to steal resources instantly.',
+      description: 'A cursed pirate banner that steals from finite base reserves. Press M near a base; player and base cooldowns are enforced by the server.',
       iconType: 'skull_and_bones',
       glowColor: '#1a1a1a',
       effect: 'plunder',
       cooldown: 15000,          // 15 second cooldown
+      baseCooldown: 90000,      // A base can only be plundered once every 90 seconds
       plunderRange: 200,        // Must be within 200 units of base edge
-      aggroRange: 600           // NPCs within 600 units become hostile
+      aggroRange: 600,          // NPCs within 600 units become hostile
+      reserveLootRolls: 1,      // One finite resource cache per base lifecycle
+      baseCreditReserve: {
+        pirate_outpost: 150,
+        swarm_hive: 200,
+        void_rift: 250,
+        default: 100
+      }
     },
     SUBSPACE_WARP_DRIVE: {
       id: 'subspace_warp_drive',
       name: 'Subspace Warp Drive',
       rarity: 'ultrarare',
       value: 3000,
-      description: 'A crystallized fragment of void energy that bends spacetime. Dramatically increases warp velocity and reduces cooldown.',
+      description: 'A crystallized fragment of void energy that bends spacetime. Extends thrust boosts, accelerates wormhole transit, and reduces both cooldowns.',
       iconType: 'subspace_warp_drive',
       glyphVariant: 'void',
       glowColor: '#9900ff',
       effect: 'warp_enhancement',
       effects: {
-        warpVelocityMultiplier: 2.5,    // +150% velocity
-        warpCooldownMultiplier: 0.75    // -25% cooldown
+        boostDurationMultiplier: 2.5,          // +150% boost duration
+        boostCooldownMultiplier: 0.75,         // -25% boost cooldown
+        wormholeTransitSpeedMultiplier: 2.5,   // 5s transit becomes 2s
+        wormholeCooldownMultiplier: 0.75       // 60s cooldown becomes 45s
       }
     }
   },

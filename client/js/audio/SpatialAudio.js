@@ -2,7 +2,8 @@
 // Handles distance-based volume falloff and stereo panning
 
 const SpatialAudio = (function() {
-  // Maximum distance for audio falloff (matches base radar range)
+  // Fixed near-field audio range (equal to the tier-1 2x broadcast envelope,
+  // not the 500-unit tier-1 radar presentation range).
   const MAX_DISTANCE = 1000;
 
   // Minimum volume threshold (sounds quieter than this won't play)

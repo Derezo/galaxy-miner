@@ -12,6 +12,7 @@
 const LeviathanSpawn = {
   // Active spawn sequences
   activeSpawns: new Map(),
+  nextSpawnId: 1,
 
   // Phase timing (ms)
   PHASES: {
@@ -30,6 +31,17 @@ const LeviathanSpawn = {
     void: '#000000',
     rift: '#330066',
     lightning: '#ff66ff'
+  },
+
+  /**
+   * Start a sequence from the socket event's position-shaped payload.
+   */
+  trigger(position, duration = 7000) {
+    if (!Number.isFinite(position?.x) || !Number.isFinite(position?.y)) {
+      return null;
+    }
+    const spawnId = `void_leviathan_spawn_${this.nextSpawnId++}`;
+    return this.start(spawnId, position.x, position.y, duration);
   },
 
   /**
@@ -252,13 +264,20 @@ const LeviathanSpawn = {
    * @param {object} camera - { x, y }
    */
   draw(ctx, camera) {
+    const viewportWidth = (typeof RenderContext !== 'undefined' && RenderContext.width)
+      || ctx.canvas.clientWidth
+      || ctx.canvas.width;
+    const viewportHeight = (typeof RenderContext !== 'undefined' && RenderContext.height)
+      || ctx.canvas.clientHeight
+      || ctx.canvas.height;
+
     for (const [spawnId, spawn] of this.activeSpawns) {
       const screenX = spawn.x - camera.x;
       const screenY = spawn.y - camera.y;
 
       // Skip if off-screen
-      if (screenX < -300 || screenX > ctx.canvas.width + 300 ||
-          screenY < -300 || screenY > ctx.canvas.height + 300) {
+      if (screenX < -300 || screenX > viewportWidth + 300 ||
+          screenY < -300 || screenY > viewportHeight + 300) {
         continue;
       }
 

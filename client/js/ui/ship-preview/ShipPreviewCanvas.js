@@ -75,7 +75,7 @@ const ShipPreviewCanvas = {
    * Start the animation loop
    */
   startAnimation() {
-    if (this.animationId) return;
+    if (this.animationId !== null) return;
 
     const animate = () => {
       this.time += 0.016; // ~60fps
@@ -89,7 +89,7 @@ const ShipPreviewCanvas = {
    * Stop the animation loop
    */
   stopAnimation() {
-    if (this.animationId) {
+    if (this.animationId !== null) {
       cancelAnimationFrame(this.animationId);
       this.animationId = null;
     }

@@ -211,6 +211,60 @@ function getStrategy(npc) {
 }
 
 /**
+ * Return the bounded range in which a faction strategy deliberately retains a
+ * player target beyond normal aggro. Strategies without an explicit contract
+ * retain the ordinary aggro behavior.
+ */
+function getPlayerTargetRetentionRange(npc) {
+  const strategy = getStrategy(npc);
+  const configuredRange = strategy &&
+    typeof strategy.getPlayerTargetRetentionRange === 'function'
+    ? Number(strategy.getPlayerTargetRetentionRange(npc))
+    : 0;
+  return Number.isFinite(configuredRange) && configuredRange > 0
+    ? configuredRange
+    : 0;
+}
+
+/**
+ * Clear a strategy-owned player target that no longer exists in the live
+ * player set. Only strategies that explicitly advertise a retention range are
+ * eligible, keeping ordinary short-lived target selection strategy-owned.
+ */
+function clearRetainedPlayerTarget(npc) {
+  if (getPlayerTargetRetentionRange(npc) <= 0) return false;
+
+  const strategy = getStrategy(npc);
+  if (!strategy || typeof strategy.clearRetainedPlayerTarget !== 'function') {
+    return false;
+  }
+
+  return strategy.clearRetainedPlayerTarget(npc) === true;
+}
+
+/**
+ * Prune strategy-owned player references that are not represented directly by
+ * npc.targetPlayer, such as Pirate scouts carrying intel and base intel maps.
+ */
+function pruneMissingPlayerTargetState(livePlayerIds, allNPCs) {
+  let prunedCount = 0;
+  const visitedStrategies = new Set();
+
+  for (const strategy of Object.values(strategies)) {
+    if (!strategy || visitedStrategies.has(strategy)) continue;
+    visitedStrategies.add(strategy);
+    if (typeof strategy.pruneMissingPlayerTargetState !== 'function') continue;
+    const count = Number(strategy.pruneMissingPlayerTargetState(
+      livePlayerIds,
+      allNPCs
+    ));
+    if (Number.isFinite(count) && count > 0) prunedCount += count;
+  }
+
+  return prunedCount;
+}
+
+/**
  * Handle orphaned NPC in rage mode - aggressive pursuit of any player
  * NPCs in rage mode ignore their normal faction behavior and simply
  * chase and attack the nearest player relentlessly.
@@ -313,15 +367,23 @@ function updateNPCAI(npc, allPlayers, allNPCs, deltaTime, getActiveBase = null, 
   }
 
   const strategy = getStrategy(npc);
+  const targetRetentionRange = getPlayerTargetRetentionRange(npc);
 
-  // Find players in aggro range
+  // Find players in aggro range. An already-retained target may have attacked
+  // from beyond passive detection range; pass it through so the faction
+  // strategy can apply its own bounded rage/raid chase limit.
   const nearbyPlayers = [];
   for (const player of allPlayers) {
     const dx = player.position.x - npc.position.x;
     const dy = player.position.y - npc.position.y;
     const dist = Math.sqrt(dx * dx + dy * dy);
+    const isRetainedTarget = targetRetentionRange > 0 &&
+      npc.targetPlayer !== null &&
+      npc.targetPlayer !== undefined &&
+      String(player.id) === String(npc.targetPlayer) &&
+      dist <= targetRetentionRange;
 
-    if (dist <= npc.aggroRange) {
+    if (dist <= npc.aggroRange || isRetainedTarget) {
       nearbyPlayers.push({ ...player, distance: dist });
     }
   }
@@ -403,7 +465,8 @@ function updateNPCAI(npc, allPlayers, allNPCs, deltaTime, getActiveBase = null, 
         x: base.x,
         y: base.y,
         type: base.type,
-        name: base.name
+        name: base.name,
+        destroyed: base.destroyed === true
       };
       // Check for Foreman presence at mining claims
       if (base.type === 'mining_claim') {
@@ -485,6 +548,24 @@ function getScavengerStrategy() {
 }
 
 /**
+ * Get the shared swarm strategy instance for assimilation and queen support.
+ * Reusing it preserves collective state and avoids per-NPC tick allocation.
+ * @returns {SwarmStrategy}
+ */
+function getSwarmStrategy() {
+  return strategies.swarm;
+}
+
+/**
+ * Get the shared Void formation strategy so lifecycle code can start the
+ * authoritative confusion/reformation sequence after leader succession.
+ * @returns {FormationStrategy}
+ */
+function getFormationStrategy() {
+  return strategies.formation;
+}
+
+/**
  * Get the mining strategy instance for external calls (rage triggering, etc.)
  * @returns {MiningStrategy} The mining strategy instance
  */
@@ -503,6 +584,11 @@ function getPirateStrategy() {
 module.exports = {
   AIStrategy,
   getStrategy,
+  getPlayerTargetRetentionRange,
+  clearRetainedPlayerTarget,
+  pruneMissingPlayerTargetState,
+  getSwarmStrategy,
+  getFormationStrategy,
   getScavengerStrategy,
   getMiningStrategy,
   getPirateStrategy,

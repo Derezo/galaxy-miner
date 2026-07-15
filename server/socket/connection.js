@@ -9,6 +9,7 @@
 const config = require('../config');
 const { statements } = require('../database');
 const mining = require('../game/mining');
+const combat = require('../game/combat');
 const wormhole = require('../game/wormhole');
 const logger = require('../../shared/logger');
 
@@ -42,6 +43,10 @@ function register(socket, deps) {
  * @param {Object} deps - Shared dependencies
  */
 function cleanupPlayer(socket, userId, deps) {
+  socket.data = socket.data || {};
+  if (socket.data.playerCleanupComplete) return false;
+  socket.data.playerCleanupComplete = true;
+
   const {
     connectedPlayers,
     userSockets,
@@ -75,6 +80,12 @@ function cleanupPlayer(socket, userId, deps) {
   // Clean up any active intervals (mining, loot collection, etc.)
   clearAllIntervals(socket.id);
 
+  // Release every wreckage lock owned by this player. Clearing the timer alone
+  // would otherwise leave the wreckage permanently exempt from expiry.
+  if (deps.loot && typeof deps.loot.cancelCollectionsForPlayer === 'function') {
+    deps.loot.cancelCollectionsForPlayer(userId);
+  }
+
   // Cancel any active mining session
   mining.cancelMining(userId);
 
@@ -90,8 +101,13 @@ function cleanupPlayer(socket, userId, deps) {
   // Clean up player status
   clearPlayerStatus(userId);
 
+  // Release per-player cooldown, damage-delay, and fractional shield state.
+  combat.clearPlayerCombatState(userId);
+
   // Clean up any active wormhole transit
   wormhole.cleanupPlayer(userId);
+
+  return true;
 }
 
 module.exports = { register, cleanupPlayer };

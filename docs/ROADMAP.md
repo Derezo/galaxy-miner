@@ -1,6 +1,6 @@
 # Galaxy Miner Development Roadmap
 
-**Last Updated:** February 7, 2026
+**Last Updated:** July 14, 2026
 **Version:** 1.2
 
 This roadmap outlines the planned development direction for Galaxy Miner, organized by priority and implementation phases. Features are designed to enhance multiplayer social gameplay and expand content depth while maintaining the game's focus on emergent player-driven experiences.
@@ -68,32 +68,32 @@ Enable progression beyond tier 5 using rare upgrade components. Components drop 
 - `ComponentsPanel.js` - Displays component inventory with icons
 - Extended `ShipUpgradePanel.js` - Shows tier 6+ requirements and crafting
 
-**Loot Pool Integration:**
-- Update `loot-pools.js` to include component drops for boss-tier NPCs
-- Component drop rates: ~5% for mid-tier, ~15% for bosses, ~30% for queens
+**Existing Loot Pool Foundation:**
+- Components already drop through `loot-pools.js`: 5% for mid-tier and 30% for boss-tier sources.
+- The future work in this item is component consumption, tier 6+ balance, and marketplace support rather than initial acquisition.
 
 ---
 
 ### Relic Activation Effects
 
-**Status:** Relic system exists, effects dormant
-**Priority:** Medium
-**Estimated Effort:** 2 weeks
+**Status:** IMPLEMENTED (July 2026)
+**Priority:** Complete
 
 **Description:**
-Activate the relic system with specific gameplay effects. Relics are ultra-rare collectibles defined in `CONSTANTS.RELIC_TYPES` and stored in the `relics` database table. Currently, they are collectible but have no mechanical impact.
+All nine relics in `CONSTANTS.RELIC_TYPES` are obtainable and have live effects. Durable ownership is stored in SQLite; combat, mining, rewards, transit, respawn, and plunder effects are server-authoritative.
 
-**Relic Effects (5 existing relics):**
-- **Ancient Star Map:** Reveals faction bases and wormholes within 5 sectors (passive)
-- **Void Crystal:** +10% damage against Void Entities and Swarm (passive)
-- **Swarm Hive Core:** Immunity to Swarm aggro (toggleable)
-- **Pirate Treasure:** Unlocks Pirate Reputation system (future expansion hook)
-- **Wormhole Gem:** Smooth wormhole transit without position snap (automatic)
+**Implemented Relic Effects:**
+- **Ancient Star Map:** Sparse faction-base and boss bearings between normal radar range and 2× range.
+- **Void Crystal:** +10% damage against Void and Swarm targets.
+- **Swarm Hive Core:** Offers the nearest active hive as a death-respawn destination and destroys that hive on selection.
+- **Pirate Treasure:** +10% to the owner's NPC-wreckage credit share.
+- **Wormhole Gem:** Unlocks wormhole destination selection and transit.
+- **Scrap Siphon:** Faster multi-wreckage collection plus Scavenger collection immunity.
+- **Mining Rites:** 2× integer mining yield before cargo capacity is applied.
+- **Skull and Bones:** Server-validated plunder of finite faction-base reserves.
+- **Subspace Warp Drive:** 2.5× boost duration, 0.75 boost cooldown, 2.5× wormhole transit speed, and 0.75 wormhole cooldown.
 
-**Implementation:**
-- New `RelicsPanel.js` with gallery view and activation toggles
-- Effect hooks in `combat.js`, `wormhole.js`, and AI aggro checks
-- Active relic indicator in HUD
+The relic gallery, shared effect metadata, reconnect synchronization, acquisition rules, and duplicate policy are documented in `docs/systems/relics.md`.
 
 ---
 
@@ -336,7 +336,7 @@ Extend ship component progression from tier 5 to tier 10 using component craftin
 
 **Priority:** Medium
 **Estimated Effort:** 2 weeks
-**Dependencies:** Relic Activation Effects
+**Dependencies:** Implemented relic effect framework
 
 **Description:**
 Expand the relic system with 10 additional unique relics, each with specific gameplay effects. Creates collectible goals and horizontal progression.

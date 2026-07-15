@@ -7,6 +7,7 @@ import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
 
 const StarSystem = require('../../../shared/star-system');
+const Physics = require('../../../shared/physics');
 
 describe('shared/star-system', () => {
   beforeEach(() => {
@@ -91,6 +92,70 @@ describe('shared/star-system', () => {
           expect(base.starY).toBe(retrieved.primaryStar.y);
         }
       }
+    });
+  });
+
+  describe('authoritative object positions', () => {
+    it('generates finite planet snapshots and resolves their fixed-time orbit', () => {
+      const system = StarSystem.generateSuperSector(0, 0)[0];
+      const planet = system.planets[0];
+      const time = 123456;
+
+      expect(planet).toBeDefined();
+      expect(Number.isFinite(planet.x)).toBe(true);
+      expect(Number.isFinite(planet.y)).toBe(true);
+
+      const starPosition = StarSystem.getStarPosition(system, planet.starId, time);
+      const expected = Physics.computePlanetPosition(planet, starPosition, time);
+      const actual = StarSystem.resolveObjectPosition(system, planet, time);
+
+      expect(actual.x).toBeCloseTo(expected.x, 10);
+      expect(actual.y).toBeCloseTo(expected.y, 10);
+    });
+
+    it('uses explicit primary and secondary roles with shared binary physics', () => {
+      const system = {
+        id: 'ss_3_-2_1',
+        primaryStar: { id: 'ss_3_-2_1_star', x: 100, y: 200 },
+        binaryInfo: {
+          secondaryStar: { id: 'ss_3_-2_1_star_b', x: -100, y: 200 },
+          baryCenter: { x: 100, y: 200 },
+          eccentricity: 0.35,
+          orbitPeriod: 180,
+          orbitPhase: 0.75,
+          primaryOrbitRadius: 120,
+          secondaryOrbitRadius: 280
+        },
+        planets: [],
+        bases: [],
+        miningClaimObjects: [],
+        wormholes: [],
+        comets: []
+      };
+      const time = 654321;
+      const expected = Physics.computeBinaryStarPositions(system, time);
+
+      expect(StarSystem.getSystemIdFromObjectId('ss_3_-2_1_planet_0')).toBe(system.id);
+      expect(StarSystem.getStarRole(system, system.primaryStar.id)).toBe('primary');
+      expect(StarSystem.getStarRole(system, system.binaryInfo.secondaryStar.id)).toBe('secondary');
+      expect(StarSystem.resolveObjectPosition(system, system.primaryStar, time)).toEqual(expected.primary);
+      expect(StarSystem.resolveObjectPosition(system, system.binaryInfo.secondaryStar, time)).toEqual(expected.secondary);
+    });
+
+    it('selects comet definitions by deterministic Bezier bounds', () => {
+      const comet = {
+        id: 'ss_0_0_0_comet_0',
+        size: 20,
+        tailLengthFactor: 2,
+        entryPoint: { x: 100, y: 100 },
+        perihelion: { x: 900, y: 900 },
+        exitPoint: { x: 1500, y: 100 }
+      };
+      const system = { comets: [comet] };
+
+      expect(StarSystem.getCometsForSector(system, 0, 0)).toEqual([comet]);
+      expect(StarSystem.getCometsForSector(system, 1, 0)).toEqual([comet]);
+      expect(StarSystem.getCometsForSector(system, 4, 4)).toEqual([]);
     });
   });
 });

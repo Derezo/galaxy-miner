@@ -2,8 +2,9 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title>Galaxy Miner</title>
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="css/index.css">
   <link rel="stylesheet" href="css/ship-upgrade.css">
   <link rel="stylesheet" href="css/wormhole-transit.css">
@@ -12,7 +13,7 @@
 </head>
 <body>
   <!-- Main game canvas -->
-  <canvas id="gameCanvas"></canvas>
+  <canvas id="gameCanvas" aria-label="Galaxy Miner game world"></canvas>
 
   <!-- Mobile rotation prompt (shown in portrait mode) -->
   <div class="rotation-prompt">
@@ -31,23 +32,28 @@
       <div class="auth-box">
         <h1>Galaxy Miner</h1>
         <div id="auth-forms">
-          <div id="login-form" class="auth-form active">
+          <form id="login-form" class="auth-form active">
             <h2>Login</h2>
-            <input type="text" id="login-username" placeholder="Username" autocomplete="username">
-            <input type="password" id="login-password" placeholder="Password" autocomplete="current-password">
-            <button id="login-btn">Login</button>
+            <label class="sr-only" for="login-username">Username</label>
+            <input type="text" id="login-username" placeholder="Username" autocomplete="username" required>
+            <label class="sr-only" for="login-password">Password</label>
+            <input type="password" id="login-password" placeholder="Password" autocomplete="current-password" required>
+            <button id="login-btn" type="submit">Login</button>
             <p class="switch-form">Don't have an account? <a href="#" id="show-register">Register</a></p>
-          </div>
-          <div id="register-form" class="auth-form">
+          </form>
+          <form id="register-form" class="auth-form">
             <h2>Register</h2>
-            <input type="text" id="register-username" placeholder="Username" autocomplete="username">
-            <input type="password" id="register-password" placeholder="Password" autocomplete="new-password">
-            <input type="password" id="register-confirm" placeholder="Confirm Password" autocomplete="new-password">
-            <button id="register-btn">Register</button>
+            <label class="sr-only" for="register-username">Username</label>
+            <input type="text" id="register-username" placeholder="Username" autocomplete="username" minlength="3" maxlength="20" required>
+            <label class="sr-only" for="register-password">Password</label>
+            <input type="password" id="register-password" placeholder="Password" autocomplete="new-password" minlength="4" required>
+            <label class="sr-only" for="register-confirm">Confirm password</label>
+            <input type="password" id="register-confirm" placeholder="Confirm Password" autocomplete="new-password" minlength="4" required>
+            <button id="register-btn" type="submit">Register</button>
             <p class="switch-form">Already have an account? <a href="#" id="show-login">Login</a></p>
-          </div>
+          </form>
         </div>
-        <p id="auth-error" class="error"></p>
+        <p id="auth-error" class="error" role="alert" aria-live="polite"></p>
       </div>
     </div>
 
@@ -141,7 +147,7 @@
 
       <!-- Radar minimap with sector display -->
       <div id="radar">
-        <canvas id="radar-canvas"></canvas>
+        <canvas id="radar-canvas" aria-label="Nearby objects radar"></canvas>
         <div id="radar-sector">
           Sector: <span id="sector-coords">0, 0</span>
         </div>
@@ -254,6 +260,7 @@
   <script src="/socket.io/socket.io.js"></script>
   <script src="/shared/constants.js?v=11"></script>
   <script src="/shared/physics.js?v=10"></script>
+  <script src="/shared/resource-selection.js?v=1"></script>
   <script src="/shared/star-system.js?v=12"></script>
   <script src="/shared/logger.js?v=10"></script>
   <script src="/shared/utils.js?v=10"></script>
@@ -325,6 +332,7 @@
   <script src="js/graphics/linked-damage.js"></script>
   <script src="js/graphics/formation-succession.js"></script>
   <script src="js/graphics/void-effects.js"></script>
+  <script src="js/graphics/leviathan-spawn.js"></script>
   <script src="js/graphics/graveyard-atmosphere.js"></script>
   <script src="js/graphics/player-death.js"></script>
   <!-- New HUD visual modules -->
@@ -387,6 +395,7 @@
   <script src="js/ui/panels/RelicsPanel.js"></script>
   <script src="js/ui/panels/FleetPanel.js"></script>
   <script src="js/ui/panels/SettingsPanel.js"></script>
+  <script src="js/ui/panels/MobileSettingsPanel.js"></script>
   <script src="js/ui/WormholeTransitUI.js"></script>
   <script src="js/ui/credit-animation.js"></script>
   <script src="js/ui/profile-modal.js?v=2"></script>

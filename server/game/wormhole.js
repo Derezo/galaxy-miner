@@ -12,9 +12,9 @@ const activeTransits = new Map(); // playerId -> { phase, wormholeId, destinatio
 const wormholeCooldowns = new Map(); // playerId -> lastWormholeTime
 
 // Constants
-const TRANSIT_DURATION = 5000; // 5 seconds for transport animation
-const WORMHOLE_RANGE = 100; // Must be within 100 units to enter
-const SELECTION_TIMEOUT = 30000; // 30 seconds to choose destination before auto-cancel
+const TRANSIT_DURATION = config.TRANSIT_DURATION; // 5 seconds by default
+const WORMHOLE_RANGE = config.WORMHOLE_RANGE; // 100 units by default
+const SELECTION_TIMEOUT = config.SELECTION_TIMEOUT; // 30 seconds by default
 const MAX_DESTINATIONS = 5; // Show 5 nearest wormholes
 const WORMHOLE_COOLDOWN = 60000; // 60 seconds base cooldown between wormhole uses
 
@@ -46,9 +46,13 @@ function hasSubspaceWarpDrive(playerId) {
 function getTransitModifiers(playerId) {
   const hasVoidWarp = hasSubspaceWarpDrive(playerId);
 
-  // Subspace Warp Drive: 2.5x velocity (divide duration), 0.75x cooldown
-  const velocityMult = hasVoidWarp ? 2.5 : 1;
-  const cooldownMult = hasVoidWarp ? 0.75 : 1;
+  const effects = config.RELIC_TYPES?.SUBSPACE_WARP_DRIVE?.effects || {};
+  const velocityMult = hasVoidWarp
+    ? Number(effects.wormholeTransitSpeedMultiplier) || 2.5
+    : 1;
+  const cooldownMult = hasVoidWarp
+    ? Number(effects.wormholeCooldownMultiplier) || 0.75
+    : 1;
 
   return {
     transitDuration: Math.round(TRANSIT_DURATION / velocityMult),
@@ -149,7 +153,22 @@ function getNearestWormholes(x, y, count = MAX_DESTINATIONS) {
  * @returns {Object|null} Wormhole object or null
  */
 function getWormholeById(wormholeId) {
-  return World.getObjectById(wormholeId);
+  if (typeof wormholeId !== 'string') return null;
+
+  // World.getObjectById is intentionally general-purpose. Restrict this entry
+  // point to the two canonical wormhole ID families before resolving it so an
+  // asteroid/base near the player cannot masquerade as a transit gate.
+  const isStarSystemWormhole = /^ss_-?\d+_-?\d+_\d+_wormhole$/.test(wormholeId);
+  const isLegacyWormhole = /^-?\d+_-?\d+_wormhole_\d+$/.test(wormholeId);
+  if (!isStarSystemWormhole && !isLegacyWormhole) return null;
+
+  const object = World.getObjectById(wormholeId);
+  if (!object || object.id !== wormholeId ||
+      !Number.isFinite(object.x) || !Number.isFinite(object.y) ||
+      !Number.isFinite(object.size) || object.size < 0) {
+    return null;
+  }
+  return object;
 }
 
 /**
@@ -200,7 +219,7 @@ function canEnterWormhole(player, wormholeId) {
  * @param {string} wormholeId - Wormhole ID
  * @returns {{success: boolean, error?: string, destinations?: Array}}
  */
-function enterWormhole(player, wormholeId) {
+function enterWormhole(player, wormholeId, onSelectionTimeout = null) {
   const check = canEnterWormhole(player, wormholeId);
   if (!check.success) {
     return check;
@@ -224,7 +243,10 @@ function enterWormhole(player, wormholeId) {
     destinations: filteredDestinations,
     startTime: Date.now(),
     selectionTimeout: setTimeout(() => {
-      cancelTransit(player.id, 'Selection timeout');
+      const result = cancelTransit(player.id, 'Selection timeout');
+      if (result.success && typeof onSelectionTimeout === 'function') {
+        onSelectionTimeout(result);
+      }
     }, SELECTION_TIMEOUT)
   });
 
@@ -378,13 +400,21 @@ function completeTransit(playerId) {
  * Cancel wormhole transit
  * @param {number} playerId - Player ID
  * @param {string} reason - Cancellation reason
- * @returns {{success: boolean}}
+ * @param {boolean} force - Allow server cleanup to abort a committed transit
+ * @returns {{success: boolean, error?: string}}
  */
-function cancelTransit(playerId, reason = 'Cancelled') {
+function cancelTransit(playerId, reason = 'Cancelled', force = false) {
   const transit = activeTransits.get(playerId);
 
   if (!transit) {
     return { success: false, error: 'Not in transit.' };
+  }
+
+  // Destination selection is cancellable, but choosing a destination commits
+  // the trip. Only authoritative teardown (disconnect/death cleanup) may force
+  // removal after that point.
+  if (transit.phase === 'transit' && !force) {
+    return { success: false, error: 'Wormhole transit is already committed.' };
   }
 
   // Clear any timeouts
@@ -422,7 +452,7 @@ function getTransitPhase(playerId) {
  * @param {number} playerId - Player ID
  */
 function cleanupPlayer(playerId) {
-  cancelTransit(playerId, 'Disconnected');
+  cancelTransit(playerId, 'Disconnected', true);
 }
 
 module.exports = {

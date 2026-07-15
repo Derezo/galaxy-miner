@@ -33,7 +33,7 @@ Galaxy Miner is a real-time multiplayer space mining game built with a client-se
 ## Technology Stack
 
 ### Backend
-- **Runtime**: Node.js 18+
+- **Runtime**: Node.js 22+
 - **Server Framework**: Express.js
 - **Real-time Communication**: Socket.io
 - **Database**: SQLite with better-sqlite3
@@ -82,8 +82,9 @@ galaxy-miner/
 │   └── index.html             # Entry point
 │
 ├── server/                    # Backend code
-│   ├── server.js              # Express server + Socket.io setup
-│   ├── socket.js              # Socket event handlers (dispatch layer)
+│   ├── index.js               # Express server + Socket.io setup
+│   ├── socket.js              # Compatibility facade for socket modules
+│   ├── socket/                # Socket handlers separated by responsibility
 │   ├── auth.js                # Authentication logic
 │   ├── database.js            # SQLite connection & queries
 │   ├── config.js              # Server configuration
@@ -246,7 +247,7 @@ update(deltaTime) {
 - Modal management (ship customization, cargo, market)
 - Reactive state management (UIState store)
 - Toast notifications
-- SVG icon generation (26 resource types)
+- SVG icon generation (27 resource types)
 
 **Architecture:**
 - `core/Component.js`: Base component with lifecycle
@@ -356,19 +357,20 @@ To optimize network traffic, updates are only sent to players within a certain r
 - Tier 1: 1000 units (500 radar × 2)
 - Tier 2: 1500 units
 - Tier 3: 2250 units
-- Tier 4: 3375 units
+- Tier 4: 3376 units
 - Tier 5: 5062 units (max)
 
 **What Gets Broadcast:**
-- Player positions (within radar range)
-- NPC updates (within broadcast range)
-- Combat events (hits, deaths)
-- Loot spawns (wreckage drops)
+- The explicit shared radar ranges are 500, 750, 1125, 1688, and 2531 units. Do not recompute them from the general tier multiplier.
+- Normal radar/world presentation is limited to radar range. Exact nearby-base snapshots also use that range.
+- Live player/NPC/combat/loot delivery uses twice each recipient's own radar range. Room and spatial-hash queries select candidates, followed by an exact recipient-range check.
+- Server-only base activation has a larger loading margin; that margin is not a client synchronization range.
+- An Ancient Star Map owner receives only sparse base/boss bearings in the band from normal range to 2× range.
 
 **Position Persistence:**
 - Player positions saved to DB every 5 seconds
 - On disconnect: position persisted for next login
-- On death: respawn at safe coordinates
+- On death: the server supplies valid respawn choices; selection persists the new position
 
 ## State Synchronization
 
@@ -396,10 +398,10 @@ Remote players and NPCs are interpolated between server updates:
 ## Upgrade System
 
 **8 Ship Components:**
-1. **Engine**: Speed & thrust (base 150 → 759 units/s at tier 5)
-2. **Weapon**: Damage & range (5 → 50 damage at tier 5)
-3. **Shield**: Capacity & recharge (50 → 800 HP at tier 5)
-4. **Mining**: Mining speed (3s → 0.59s at tier 5)
+1. **Engine**: Speed (180 → 691 units/s at tier 5)
+2. **Weapon**: Damage, cooldown, and explicit per-tier range (10 → 38.4 base damage)
+3. **Shield**: Capacity (60 → 960 HP at tier 5)
+4. **Mining**: Cycle time and integer yield (3.00s/1 unit → 0.78s/8 units)
 5. **Cargo**: Inventory capacity (100 → 2000 units at tier 5)
 6. **Radar**: Detection range (500 → 2531 units at tier 5)
 7. **Energy Core**: Weapon cooldown, shield regen, boost ability
@@ -407,40 +409,34 @@ Remote players and NPCs are interpolated between server updates:
 
 **Tier Progression:**
 - Max tier: 5
-- Cost scaling: Tier 2: $300, Tier 3: $900, Tier 4: $3000, Tier 5: $9000
+- Cost scaling: Tier 2: 100 credits, Tier 3: 400, Tier 4: 3000, Tier 5: 9000
 - Resource requirements: Common → ultrarare materials
-- Multiplier: 1.5× per tier for most stats
+- General stat multiplier: 1.4× per tier; shields use 2× and radar uses an explicit table
+
+See [Ship Upgrades](../systems/ship-upgrades.md) for the authoritative formulas and exact resource requirements.
 
 ## Combat System
 
 ### Weapon Types
-- **Kinetic**: High hull damage, blocked by shields
-- **Energy**: Balanced, extra damage to shields
-- **Explosive**: Area effect (future: splash damage)
+- **Kinetic**: 1.3× shield damage, normal hull damage
+- **Energy**: Normal shield damage, 1.3× hull damage
+- **Explosive**: 0.8× shield and hull damage; no generic splash mutation is currently applied
 
 ### Damage Calculation
 ```javascript
 // Base damage = BASE_WEAPON_DAMAGE (10) × tierMultiplier^(tier-1)
-// Tier 5 = 10 × 1.5^4 = 50 damage
+// Tier 5 = 10 × 1.4^4 = 38.416 base damage
 
-// Shield absorbs percentage based on type effectiveness
-shieldDamage = baseDamage × shieldAbsorption[weaponType]
-hullDamage = baseDamage × (1 - shieldAbsorption) × (1 - hullResistance)
-
-// Shield absorbs first, then hull
-if (shield > 0) {
-  shield -= shieldDamage;
-  if (shield < 0) hull += shield; // Overflow to hull
-} else {
-  hull -= hullDamage;
-}
+// Type effectiveness produces separate shieldDamage and hullDamage values.
+// Shields absorb shieldDamage first. Overflow and shield-piercing damage reach
+// the hull, where type-specific hull resistance is applied (capped at 50%).
 ```
 
 ### Death & Respawn
-- On death: Drop 50% of cargo
-- Respawn at safe coordinates (sector 0,0)
-- Full health/shield restored
-- Dropped cargo becomes wreckage (collectible for 2 minutes)
+- For each resource stack, `floor(quantity × 0.5)` is removed from inventory.
+- Only `floor(removed quantity × 0.5)` becomes collectible player wreckage. The other half of the removed amount is an intentional economy sink, so at most roughly 25% of the original stack returns to circulation; integer rounding can reduce that further.
+- The dead player receives server-generated respawn choices and remains action-locked until selecting one. Normal choices restore full health and shields; Swarm Hive Core can add a hive-specific option.
+- Player wreckage has no damage-contributor team record, so its collector is treated as the solo owner.
 
 ## Performance Considerations
 

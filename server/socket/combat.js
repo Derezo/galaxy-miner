@@ -9,7 +9,34 @@ const config = require('../config');
 const { statements, getSafeCredits, safeUpdateCredits } = require('../database');
 const npc = require('../game/npc');
 const engine = require('../game/engine');
+const combat = require('../game/combat');
+const { normalizeRotation, validateCombatFire } = require('../validators');
 const logger = require('../../shared/logger');
+
+function allocateBaseCreditPool(participantIds, totalCredits, legacyCreditsPerPlayer) {
+  const ids = Array.isArray(participantIds) ? participantIds : [];
+  if (ids.length === 0) return new Map();
+
+  const normalizeCredits = value => {
+    const numericValue = Number(value);
+    if (!Number.isFinite(numericValue) || numericValue <= 0) return 0;
+    const normalized = Math.floor(numericValue);
+    return Number.isSafeInteger(normalized) ? normalized : 0;
+  };
+  const hasDeclaredPool = totalCredits !== undefined && totalCredits !== null;
+  const legacyShare = normalizeCredits(legacyCreditsPerPlayer);
+  const pool = hasDeclaredPool
+    ? normalizeCredits(totalCredits)
+    : legacyShare * ids.length;
+  if (!Number.isSafeInteger(pool)) return new Map(ids.map(id => [id, 0]));
+
+  const baseShare = Math.floor(pool / ids.length);
+  const remainder = pool - (baseShare * ids.length);
+  return new Map(ids.map((id, index) => [
+    id,
+    baseShare + (index < remainder ? 1 : 0)
+  ]));
+}
 
 /**
  * Register combat socket event handlers
@@ -19,7 +46,9 @@ const logger = require('../../shared/logger');
 function register(socket, deps) {
   const { io, getAuthenticatedUserId } = deps;
   const { connectedPlayers, setPlayerStatus, broadcastToNearby } = deps.state;
-  const { broadcastChainLightning, broadcastTeslaCoil } = deps.broadcasts;
+  const combatSystem = deps.combat || combat;
+  const npcSystem = deps.npc || npc;
+  const gameEngine = deps.engine || engine;
 
   // Combat: Fire weapon
   socket.on('combat:fire', (data) => {
@@ -28,6 +57,20 @@ function register(socket, deps) {
 
     const player = connectedPlayers.get(socket.id);
     if (!player) return;
+    if (player.isDead || deps.wormhole?.isInTransit?.(authenticatedUserId)) return;
+
+    const validation = validateCombatFire(data);
+    if (!validation.valid) {
+      logger.warn(`Rejected invalid combat input from ${player.username}: ${validation.error}`);
+      return;
+    }
+
+    const weaponTier = player.weaponTier || 1;
+    const energyCoreTier = player.energyCoreTier || 1;
+    const fireResult = combatSystem.fire(authenticatedUserId, weaponTier, energyCoreTier);
+    if (!fireResult.success) return;
+
+    const fireDirection = normalizeRotation(data.direction ?? player.rotation);
 
     // Set player status to combat (with timeout back to idle)
     setPlayerStatus(authenticatedUserId, 'combat', 3000);
@@ -38,20 +81,19 @@ function register(socket, deps) {
       x: player.position.x,
       y: player.position.y,
       rotation: player.rotation,
-      direction: data.direction,
-      weaponTier: player.weaponTier || 1
+      direction: fireDirection,
+      weaponTier
     });
 
     // Hit detection for NPCs
-    const weaponTier = player.weaponTier || 1;
     // Use per-tier weapon ranges that match client visual projectile distance
     const weaponRange = (config.WEAPON_RANGES && config.WEAPON_RANGES[weaponTier])
       || config.BASE_WEAPON_RANGE * Math.pow(config.TIER_MULTIPLIER, weaponTier - 1);
-    const fireDirection = data.direction || player.rotation;
 
     // Get all NPCs in range
-    const npcsInRange = npc.getNPCsInRange(player.position, weaponRange);
+    const npcsInRange = npcSystem.getNPCsInRange(player.position, weaponRange);
     const projectileSpeed = config.PROJECTILE_SPEED || 800;
+    let npcWasHit = false;
 
     for (const npcData of npcsInRange) {
       // Calculate distance to NPC
@@ -64,8 +106,10 @@ function register(socket, deps) {
 
       // Predict NPC position at impact time (account for NPC movement)
       const npcVelocity = npcData.velocity || { x: 0, y: 0 };
-      const predictedX = npcData.position.x + npcVelocity.x * travelTime;
-      const predictedY = npcData.position.y + npcVelocity.y * travelTime;
+      const velocityX = Number.isFinite(npcVelocity.x) ? npcVelocity.x : 0;
+      const velocityY = Number.isFinite(npcVelocity.y) ? npcVelocity.y : 0;
+      const predictedX = npcData.position.x + velocityX * travelTime;
+      const predictedY = npcData.position.y + velocityY * travelTime;
 
       // Calculate angle to PREDICTED position
       const predictedDx = predictedX - player.position.x;
@@ -73,15 +117,13 @@ function register(socket, deps) {
       const angleToNpc = Math.atan2(predictedDy, predictedDx);
 
       // Check if NPC is in firing cone
-      let angleDiff = angleToNpc - fireDirection;
-      while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
-      while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
+      const angleDiff = normalizeRotation(angleToNpc - fireDirection);
 
       // Slightly wider hit angle for prediction tolerance (~17 degrees)
       const hitAngle = 0.30;
       if (Math.abs(angleDiff) <= hitAngle) {
         // Hit! Apply damage to NPC
-        const result = engine.playerAttackNPC(
+        const result = gameEngine.playerAttackNPC(
           authenticatedUserId,
           npcData.id,
           player.weaponType || 'kinetic',
@@ -89,18 +131,23 @@ function register(socket, deps) {
         );
 
         if (result) {
-          // Send hit feedback to the player
-          const baseDamage = config.BASE_WEAPON_DAMAGE * Math.pow(config.TIER_MULTIPLIER, weaponTier - 1);
-          socket.emit('combat:npcHit', {
-            npcId: npcData.id,
-            damage: baseDamage,
-            destroyed: result.destroyed
-            // Note: rewards are now granted only when collecting wreckage/scrap
-          });
+          npcWasHit = true;
+          if (!result.blocked) {
+            // Send hit feedback to the player
+            const baseDamage = config.BASE_WEAPON_DAMAGE * Math.pow(config.TIER_MULTIPLIER, weaponTier - 1);
+            socket.emit('combat:npcHit', {
+              npcId: npcData.id,
+              damage: baseDamage,
+              destroyed: result.destroyed,
+              x: predictedX,
+              y: predictedY
+              // Note: rewards are now granted only when collecting wreckage/scrap
+            });
 
-          // Tesla Cannon chain lightning (tier 5 only)
-          if (weaponTier >= 5 && config.TESLA_CANNON) {
-            handleChainLightning(socket, player, npcData, weaponTier, baseDamage, authenticatedUserId, deps);
+            // Tesla Cannon chain lightning (tier 5 only)
+            if (weaponTier >= 5 && config.TESLA_CANNON) {
+              handleChainLightning(socket, player, npcData, weaponTier, baseDamage, authenticatedUserId, deps);
+            }
           }
         }
         break; // Only hit one NPC per shot
@@ -108,7 +155,9 @@ function register(socket, deps) {
     }
 
     // Hit detection for faction bases (only if no NPC was hit)
-    handleBaseHitDetection(socket, player, weaponTier, fireDirection, weaponRange, authenticatedUserId, deps);
+    if (!npcWasHit) {
+      handleBaseHitDetection(socket, player, weaponTier, fireDirection, weaponRange, authenticatedUserId, deps);
+    }
   });
 }
 
@@ -117,6 +166,8 @@ function register(socket, deps) {
  */
 function handleChainLightning(socket, player, hitNpc, weaponTier, baseDamage, authenticatedUserId, deps) {
   const { broadcastChainLightning } = deps.broadcasts;
+  const npcSystem = deps.npc || npc;
+  const gameEngine = deps.engine || engine;
   const teslaConfig = config.TESLA_CANNON;
   const chainRange = teslaConfig.chainRange || 150;
   const damageFalloff = teslaConfig.damageFalloff || [1.0, 0.5, 0.25];
@@ -130,7 +181,7 @@ function handleChainLightning(socket, player, hitNpc, weaponTier, baseDamage, au
 
   for (let i = 0; i < maxChains; i++) {
     // Find nearest NPC within chain range that hasn't been hit
-    const nearbyNpcs = npc.getNPCsInRange(lastPos, chainRange);
+    const nearbyNpcs = npcSystem.getNPCsInRange(lastPos, chainRange);
     let bestTarget = null;
     let bestDist = Infinity;
 
@@ -151,7 +202,7 @@ function handleChainLightning(socket, player, hitNpc, weaponTier, baseDamage, au
     const chainDamageMultiplier = damageFalloff[i + 1] || damageFalloff[damageFalloff.length - 1];
     const chainDamage = Math.round(baseDamage * chainDamageMultiplier);
 
-    const chainResult = engine.playerAttackNPC(
+    const chainResult = gameEngine.playerAttackNPC(
       authenticatedUserId,
       bestTarget.id,
       'tesla', // Special weapon type for chain lightning
@@ -189,8 +240,13 @@ function handleChainLightning(socket, player, hitNpc, weaponTier, baseDamage, au
 function handleBaseHitDetection(socket, player, weaponTier, fireDirection, weaponRange, authenticatedUserId, deps) {
   const { io } = deps;
   const { broadcastTeslaCoil } = deps.broadcasts;
+  const npcSystem = deps.npc || npc;
+  const gameEngine = deps.engine || engine;
+  const dbStatements = deps.statements || statements;
+  const readCredits = deps.getSafeCredits || getSafeCredits;
+  const updateCredits = deps.safeUpdateCredits || safeUpdateCredits;
 
-  const basesInRange = npc.getBasesInRange(player.position, weaponRange);
+  const basesInRange = npcSystem.getBasesInRange(player.position, weaponRange);
   for (const baseData of basesInRange) {
     // Calculate distance and angle to base center
     const dx = baseData.x - player.position.x;
@@ -207,9 +263,7 @@ function handleBaseHitDetection(socket, player, weaponTier, fireDirection, weapo
     const angleToBase = Math.atan2(dy, dx);
 
     // Bases are larger targets - use wider hit angle based on size
-    let angleDiff = angleToBase - fireDirection;
-    while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
-    while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
+    const angleDiff = normalizeRotation(angleToBase - fireDirection);
 
     // Calculate angular size of base from player's perspective
     const baseAngularSize = Math.atan2(baseSize, distToBase);
@@ -217,7 +271,7 @@ function handleBaseHitDetection(socket, player, weaponTier, fireDirection, weapo
 
     if (Math.abs(angleDiff) <= hitAngle) {
       // Hit! Apply damage to base
-      const result = engine.playerAttackBase(
+      const result = gameEngine.playerAttackBase(
         authenticatedUserId,
         baseData.id,
         player.weaponType || 'kinetic',
@@ -241,7 +295,7 @@ function handleBaseHitDetection(socket, player, weaponTier, fireDirection, weapo
           const coilDuration = teslaConfig.teslaCoilDuration || 500;
 
           // Find nearby NPCs for visual arcing (no damage, just visual effect)
-          const nearbyNpcs = npc.getNPCsInRange({ x: baseData.x, y: baseData.y }, coilRange);
+          const nearbyNpcs = npcSystem.getNPCsInRange({ x: baseData.x, y: baseData.y }, coilRange);
           const coilTargets = nearbyNpcs.slice(0, 6).map(n => ({
             npcId: n.id,
             x: n.position.x,
@@ -260,35 +314,56 @@ function handleBaseHitDetection(socket, player, weaponTier, fireDirection, weapo
           });
         }
 
-        // If base was destroyed, give rewards to player
+        // If base was destroyed, give the independently earned share to every
+        // damage contributor. Online state/notifications are synchronized, but
+        // being offline never forfeits a reward.
         if (result.destroyed) {
-          try {
-            // Award credit reward (with team bonus)
-            if (result.creditsPerPlayer > 0) {
-              const ship = statements.getShipByUserId.get(authenticatedUserId);
-              const currentCredits = getSafeCredits(ship);
-              safeUpdateCredits(currentCredits + result.creditsPerPlayer, authenticatedUserId);
+          const participantIds = [...new Set((result.participants || [])
+            .map(Number)
+            .filter(id => Number.isSafeInteger(id) && id > 0))];
+          if (participantIds.length === 0) participantIds.push(authenticatedUserId);
+          const rewards = allocateBaseCreditPool(
+            participantIds,
+            result.totalCredits,
+            result.creditsPerPlayer
+          );
+
+          for (const participantId of participantIds) {
+            const reward = rewards.get(participantId) || 0;
+            try {
+              if (reward > 0) {
+                const ship = dbStatements.getShipByUserId.get(participantId);
+                if (ship) {
+                  updateCredits(readCredits(ship) + reward, participantId);
+                }
+              }
+
+              const participantSocketId = deps.state.userSockets?.get(participantId) ||
+                deps.state.userSockets?.get(String(participantId));
+              if (!participantSocketId) continue;
+
+              const inventory = dbStatements.getInventory.all(participantId);
+              const updatedShip = dbStatements.getShipByUserId.get(participantId);
+              io.to(participantSocketId).emit('inventory:update', {
+                inventory,
+                credits: readCredits(updatedShip)
+              });
+              io.to(participantSocketId).emit('base:reward', {
+                credits: reward,
+                teamMultiplier: result.teamMultiplier,
+                participantCount: participantIds.length,
+                baseName: baseData.name,
+                faction: baseData.faction
+              });
+            } catch (err) {
+              logger.error(`[COMBAT REWARD ERROR] User ${participantId} base loot:`, err.message);
+              const failedSocketId = deps.state.userSockets?.get(participantId);
+              if (failedSocketId) {
+                io.to(failedSocketId).emit('error:generic', {
+                  message: 'Failed to award base destruction rewards. Please check your inventory.'
+                });
+              }
             }
-
-            // Send updated inventory and credits
-            const inventory = statements.getInventory.all(authenticatedUserId);
-            const updatedShip = statements.getShipByUserId.get(authenticatedUserId);
-            socket.emit('inventory:update', {
-              inventory,
-              credits: getSafeCredits(updatedShip)
-            });
-
-            // Notify player of rewards
-            socket.emit('base:reward', {
-              credits: result.creditsPerPlayer,
-              teamMultiplier: result.teamMultiplier,
-              participantCount: result.participantCount,
-              baseName: baseData.name,
-              faction: baseData.faction
-            });
-          } catch (err) {
-            logger.error(`[COMBAT REWARD ERROR] User ${authenticatedUserId} base loot:`, err.message);
-            socket.emit('error:generic', { message: 'Failed to award base destruction rewards. Please check your inventory.' });
           }
         }
       }
@@ -297,4 +372,4 @@ function handleBaseHitDetection(socket, player, weaponTier, fireDirection, weapo
   }
 }
 
-module.exports = { register };
+module.exports = { register, allocateBaseCreditPool };

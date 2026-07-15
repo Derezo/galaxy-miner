@@ -2,22 +2,23 @@
 
 ## Overview
 
-The Wormhole Transit system allows players possessing the **Wormhole Gem** relic to travel instantly across vast distances by entering wormholes scattered throughout the galaxy. This provides fast travel between systems that would otherwise require long manual journeys.
+The Wormhole Transit system allows players possessing the **Wormhole Gem** relic to cross vast distances through a timed, server-authoritative transit. Default travel takes 5 seconds; a player who also owns the Subspace Warp Drive completes it in 2 seconds.
 
 ## Purpose
 
 - **Fast Travel**: Jump thousands of units across the galaxy in seconds
 - **Strategic Positioning**: Access remote sectors for mining, exploration, or evasion
 - **Relic Utility**: Provides end-game functionality for rare Wormhole Gem holders
-- **Risk/Reward**: 5-second transit leaves players vulnerable and unable to cancel
+- **Commitment**: Selection/transit is an invulnerable out-of-world state, but movement, combat, mining, and loot actions are blocked until exit or selection cancellation
 
 ## Wormhole Mechanics
 
 ### Entry Requirements
 
-1. **Wormhole Gem Relic**: Player must possess the `WORMHOLE_GEM` relic (ultrarare, value: 2000 credits)
+1. **Wormhole Gem Relic**: Player must possess the non-tradable `WORMHOLE_GEM` relic (ultrarare; artifact metadata value 2000)
 2. **Proximity**: Must be within **100 units + wormhole size** to enter
 3. **Not In Transit**: Cannot enter if already transiting
+4. **Cooldown Ready**: Base cooldown is 60 seconds after a completed trip, or 45 seconds with Subspace Warp Drive
 
 ### Wormhole Properties
 
@@ -40,6 +41,8 @@ When player enters a wormhole:
 4. Client displays full-screen UI with cardinal-positioned destination buttons
 5. Player has **30 seconds** to select destination or transit auto-cancels
 
+From entry through exit (including destination selection), the server treats the player as outside the simulated world: NPC targeting, direct combat, damage-over-time, star heat, mining, loot collection, and movement are blocked.
+
 **Destination Search Algorithm**:
 ```
 Expands search in rings until 5 wormholes found (max 100 sectors)
@@ -53,12 +56,12 @@ for (searchRadius = 0 to maxSearchRadius) {
 Returns 5 closest wormholes sorted by distance
 ```
 
-#### Phase 2: Transit (5 seconds, no cancellation)
+#### Phase 2: Transit (5 seconds by default, 2 seconds with Subspace Warp Drive)
 
 Once destination selected:
 
-1. **Duration**: 5000ms (5 seconds) fixed
-2. **Invulnerability**: Player cannot be damaged during transit
+1. **Duration**: Configured default is 5000 ms. Subspace Warp Drive applies a 2.5× transit-speed multiplier, producing a 2000 ms trip with the default configuration.
+2. **Protection**: Player is untargetable and cannot receive damage during committed transit
 3. **Immobilization**: Player frozen at entry wormhole position
 4. **Visual Effects**:
    - Full-screen tunnel effect with accelerating particles
@@ -83,7 +86,7 @@ Upon completion (when progress >= 1.0):
 
 1. Player teleported to **exit position** (80 units from destination wormhole at random angle)
 2. Transit state cleared from server memory
-3. Normal game state resumes instantly
+3. Normal game state resumes only after the configured duration has elapsed and the server commits the exit position
 4. Client removes transit UI overlay
 
 ### Cancellation
@@ -95,14 +98,15 @@ Upon completion (when progress >= 1.0):
 
 ## Configuration Constants
 
-All constants defined in `/server/game/wormhole.js`:
+Defaults are loaded through `server/env.js` and `server/config.js`; transit state and its 60-second base cooldown live in `server/game/wormhole.js`:
 
 | Constant | Value | Description |
 |----------|-------|-------------|
-| `TRANSIT_DURATION` | 5000ms | Time for teleportation animation |
+| `TRANSIT_DURATION` | 5000ms | Default authoritative travel time; divided by 2.5 for Subspace Warp Drive |
 | `WORMHOLE_RANGE` | 100 units | Proximity required to enter |
 | `SELECTION_TIMEOUT` | 30000ms | Time limit for choosing destination |
 | `MAX_DESTINATIONS` | 5 | Number of destination options shown |
+| `WORMHOLE_COOLDOWN` | 60000ms | Starts after successful completion; multiplied by 0.75 for Subspace Warp Drive |
 
 Exit position calculation:
 ```javascript
@@ -196,43 +200,52 @@ Transit Phase: Tunnel effect
 ```javascript
 // Request to enter wormhole
 socket.emit('wormhole:enter', { wormholeId: string });
-// Response: { success, destinations, error }
+// Response event: wormhole:entered or wormhole:error
 
 // Select destination
 socket.emit('wormhole:selectDestination', { destinationId: string });
-// Response: { success, duration, destination, error }
+// Response event: wormhole:transitStarted or wormhole:error
 
 // Cancel transit (selection phase only)
 socket.emit('wormhole:cancel');
-// Response: { success, reason }
+// Response event: wormhole:cancelled
 ```
 
 **Server to Client**:
 ```javascript
-// Transit started (for all nearby players to see frozen player)
-socket.emit('wormhole:transitStarted', {
-  playerId,
-  duration,
-  entryWormholeId,
-  destinationId
+socket.on('wormhole:entered', ({ wormholeId, destinations }) => {
+  showDestinationSelection(wormholeId, destinations);
 });
 
-// Transit completed (player teleported)
-socket.emit('wormhole:transitComplete', {
-  playerId,
-  position: { x, y },
-  wormholeId
+socket.on('wormhole:transitStarted', ({ destinationId, destination, duration, hasVoidWarp }) => {
+  startTransitAnimation({ destinationId, destination, duration, hasVoidWarp });
+});
+
+socket.on('wormhole:progress', ({ phase, progress, complete }) => {
+  updateTransitProgress({ phase, progress, complete });
+});
+
+// Transit completed after the authoritative timer (player teleported)
+socket.on('wormhole:exitComplete', (data) => {
+  const {
+    position: { x, y },
+    wormholeId,
+    hasVoidWarp
+  } = data;
 });
 
 // Transit cancelled
-socket.emit('wormhole:cancelled', { playerId, reason });
+socket.on('wormhole:cancelled', ({ reason }) => {
+  showCancellation(reason);
+});
 ```
 
 ## Related Files
 
 ### Core System
 - `/server/game/wormhole.js` - Server-side transit logic
-- `/shared/constants.js` - Configuration constants (lines 36, 483, 1176-1184)
+- `/server/env.js`, `/server/config.js` - Environment-backed transit defaults
+- `/shared/constants.js` - Wormhole generation and relic effect metadata
 
 ### Client UI
 - `/client/js/ui/WormholeTransitUI.js` - Full-screen transit overlay
@@ -259,13 +272,13 @@ socket.emit('wormhole:cancelled', { playerId, reason });
 
 - **Expanding Search**: Finds nearest wormholes efficiently without checking all sectors
 - **O(1) Duplicate Detection**: Uses Set instead of array for seen wormhole IDs
-- **Minimal State**: Only tracks active transits, no persistent data
+- **Minimal State**: Active transits and cooldowns are process-local maps, not persistent database data
 - **Sector Caching**: Uses existing world generation cache for wormhole positions
 
 ### Player Experience
 
 - **Clear Feedback**: Full-screen UI with progress indication
 - **Time Pressure**: 30-second selection creates urgency without stress
-- **Commitment**: 5-second transit is short but cannot be cancelled
+- **Commitment**: Default transit takes 5 seconds (2 seconds with Subspace Warp Drive); normal actions resume only after the server completes the exit
 - **Strategic Depth**: Must choose destination wisely
 - **Accessibility**: Large buttons, clear labels, ESC to cancel

@@ -3,6 +3,11 @@ const fs = require('fs');
 const path = require('path');
 const logger = require('../shared/logger');
 const CONSTANTS = require('../shared/constants');
+const { createMarketplaceTransactions } = require('./game/marketplace-transactions');
+const { createPlunderTransactions } = require('./game/plunder-transactions');
+const { createShipUpgradeTransactions } = require('./game/ship-upgrade-transactions');
+const { createMiningTransactions } = require('./game/mining-transactions');
+const { createDeathTransactions } = require('./game/death-transactions');
 
 const DB_PATH = path.join(__dirname, '..', 'data', 'galaxy-miner.db');
 const SCHEMA_PATH = path.join(__dirname, 'schema.sql');
@@ -66,7 +71,8 @@ const statements = {
 
   // Ships
   createShip: db.prepare(`
-    INSERT INTO ships (user_id) VALUES (?)
+    INSERT INTO ships (user_id, hull_hp, hull_max, shield_hp, shield_max)
+    VALUES (?, ?, ?, ?, ?)
   `),
   getShipByUserId: db.prepare(`
     SELECT * FROM ships WHERE user_id = ?
@@ -143,10 +149,12 @@ const statements = {
     UPDATE inventory SET quantity = ? WHERE user_id = ? AND resource_type = ?
   `),
   removeInventoryItem: db.prepare(`
-    DELETE FROM inventory WHERE user_id = ? AND resource_type = ? AND quantity <= 0
+    DELETE FROM inventory WHERE user_id = ? AND resource_type = ?
   `),
   getTotalCargoCount: db.prepare(`
-    SELECT COALESCE(SUM(quantity), 0) as total FROM inventory WHERE user_id = ?
+    SELECT
+      COALESCE((SELECT SUM(quantity) FROM inventory WHERE user_id = ?), 0) +
+      COALESCE((SELECT SUM(quantity) FROM marketplace WHERE seller_id = ?), 0) AS total
   `),
 
   // Marketplace
@@ -348,137 +356,40 @@ const statements = {
 // Transaction helpers
 const createUserWithShip = db.transaction((username, passwordHash) => {
   const userResult = statements.createUser.run(username, passwordHash);
-  statements.createShip.run(userResult.lastInsertRowid);
+  statements.createShip.run(
+    userResult.lastInsertRowid,
+    CONSTANTS.DEFAULT_HULL_HP,
+    CONSTANTS.DEFAULT_HULL_HP,
+    CONSTANTS.DEFAULT_SHIELD_HP,
+    CONSTANTS.DEFAULT_SHIELD_HP
+  );
   return userResult.lastInsertRowid;
 });
 
-const purchaseListing = db.transaction((buyerId, listingId, quantity) => {
-  const listing = statements.getListingById.get(listingId);
-  if (!listing) return { success: false, error: 'Listing not found' };
-  if (listing.quantity < quantity) return { success: false, error: 'Not enough quantity' };
-
-  const totalCost = listing.price_per_unit * quantity;
-  const buyerShip = statements.getShipByUserId.get(buyerId);
-  if (buyerShip.credits < totalCost) return { success: false, error: 'Not enough credits' };
-
-  // Transfer credits
-  statements.updateShipCredits.run(buyerShip.credits - totalCost, buyerId);
-  const sellerShip = statements.getShipByUserId.get(listing.seller_id);
-  statements.updateShipCredits.run(sellerShip.credits + totalCost, listing.seller_id);
-
-  // Transfer resources
-  statements.upsertInventory.run(buyerId, listing.resource_type, quantity);
-
-  // Update or remove listing
-  if (listing.quantity === quantity) {
-    statements.deleteListing.run(listingId);
-  } else {
-    statements.updateListingQuantity.run(listing.quantity - quantity, listingId);
-  }
-
-  return { success: true, cost: totalCost };
+const {
+  createListing: createMarketplaceListing,
+  purchaseListing,
+  cancelListing: cancelMarketplaceListing
+} = createMarketplaceTransactions(db, statements, logger, {
+  cargoCapacityByTier: CONSTANTS.CARGO_CAPACITY
 });
-
-/**
- * Perform ship upgrade with resource deduction (atomic transaction)
- * @param {number} userId - User ID
- * @param {string} component - Component key (engine, weapon, shield, etc.)
- * @param {Object} requirements - { credits: number, resources: { RESOURCE_TYPE: quantity } }
- * @param {number} maxTier - Maximum tier (default 5)
- * @returns {Object} { success: boolean, error?: string, newTier?: number, creditsSpent?: number }
- */
-const performUpgrade = db.transaction((userId, component, requirements, maxTier = 5) => {
-  // 1. Get ship and verify current tier
-  const ship = statements.getShipByUserId.get(userId);
-  if (!ship) return { success: false, error: 'Ship not found' };
-
-  // Map component key to database column name
-  const dbColumnMap = {
-    'engine': 'engine_tier',
-    'weapon': 'weapon_tier',
-    'shield': 'shield_tier',
-    'mining': 'mining_tier',
-    'cargo': 'cargo_tier',
-    'radar': 'radar_tier',
-    'energy_core': 'energy_core_tier',
-    'hull': 'hull_tier'
-  };
-
-  const dbColumn = dbColumnMap[component];
-  if (!dbColumn) return { success: false, error: 'Invalid component' };
-
-  const currentTier = ship[dbColumn] || 1;
-  if (currentTier >= maxTier) return { success: false, error: 'Already at max tier' };
-
-  // 2. Check credits
-  const shipCredits = ship.credits || 0;
-  if (shipCredits < requirements.credits) {
-    return { success: false, error: `Not enough credits (need ${requirements.credits}, have ${shipCredits})` };
-  }
-
-  // 3. Check all resources
-  const inventory = statements.getInventory.all(userId);
-  const inventoryMap = new Map(inventory.map(i => [i.resource_type, i.quantity]));
-
-  for (const [resourceType, required] of Object.entries(requirements.resources || {})) {
-    const available = inventoryMap.get(resourceType) || 0;
-    if (available < required) {
-      return {
-        success: false,
-        error: `Need ${required} ${resourceType} (have ${available})`
-      };
-    }
-  }
-
-  // 4. Deduct credits
-  statements.updateShipCredits.run(shipCredits - requirements.credits, userId);
-
-  // 5. Deduct resources
-  for (const [resourceType, quantity] of Object.entries(requirements.resources || {})) {
-    const current = inventoryMap.get(resourceType);
-    const newQuantity = current - quantity;
-    logger.log(`[INVENTORY] User ${userId} ${resourceType}: ${current} -> ${newQuantity} (upgrade -${quantity})`);
-    if (newQuantity <= 0) {
-      // Remove entry entirely
-      db.prepare('DELETE FROM inventory WHERE user_id = ? AND resource_type = ?')
-        .run(userId, resourceType);
-    } else {
-      statements.setInventoryQuantity.run(newQuantity, userId, resourceType);
-    }
-  }
-
-  // 6. Apply upgrade - build params array for upgradeShipComponent
-  // Order: engine, weapon_type, weapon, shield, mining, cargo, radar, energy_core, hull, shield_max, hull_max, user_id
-  const nextTier = currentTier + 1;
-  const updateParams = [null, null, null, null, null, null, null, null, null, null, null, userId];
-  const componentToIndex = {
-    'engine': 0,
-    'weapon': 2,
-    'shield': 3,
-    'mining': 4,
-    'cargo': 5,
-    'radar': 6,
-    'energy_core': 7,
-    'hull': 8
-  };
-  updateParams[componentToIndex[component]] = nextTier;
-
-  // Recalculate max HP values for shield/hull upgrades
-  // Shield uses SHIELD_TIER_MULTIPLIER (2.0x), Hull uses TIER_MULTIPLIER (1.5x)
-  if (component === 'shield') {
-    const shieldMultiplier = CONSTANTS.SHIELD_TIER_MULTIPLIER || 2.0;
-    const newShieldMax = Math.round(CONSTANTS.DEFAULT_SHIELD_HP * Math.pow(shieldMultiplier, nextTier - 1));
-    updateParams[9] = newShieldMax;  // shield_max
-  } else if (component === 'hull') {
-    const hullMultiplier = CONSTANTS.TIER_MULTIPLIER || 1.5;
-    const newHullMax = Math.round(CONSTANTS.DEFAULT_HULL_HP * Math.pow(hullMultiplier, nextTier - 1));
-    updateParams[10] = newHullMax;  // hull_max
-  }
-
-  statements.upgradeShipComponent.run(...updateParams);
-
-  return { success: true, newTier: nextTier, creditsSpent: requirements.credits };
+const { grantPlunderRewards } = createPlunderTransactions(
+  db,
+  statements,
+  new Set(Object.keys(CONSTANTS.RESOURCE_TYPES || {}))
+);
+const { performUpgrade } = createShipUpgradeTransactions(db, statements, logger, {
+  defaultShieldHp: CONSTANTS.DEFAULT_SHIELD_HP,
+  defaultHullHp: CONSTANTS.DEFAULT_HULL_HP,
+  shieldTierMultiplier: CONSTANTS.SHIELD_TIER_MULTIPLIER,
+  hullTierMultiplier: CONSTANTS.TIER_MULTIPLIER
 });
+const { completeMiningYield } = createMiningTransactions(db, statements);
+const { settleDeathCargo } = createDeathTransactions(
+  db,
+  statements,
+  CONSTANTS.DEATH_CARGO_DROP_PERCENT
+);
 
 /**
  * Safely update ship credits - prevents null/NaN from ever being written
@@ -566,8 +477,13 @@ module.exports = {
   db,
   statements,
   createUserWithShip,
+  createMarketplaceListing,
   purchaseListing,
+  cancelMarketplaceListing,
+  grantPlunderRewards,
   performUpgrade,
+  completeMiningYield,
+  settleDeathCargo,
   safeUpdateCredits,
   getSafeCredits,
   safeUpsertInventory

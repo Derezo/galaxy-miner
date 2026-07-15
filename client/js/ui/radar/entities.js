@@ -2,8 +2,32 @@
 // Renders players, NPCs, and bases with tier-aware visuals
 
 const RadarEntities = {
+  strategicContacts: [],
+  lastStrategicContactUpdate: 0,
+
+  setStrategicContacts(contacts) {
+    const maxContacts = Math.max(
+      1,
+      Math.floor(CONSTANTS.RELIC_TYPES?.ANCIENT_STAR_MAP?.effects?.maxStrategicContacts || 8)
+    );
+    this.strategicContacts = Array.isArray(contacts)
+      ? contacts.filter(contact => contact &&
+        Number.isFinite(Number(contact.x)) && Number.isFinite(Number(contact.y)) &&
+        (contact.contactType === 'base' || contact.contactType === 'boss'))
+        .slice(0, maxContacts)
+        .map(contact => ({
+          id: String(contact.id || ''),
+          x: Number(contact.x),
+          y: Number(contact.y),
+          faction: contact.faction || null,
+          contactType: contact.contactType
+        }))
+      : [];
+    this.lastStrategicContactUpdate = Date.now();
+  },
+
   // Draw all entities within radar range
-  draw(ctx, center, scale, radarRange, radarTier, playerPos, playerRotation) {
+  draw(ctx, center, scale, radarRange, radarTier, playerPos, playerRotation, objects) {
     // Note: Bases are now drawn from world data in RadarObjects
     // Entities.bases is used for server-side health/damage tracking only
 
@@ -16,8 +40,61 @@ const RadarEntities = {
     // Draw other players
     this.drawPlayers(ctx, center, scale, radarRange, radarTier, playerPos);
 
+    // Ancient Star Map: server-authoritative edge markers just outside normal
+    // range. Only sparse bearing data is retained by the client.
+    this.drawStrategicContacts(ctx, center, radarRange, playerPos, objects);
+
     // Draw local player at center (always on top)
     this.drawLocalPlayer(ctx, center, radarTier, playerRotation);
+  },
+
+  drawStrategicContacts(ctx, center, radarRange, playerPos, objects = null) {
+    if (typeof Player === 'undefined' || !Player.hasRelic?.('ANCIENT_STAR_MAP')) return;
+
+    const effects = CONSTANTS.RELIC_TYPES?.ANCIENT_STAR_MAP?.effects || {};
+    const rangeMultiplier = Math.max(1, Number(effects.strategicContactRangeMultiplier) || 2);
+    const strategicRange = radarRange * rangeMultiplier;
+    const now = Date.now();
+
+    const markerRadius = center - 7;
+    const pulse = 0.72 + Math.sin(now / 240) * 0.18;
+    for (const contact of this.strategicContacts) {
+      const dx = contact.x - playerPos.x;
+      const dy = contact.y - playerPos.y;
+      const distance = Math.sqrt(dx * dx + dy * dy);
+      if (distance <= radarRange || distance > strategicRange || distance === 0) continue;
+
+      const angle = Math.atan2(dy, dx);
+      const x = center + Math.cos(angle) * markerRadius;
+      const y = center + Math.sin(angle) * markerRadius;
+      const color = CONSTANTS.FACTION_RADAR_COLORS[contact.faction] || '#66ddff';
+      const size = contact.contactType === 'base' ? 4.5 : 3.5;
+
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.rotate(Math.PI / 4);
+      ctx.globalAlpha = pulse;
+      ctx.fillStyle = 'rgba(0, 12, 28, 0.9)';
+      ctx.strokeStyle = color;
+      ctx.lineWidth = contact.contactType === 'base' ? 1.5 : 1;
+      ctx.beginPath();
+      ctx.rect(-size, -size, size * 2, size * 2);
+      ctx.fill();
+      ctx.stroke();
+      ctx.restore();
+
+      // Short inward bearing tick distinguishes Star Map contacts from ordinary
+      // tier-based direction indicators.
+      ctx.save();
+      ctx.globalAlpha = pulse * 0.8;
+      ctx.strokeStyle = '#66ddff';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(x - Math.cos(angle) * 7, y - Math.sin(angle) * 7);
+      ctx.lineTo(x - Math.cos(angle) * 12, y - Math.sin(angle) * 12);
+      ctx.stroke();
+      ctx.restore();
+    }
   },
 
   // Draw faction bases

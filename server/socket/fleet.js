@@ -23,7 +23,11 @@ function register(socket, deps) {
     const authenticatedUserId = getAuthenticatedUserId();
     if (!authenticatedUserId) return;
 
-    const name = (data?.name || 'Fleet').trim().slice(0, 30);
+    if (data?.name !== undefined && typeof data.name !== 'string') {
+      socket.emit('fleet:error', { message: 'Fleet name must be text' });
+      return;
+    }
+    const name = (data?.name || 'Fleet').trim().slice(0, 30) || 'Fleet';
     const result = fleet.create(authenticatedUserId, name);
 
     if (result.success) {
@@ -40,13 +44,15 @@ function register(socket, deps) {
     if (!authenticatedUserId) return;
 
     const { username } = data || {};
-    if (!username) {
+    if (typeof username !== 'string' || !username.trim()) {
       socket.emit('fleet:error', { message: 'Username required' });
       return;
     }
 
+    const cleanUsername = username.trim().slice(0, 50);
+
     // Find invitee by username
-    const invitee = statements.getUserByUsername.get(username);
+    const invitee = statements.getUserByUsername.get(cleanUsername);
     if (!invitee) {
       socket.emit('fleet:error', { message: 'Player not found' });
       return;
@@ -86,7 +92,7 @@ function register(socket, deps) {
     if (!authenticatedUserId) return;
 
     const { fleetId } = data || {};
-    if (!fleetId) {
+    if (!Number.isSafeInteger(fleetId) || fleetId <= 0) {
       socket.emit('fleet:error', { message: 'Fleet ID required' });
       return;
     }
@@ -121,7 +127,7 @@ function register(socket, deps) {
     if (!authenticatedUserId) return;
 
     const { fleetId } = data || {};
-    if (!fleetId) return;
+    if (!Number.isSafeInteger(fleetId) || fleetId <= 0) return;
 
     fleet.decline(authenticatedUserId, fleetId);
     socket.emit('fleet:inviteDeclined', { fleetId });
@@ -172,7 +178,7 @@ function register(socket, deps) {
     if (!authenticatedUserId) return;
 
     const { userId } = data || {};
-    if (!userId) {
+    if (!Number.isSafeInteger(userId) || userId <= 0) {
       socket.emit('fleet:error', { message: 'User ID required' });
       return;
     }

@@ -86,13 +86,15 @@ function getWeaponCooldown(weaponTier) {
 }
 
 /**
- * Calculate shield recharge rate based on tier
- * @param {number} shieldTier - Shield tier (1-5)
+ * Calculate shield recharge rate based on energy-core tier. Shield tier
+ * changes capacity; the energy core is the only component that changes regen.
+ * @param {number} energyCoreTier - Energy core tier (1-5)
  * @returns {number} Recharge rate per second
  */
-function getShieldRechargeRate(shieldTier) {
-  const baseRate = _utilsConstants ? _utilsConstants.SHIELD_RECHARGE_RATE : 5;
-  return baseRate * getTierMultiplier(shieldTier);
+function getShieldRechargeRate(energyCoreTier) {
+  const baseRate = _utilsConstants ? _utilsConstants.SHIELD_RECHARGE_RATE : 2;
+  const bonuses = _utilsConstants?.ENERGY_CORE?.SHIELD_REGEN_BONUS || [];
+  return baseRate + (bonuses[energyCoreTier || 1] || 0);
 }
 
 /**

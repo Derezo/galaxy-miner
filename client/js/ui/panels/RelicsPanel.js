@@ -131,8 +131,8 @@ const RelicsPanel = {
           ${hasEffect ? this._renderEffect(relicInfo) : this._renderNoEffect()}
 
           <div class="panel-detail-stat">
-            <span class="panel-detail-stat-label">Trade Value</span>
-            <span class="panel-detail-stat-value">${relicInfo.value} cr</span>
+            <span class="panel-detail-stat-label">Archive Rating</span>
+            <span class="panel-detail-stat-value">${relicInfo.value}</span>
           </div>
           <div class="panel-detail-stat">
             <span class="panel-detail-stat-label">Discovered</span>
@@ -152,25 +152,43 @@ const RelicsPanel = {
 
     if (relicInfo.effect === 'wormhole_transit') {
       effectName = 'Wormhole Transit';
-      effectDesc = 'Approach a wormhole and press [M] to enter. Select a destination from nearby wormholes to instantly travel.';
+      effectDesc = 'Approach a wormhole and press [M] to enter. Select a destination, then remain protected during the server-controlled transit sequence.';
+    } else if (relicInfo.effect === 'strategic_radar') {
+      effectName = 'Strategic Cartography';
+      const rangeMultiplier = relicInfo.effects?.strategicContactRangeMultiplier || 2;
+      const maxContacts = relicInfo.effects?.maxStrategicContacts || 8;
+      effectDesc = `Marks up to ${maxContacts} server-confirmed faction bases and boss-class contacts between normal radar range and ${rangeMultiplier}x range. Cyan-ticked edge diamonds reveal bearing only, not combat state.`;
+    } else if (relicInfo.effect === 'faction_damage') {
+      effectName = 'Resonant Fracture';
+      const bonus = Math.round((relicInfo.effects?.factionDamageBonus || 0.1) * 100);
+      const factions = (relicInfo.effects?.targetFactions || ['void', 'swarm'])
+        .map(faction => faction.charAt(0).toUpperCase() + faction.slice(1))
+        .join(' and ');
+      effectDesc = `Weapon damage against ${factions} NPCs and faction bases is increased by ${bonus}%. Applied automatically by the authoritative combat server.`;
     } else if (relicInfo.effect === 'plunder') {
       effectName = 'Plunder';
       const cooldownSec = Math.round((relicInfo.cooldown || 15000) / 1000);
+      const baseCooldownSec = Math.round((relicInfo.baseCooldown || 90000) / 1000);
       const aggroRange = relicInfo.aggroRange || 600;
-      effectDesc = `Press [M] near any faction base to steal resources instantly without destroying it. Cooldown: ${cooldownSec}s. Warning: NPCs within ${aggroRange} units will become hostile!`;
+      effectDesc = `Press [M] near a faction base to steal from its finite reserve. Player cooldown: ${cooldownSec}s; each base enters a ${baseCooldownSec}s alert. Cargo limits apply, unclaimed cargo remains, and NPCs within ${aggroRange} units become hostile.`;
     } else if (relicInfo.effect === 'credit_bonus') {
       effectName = "Pirate's Share";
       const bonusPct = relicInfo.effects?.npcWreckageCreditBonus ? Math.round(relicInfo.effects.npcWreckageCreditBonus * 100) : 10;
-      effectDesc = `All credit rewards from NPC wreckage increased by ${bonusPct}%. Applies automatically when collecting loot.`;
+      effectDesc = `Your own credit share from NPC wreckage is increased by ${bonusPct}%, including shares collected by teammates. Other players only receive the bonus if they own the relic too.`;
+    } else if (relicInfo.effect === 'hive_respawn') {
+      effectName = 'Hive Rejection';
+      const radius = relicInfo.effects?.hiveDestructionRadius || 500;
+      effectDesc = `On death, unlocks the nearest active Swarm hive as a respawn destination. Choosing it destroys the host hive and releases a ${radius}-unit rejection blast.`;
     } else if (relicInfo.effect === 'warp_enhancement') {
       effectName = 'Subspace Warp';
-      const velocityBonus = relicInfo.effects?.warpVelocityMultiplier
-        ? Math.round((relicInfo.effects.warpVelocityMultiplier - 1) * 100)
+      const durationBonus = relicInfo.effects?.boostDurationMultiplier
+        ? Math.round((relicInfo.effects.boostDurationMultiplier - 1) * 100)
         : 150;
-      const cooldownReduction = relicInfo.effects?.warpCooldownMultiplier
-        ? Math.round((1 - relicInfo.effects.warpCooldownMultiplier) * 100)
+      const cooldownReduction = relicInfo.effects?.boostCooldownMultiplier
+        ? Math.round((1 - relicInfo.effects.boostCooldownMultiplier) * 100)
         : 25;
-      effectDesc = `Void energy bends spacetime around your ship. Boost velocity increased by ${velocityBonus}% and boost cooldown reduced by ${cooldownReduction}%. Effect is always active.`;
+      const transitSpeed = relicInfo.effects?.wormholeTransitSpeedMultiplier || 2.5;
+      effectDesc = `Boost duration is increased by ${durationBonus}% and boost cooldown is reduced by ${cooldownReduction}%. Wormhole transit runs ${transitSpeed}x faster. Effect is always active.`;
     } else if (relicInfo.effects) {
       // Handle relics with multiple effects (like SCRAP_SIPHON)
       const effects = relicInfo.effects;
@@ -182,12 +200,15 @@ const RelicsPanel = {
         const multiRange = effects.multiWreckageRange || 100;
 
         let descParts = [];
-        descParts.push(`Press [M] near wreckage to instantly collect up to ${multiCount} pieces within ${multiRange} units.`);
+        descParts.push(`Press [M] near wreckage to collect up to ${multiCount} pieces in parallel within ${multiRange} units.`);
         descParts.push(`Collection is ${speedPct}% faster than normal.`);
         if (effects.scavengerWreckageImmunity) {
           descParts.push('Scavengers will ignore your wreckage collection.');
         }
         effectDesc = descParts.join(' ');
+      } else if (effects.miningYieldMultiplier !== undefined) {
+        effectName = 'Ritual Extraction';
+        effectDesc = `Mining yield is multiplied by ${effects.miningYieldMultiplier}x before cargo capacity is applied. Quantities remain whole units and the server uses this configured value directly.`;
       }
     }
 

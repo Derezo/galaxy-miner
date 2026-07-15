@@ -13,11 +13,26 @@ const getConfig = () => {
   return {};
 };
 
+// Get shared analytical physics without creating a client/server fork.
+const getPhysics = () => {
+  if (typeof window !== 'undefined' && window.Physics) return window.Physics;
+  if (typeof Physics !== 'undefined') return Physics;
+  if (typeof module !== 'undefined') return require('./physics');
+  return null;
+};
+
 // Get logger - works in both Node.js and browser
 const getLogger = () => {
   if (typeof window !== 'undefined' && window.Logger) return window.Logger;
   if (typeof module !== 'undefined') return require('./logger');
   return { category: () => {}, error: console.error };
+};
+
+// Get deterministic rarity selection - works in both Node.js and browser.
+const getResourceSelection = () => {
+  if (typeof window !== 'undefined' && window.ResourceSelection) return window.ResourceSelection;
+  if (typeof module !== 'undefined') return require('./resource-selection');
+  return null;
 };
 
 // Define StarSystem and immediately attach to window for browser
@@ -311,29 +326,136 @@ Object.assign(StarSystem, {
     };
   },
 
-  // Compute current binary star positions based on time
+  // Compute current binary star positions based on time. Keep this as a thin
+  // wrapper around shared physics so eccentric binaries use identical math on
+  // the client and server.
   computeBinaryPositions(system, time) {
-    if (!system.binaryInfo) {
+    const physics = getPhysics();
+    if (physics?.computeBinaryStarPositions) {
+      return physics.computeBinaryStarPositions(system, time);
+    }
+
+    return {
+      primary: { x: system.primaryStar.x, y: system.primaryStar.y },
+      secondary: system.binaryInfo
+        ? { ...system.binaryInfo.secondaryStar }
+        : null
+    };
+  },
+
+  // StarSystem object IDs always begin ss_{superX}_{superY}_{systemIndex}.
+  // Object suffixes may themselves contain underscores, so only the first
+  // four components belong to the owning system ID.
+  getSystemIdFromObjectId(objectId) {
+    if (typeof objectId !== 'string' || !objectId.startsWith('ss_')) return null;
+
+    const parts = objectId.split('_');
+    if (parts.length < 5) return null;
+
+    const superX = Number(parts[1]);
+    const superY = Number(parts[2]);
+    const systemIndex = Number(parts[3]);
+    if (!Number.isInteger(superX) || !Number.isInteger(superY) ||
+        !Number.isInteger(systemIndex)) {
+      return null;
+    }
+
+    return `ss_${superX}_${superY}_${systemIndex}`;
+  },
+
+  getStarRole(system, starId) {
+    if (!system || typeof starId !== 'string') return null;
+    if (system.primaryStar?.id === starId) return 'primary';
+    if (system.binaryInfo?.secondaryStar?.id === starId) return 'secondary';
+    return null;
+  },
+
+  findObjectInSystem(system, objectId) {
+    if (!system || typeof objectId !== 'string') return null;
+    if (system.primaryStar?.id === objectId) return system.primaryStar;
+    if (system.binaryInfo?.secondaryStar?.id === objectId) {
+      return system.binaryInfo.secondaryStar;
+    }
+
+    const collections = [
+      system.planets,
+      system.bases,
+      system.miningClaimObjects,
+      system.wormholes,
+      system.comets
+    ];
+    for (const collection of collections) {
+      const object = collection?.find(candidate => candidate.id === objectId);
+      if (object) return object;
+    }
+    return null;
+  },
+
+  getStarPosition(system, starId, time) {
+    const role = this.getStarRole(system, starId);
+    if (!role) return null;
+
+    const positions = this.computeBinaryPositions(system, time);
+    const position = role === 'secondary' ? positions.secondary : positions.primary;
+    if (!position || !Number.isFinite(position.x) || !Number.isFinite(position.y)) {
+      return null;
+    }
+    return { x: position.x, y: position.y };
+  },
+
+  // Resolve a generated object against its owning system. This is deliberately
+  // analytical and consumes no random values, so it can be called at any time
+  // without shifting procedural generation.
+  resolveObjectPosition(system, object, time) {
+    if (!system || !object || typeof object.id !== 'string') return null;
+
+    const physics = getPhysics();
+    if (!physics) return null;
+
+    // Use the immutable generated object when available. Client sector clones
+    // are mutated each frame for rendering and must not become the next frame's
+    // orbital anchor.
+    const canonical = this.findObjectInSystem(system, object.id) || object;
+    const starRole = this.getStarRole(system, canonical.id);
+    if (starRole) {
+      return this.getStarPosition(system, canonical.id, time);
+    }
+
+    if (canonical.entryPoint && canonical.perihelion && canonical.exitPoint &&
+        physics.computeCometPosition) {
+      const state = physics.computeCometPosition(canonical, time);
+      return Number.isFinite(state.x) && Number.isFinite(state.y) ? state : null;
+    }
+
+    const hasOrbit = Number.isFinite(canonical.orbitRadius) &&
+      Number.isFinite(canonical.orbitAngle) &&
+      Number.isFinite(canonical.orbitSpeed) &&
+      typeof canonical.starId === 'string';
+
+    if (hasOrbit) {
+      const starPosition = this.getStarPosition(system, canonical.starId, time);
+      if (!starPosition) return null;
+
+      const position = physics.computePlanetPosition(canonical, starPosition, time);
+      return Number.isFinite(position.x) && Number.isFinite(position.y)
+        ? position
+        : null;
+    }
+
+    // Static bases generated relative to a binary primary follow that star.
+    if (system.binaryInfo && typeof canonical.starId === 'string' &&
+        Number.isFinite(canonical.starX) && Number.isFinite(canonical.starY) &&
+        Number.isFinite(canonical.x) && Number.isFinite(canonical.y)) {
+      const starPosition = this.getStarPosition(system, canonical.starId, time);
+      if (!starPosition) return null;
       return {
-        primary: { x: system.primaryStar.x, y: system.primaryStar.y },
-        secondary: null
+        x: starPosition.x + canonical.x - canonical.starX,
+        y: starPosition.y + canonical.y - canonical.starY
       };
     }
 
-    const bi = system.binaryInfo;
-    const elapsedSeconds = time / 1000;
-    const phase = bi.orbitPhase + (elapsedSeconds / bi.orbitPeriod) * Math.PI * 2;
-
-    return {
-      primary: {
-        x: bi.baryCenter.x + Math.cos(phase) * bi.primaryOrbitRadius,
-        y: bi.baryCenter.y + Math.sin(phase) * bi.primaryOrbitRadius
-      },
-      secondary: {
-        x: bi.baryCenter.x + Math.cos(phase + Math.PI) * bi.secondaryOrbitRadius,
-        y: bi.baryCenter.y + Math.sin(phase + Math.PI) * bi.secondaryOrbitRadius
-      }
-    };
+    if (!Number.isFinite(canonical.x) || !Number.isFinite(canonical.y)) return null;
+    return { x: canonical.x, y: canonical.y };
   },
 
   // Generate asteroid belts based on star size
@@ -488,10 +610,16 @@ Object.assign(StarSystem, {
       // Generate seed for deterministic texture rendering
       const textureSeed = this.hash(`${systemId}_planet_${index}`, slot.radius, 0);
 
+      // Keep the generated snapshot finite as well as the analytical position.
+      // This reuses the existing orbit-angle draw and does not consume RNG.
+      const orbitAngle = rng() * Math.PI * 2;
+
       planets.push({
         id: `${systemId}_planet_${index}`,
+        x: star.x + Math.cos(orbitAngle) * slot.radius,
+        y: star.y + Math.sin(orbitAngle) * slot.radius,
         orbitRadius: slot.radius,
-        orbitAngle: rng() * Math.PI * 2,
+        orbitAngle,
         orbitSpeed,
         size: planetSize,
         type: planetType,
@@ -1176,17 +1304,40 @@ Object.assign(StarSystem, {
     return comets;
   },
 
+  // Return comet definitions whose Bezier control-point bounds overlap a
+  // sector. A quadratic Bezier stays inside this convex hull, so both worlds
+  // expose the same complete set without sampling or consuming RNG.
+  getCometsForSector(system, sectorX, sectorY) {
+    const config = getConfig();
+    const sectorSize = config.SECTOR_SIZE || 1000;
+    const sectorMinX = sectorX * sectorSize;
+    const sectorMinY = sectorY * sectorSize;
+    const sectorMaxX = sectorMinX + sectorSize;
+    const sectorMaxY = sectorMinY + sectorSize;
+
+    return (system?.comets || []).filter(comet => {
+      if (!comet.entryPoint || !comet.perihelion || !comet.exitPoint) return false;
+
+      const padding = Math.max(
+        comet.size || 0,
+        (comet.size || 0) * (comet.tailLengthFactor || 1)
+      );
+      const minX = Math.min(comet.entryPoint.x, comet.perihelion.x, comet.exitPoint.x) - padding;
+      const maxX = Math.max(comet.entryPoint.x, comet.perihelion.x, comet.exitPoint.x) + padding;
+      const minY = Math.min(comet.entryPoint.y, comet.perihelion.y, comet.exitPoint.y) - padding;
+      const maxY = Math.max(comet.entryPoint.y, comet.perihelion.y, comet.exitPoint.y) + padding;
+
+      return maxX >= sectorMinX && minX < sectorMaxX &&
+        maxY >= sectorMinY && minY < sectorMaxY;
+    });
+  },
+
   getPlanetResources(rng) {
     const config = getConfig();
-    const resources = [];
-    const types = Object.keys(config.RESOURCE_TYPES || {});
-    if (types.length === 0) return resources;
-
     const count = 1 + Math.floor(rng() * 3);
-    for (let i = 0; i < count; i++) {
-      resources.push(types[Math.floor(rng() * types.length)]);
-    }
-    return resources;
+    const resourceSelection = getResourceSelection();
+    if (!resourceSelection) return [];
+    return resourceSelection.selectResources(config.RESOURCE_TYPES, rng, count);
   },
 
   getAsteroidResources(rng, beltType) {

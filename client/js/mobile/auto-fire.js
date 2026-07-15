@@ -2,7 +2,7 @@
 // Automatically fires at nearest enemy when aimed within tolerance (mobile only)
 
 const AutoFire = {
-  enabled: true,
+  enabled: false,
   aimTolerance: Math.PI / 6, // 30 degrees tolerance
   lastFireTime: 0,
   currentTarget: null,
@@ -30,7 +30,8 @@ const AutoFire = {
     if (typeof MobileHUD !== 'undefined' && MobileHUD._manualFiringActive) return;
 
     // Don't fire if game hasn't started
-    if (typeof GalaxyMiner === 'undefined' || !GalaxyMiner.gameStarted) return;
+    if (typeof GalaxyMiner === 'undefined' ||
+        !GalaxyMiner.gameStarted || GalaxyMiner.connectionPaused) return;
 
     // Don't fire if player is dead or in transit
     if (typeof Player === 'undefined' || Player.isDead || Player.inWormholeTransit) return;
@@ -99,7 +100,11 @@ const AutoFire = {
    * @returns {number} Cooldown in milliseconds
    */
   getWeaponCooldown() {
-    if (typeof CONSTANTS === 'undefined') return 500;
+    if (typeof Player !== 'undefined' && typeof Player.getWeaponCooldown === 'function') {
+      return Player.getWeaponCooldown();
+    }
+
+    if (typeof CONSTANTS === 'undefined' || typeof Player === 'undefined') return 500;
 
     const tier = Player.ship.weaponTier || 1;
     const energyTier = Player.ship.energyCoreTier || 1;
@@ -129,16 +134,21 @@ const AutoFire = {
 
     for (const [id, npc] of Entities.npcs) {
       if (!npc || npc.isDead) continue;
+      if (!this.isAttackable(npc)) continue;
 
-      const dx = npc.x - playerX;
-      const dy = npc.y - playerY;
+      const position = npc.position;
+      if (!position || !Number.isFinite(position.x) || !Number.isFinite(position.y)) continue;
+
+      const dx = position.x - playerX;
+      const dy = position.y - playerY;
       const distance = Math.sqrt(dx * dx + dy * dy);
 
       if (distance <= range) {
         results.push({
           id: id,
-          x: npc.x,
-          y: npc.y,
+          x: position.x,
+          y: position.y,
+          position: position,
           distance: distance,
           faction: npc.faction,
           npc: npc
@@ -147,6 +157,22 @@ const AutoFire = {
     }
 
     return results;
+  },
+
+  isAttackable(npc) {
+    if (npc.attackable === false || npc.passive === true) return false;
+    const state = String(npc.state || '').toLowerCase();
+    if (['hatching', 'spawning', 'retreat', 'retreating', 'despawn'].includes(state)) {
+      return false;
+    }
+
+    // These factions are neutral/passive until provoked in normal gameplay.
+    // Only assist once the authoritative state is overtly hostile.
+    if (npc.faction === 'scavenger' || npc.faction === 'rogue_miner') {
+      return ['attack', 'attacking', 'combat', 'engage', 'chase', 'rage', 'enraged', 'raid']
+        .includes(state);
+    }
+    return true;
   },
 
   /**

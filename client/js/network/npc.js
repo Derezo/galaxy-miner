@@ -1,5 +1,59 @@
 // Galaxy Miner - NPC & Base Network Handlers
 
+function clearPersistentVoidNpcEffects(npcId, npcType) {
+  if (typeof RiftPortal !== 'undefined' &&
+      typeof RiftPortal.remove === 'function') {
+    RiftPortal.remove(npcId);
+  }
+  if (typeof VoidParticles !== 'undefined' &&
+      typeof VoidParticles.removeNPC === 'function') {
+    VoidParticles.removeNPC(npcId);
+  }
+
+  if (npcType === 'void_leviathan') {
+    const wellId = `gravity_well_${npcId}`;
+    if (typeof GravityWellEffect !== 'undefined' &&
+        typeof GravityWellEffect.remove === 'function') {
+      GravityWellEffect.remove(wellId);
+    }
+    if (typeof AudioManager !== 'undefined' &&
+        typeof AudioManager.stopLoop === 'function') {
+      AudioManager.stopLoop(wellId);
+    }
+  }
+}
+
+function applyAuthoritativeNpcState(data) {
+  const existing = typeof Entities !== 'undefined'
+    ? Entities.npcs?.get(data.id)
+    : null;
+  if (existing?.faction === 'void' && data.faction && data.faction !== 'void') {
+    clearPersistentVoidNpcEffects(data.id, existing.type);
+  }
+  Entities.updateNPC(data);
+  return existing;
+}
+
+/**
+ * Silently retire an NPC that left authoritative visibility. This is not a
+ * death, so no sound or death animation is played, but every persistent effect
+ * keyed by the NPC id must be removed immediately.
+ */
+function retireNpcVisibility(npcId) {
+  const entity = typeof Entities !== 'undefined'
+    ? Entities.npcs?.get(npcId)
+    : null;
+  // A rich destruction event may be followed by an idempotent leave. It has
+  // already removed the entity and owns its closing/death animations.
+  if (!entity) return;
+
+  if (entity.faction === 'void') {
+    clearPersistentVoidNpcEffects(npcId, entity.type);
+  }
+
+  Entities.removeNPC(npcId);
+}
+
 /**
  * Registers NPC, base, and faction-related socket event handlers
  * @param {Socket} socket - Socket.io client instance
@@ -7,7 +61,7 @@
 function register(socket) {
   // NPC events - spawn, update, destroyed
   socket.on('npc:spawn', (data) => {
-    Entities.updateNPC({
+    applyAuthoritativeNpcState({
       id: data.id,
       type: data.type,
       name: data.name,
@@ -18,7 +72,10 @@ function register(socket) {
       hull: data.hull,
       hullMax: data.hullMax,
       shield: data.shield,
-      shieldMax: data.shieldMax
+      shieldMax: data.shieldMax,
+      isBoss: data.isBoss,
+      sizeMultiplier: data.sizeMultiplier,
+      phase: data.phase
     });
 
     // Create rift portal for void faction NPCs when they spawn
@@ -46,6 +103,9 @@ function register(socket) {
       hullMax: data.hullMax,
       shield: data.shield,
       shieldMax: data.shieldMax,
+      isBoss: data.isBoss,
+      sizeMultiplier: data.sizeMultiplier,
+      phase: data.phase,
       vx: data.vx || 0,
       vy: data.vy || 0
     };
@@ -57,7 +117,7 @@ function register(socket) {
     if (data.miningTargetPos) {
       npcData.miningTargetPos = data.miningTargetPos;
     }
-    Entities.updateNPC(npcData);
+    applyAuthoritativeNpcState(npcData);
 
     // Create rift portal for void faction NPCs when they're first seen
     if (isNewNpc && data.faction === 'void' && typeof RiftPortal !== 'undefined') {
@@ -87,6 +147,9 @@ function register(socket) {
           hullMax: data.hullMax,
           shield: data.shield,
           shieldMax: data.shieldMax,
+          isBoss: data.isBoss,
+          sizeMultiplier: data.sizeMultiplier,
+          phase: data.phase,
           vx: data.vx || 0,
           vy: data.vy || 0
         };
@@ -96,7 +159,7 @@ function register(socket) {
         if (data.miningTargetPos) {
           npcData.miningTargetPos = data.miningTargetPos;
         }
-        Entities.updateNPC(npcData);
+        applyAuthoritativeNpcState(npcData);
       } else if (existingNpc) {
         // Delta update - only position/rotation/velocity + changed fields
         const npcData = {
@@ -109,12 +172,20 @@ function register(socket) {
         };
         // Apply only fields that are present in the delta
         if (data.state !== undefined) npcData.state = data.state;
+        if (data.type !== undefined) npcData.type = data.type;
+        if (data.name !== undefined) npcData.name = data.name;
+        if (data.faction !== undefined) npcData.faction = data.faction;
         if (data.hull !== undefined) npcData.hull = data.hull;
+        if (data.hullMax !== undefined) npcData.hullMax = data.hullMax;
         if (data.shield !== undefined) npcData.shield = data.shield;
+        if (data.shieldMax !== undefined) npcData.shieldMax = data.shieldMax;
+        if (data.isBoss !== undefined) npcData.isBoss = data.isBoss;
+        if (data.sizeMultiplier !== undefined) npcData.sizeMultiplier = data.sizeMultiplier;
+        if (data.phase !== undefined) npcData.phase = data.phase;
         // Use !== undefined to handle explicit null (signals "stopped collecting/mining")
         if (data.collectingWreckagePos !== undefined) npcData.collectingWreckagePos = data.collectingWreckagePos;
         if (data.miningTargetPos !== undefined) npcData.miningTargetPos = data.miningTargetPos;
-        Entities.updateNPC(npcData);
+        applyAuthoritativeNpcState(npcData);
       }
 
       // Create rift portal for void NPCs first seen
@@ -156,9 +227,14 @@ function register(socket) {
       Player.onNPCKill();
     }
 
-    // Play death sound based on faction
-    if (npc && typeof AudioManager !== 'undefined' && AudioManager.isReady && AudioManager.isReady()) {
-      AudioManager.playAt('death_' + npc.faction, npc.position.x, npc.position.y);
+    // Play the configured small/medium/large family based on the real entity.
+    if (npc && npc.type !== 'void_leviathan' &&
+        typeof AudioManager !== 'undefined' && AudioManager.isReady && AudioManager.isReady()) {
+      const factionKey = npc.faction === 'rogue_miner' ? 'rogue' : npc.faction;
+      const sizeClass = npc.isBoss || (Number(npc.hullMax) || 0) >= 500
+        ? '_large'
+        : ((Number(npc.hullMax) || 0) <= 60 ? '_small' : '');
+      AudioManager.playAt(`death_${factionKey}${sizeClass}`, npc.position.x, npc.position.y);
     }
 
     // Trigger death effect
@@ -169,6 +245,13 @@ function register(socket) {
           npc.position.x,
           npc.position.y,
           npc.phase || 'HUNT',
+          npc.rotation || 0
+        );
+      } else if (npc.type === 'void_leviathan' &&
+                 typeof DeathEffects.triggerLeviathanDeath === 'function') {
+        DeathEffects.triggerLeviathanDeath(
+          npc.position.x,
+          npc.position.y,
           npc.rotation || 0
         );
       } else if (npc.type === 'scavenger_hauler' || npc.type === 'scavenger_barnacle_king') {
@@ -191,9 +274,29 @@ function register(socket) {
     if (npc && npc.faction === 'void' && typeof RiftPortal !== 'undefined') {
       RiftPortal.setState(data.id, 'close');
     }
+    if (npc && npc.faction === 'void' && typeof VoidParticles !== 'undefined') {
+      VoidParticles.removeNPC(data.id);
+    }
+    if (npc?.type === 'void_leviathan') {
+      const wellId = `gravity_well_${data.id}`;
+      if (typeof GravityWellEffect !== 'undefined') {
+        GravityWellEffect.setPhase(wellId, 'end');
+      }
+      if (typeof AudioManager !== 'undefined' &&
+          typeof AudioManager.stopLoop === 'function') {
+        AudioManager.stopLoop(wellId);
+      }
+    }
 
     // Now remove the NPC
     Entities.removeNPC(data.id);
+  });
+
+  // Visibility retirement is not a death/despawn. Remove the stale local
+  // prediction silently; a later re-entry will arrive as a fresh full state.
+  socket.on('npc:leave', (data) => {
+    if (!data || typeof data.id !== 'string') return;
+    retireNpcVisibility(data.id);
   });
 
   // Swarm Queen spawning minions
@@ -256,16 +359,18 @@ function register(socket) {
 
   // Swarm assimilation events
   socket.on('swarm:droneSacrifice', (data) => {
-    window.Logger.category('swarm', 'Drone sacrifice at', data.position);
+    const position = data.position || { x: data.x, y: data.y };
+    window.Logger.category('swarm', 'Drone sacrifice at', position);
 
-    if (typeof ParticleSystem !== 'undefined') {
+    if (typeof ParticleSystem !== 'undefined' &&
+        Number.isFinite(position?.x) && Number.isFinite(position?.y)) {
       // Red organic burst
       for (let i = 0; i < 15; i++) {
         const angle = (Math.PI * 2 * i) / 15 + Math.random() * 0.3;
         const speed = 30 + Math.random() * 60;
         ParticleSystem.spawn({
-          x: data.position.x,
-          y: data.position.y,
+          x: position.x,
+          y: position.y,
           vx: Math.cos(angle) * speed,
           vy: Math.sin(angle) * speed,
           life: 300 + Math.random() * 200,
@@ -281,8 +386,8 @@ function register(socket) {
       for (let i = 0; i < 8; i++) {
         const angle = Math.random() * Math.PI * 2;
         ParticleSystem.spawn({
-          x: data.position.x,
-          y: data.position.y,
+          x: position.x,
+          y: position.y,
           vx: Math.cos(angle) * 15,
           vy: Math.sin(angle) * 15,
           life: 500 + Math.random() * 300,
@@ -309,7 +414,7 @@ function register(socket) {
     }
 
     // Pulsing effect on base being assimilated
-    if (typeof ParticleSystem !== 'undefined') {
+    if (typeof ParticleSystem !== 'undefined' && data.position) {
       // Red pulse ring around base
       for (let i = 0; i < 12; i++) {
         const angle = (Math.PI * 2 * i) / 12;
@@ -340,6 +445,38 @@ function register(socket) {
         base.type = data.newType;
         base.faction = 'swarm';
         base.assimilationProgress = null; // Clear progress
+      }
+
+      // Conversion is an authoritative identity transition, not a later spawn.
+      // Apply the complete server snapshot immediately and retire presentation
+      // owned by the previous faction (especially per-NPC Void rifts).
+      for (const conversion of Array.isArray(data.convertedNpcs)
+        ? data.convertedNpcs
+        : []) {
+        const npcId = conversion?.id || conversion?.npcId;
+        if (typeof npcId !== 'string' ||
+            !Number.isFinite(conversion.x) ||
+            !Number.isFinite(conversion.y)) {
+          continue;
+        }
+
+        const existingNpc = Entities.npcs.get(npcId);
+        if (conversion.oldFaction === 'void' && existingNpc?.faction !== 'void') {
+          clearPersistentVoidNpcEffects(npcId, conversion.oldType);
+        }
+        applyAuthoritativeNpcState({
+          ...conversion,
+          id: npcId,
+          type: conversion.type || conversion.newType,
+          faction: conversion.faction || 'swarm'
+        });
+
+        const convertedNpc = Entities.npcs.get(npcId);
+        if (convertedNpc) {
+          convertedNpc.formationLeader = false;
+          convertedNpc.isFormationLeader = false;
+          delete convertedNpc.formationId;
+        }
       }
     }
 
@@ -400,6 +537,10 @@ function register(socket) {
   socket.on('swarm:queenSpawn', (data) => {
     window.Logger.category('swarm', 'Queen has emerged at', data.x, data.y);
 
+    if (typeof QueenVisuals !== 'undefined' && QueenVisuals.setQueenPhase) {
+      QueenVisuals.setQueenPhase(data.id, 'HUNT');
+    }
+
     // Massive visual effect for queen emergence
     if (typeof ParticleSystem !== 'undefined') {
       // Crimson vortex effect
@@ -453,6 +594,13 @@ function register(socket) {
 
   socket.on('swarm:queenDeath', (data) => {
     window.Logger.category('swarm', 'Queen destroyed!');
+
+    if (typeof Entities !== 'undefined') {
+      Entities.removeNPC(data.id);
+    }
+    if (typeof QueenVisuals !== 'undefined' && QueenVisuals.clearQueen) {
+      QueenVisuals.clearQueen(data.id);
+    }
 
     // Play epic queen death sound
     if (typeof AudioManager !== 'undefined' && AudioManager.isReady && AudioManager.isReady()) {
@@ -644,6 +792,15 @@ function register(socket) {
   socket.on('queen:phaseChange', (data) => {
     window.Logger.category('swarm', 'Queen phase changed to:', data.phase);
 
+    const queen = typeof Entities !== 'undefined'
+      ? Entities.npcs.get(data.queenId)
+      : null;
+    const previousPhase = data.fromPhase || queen?.phaseManager?.currentPhase || 'HUNT';
+    if (queen) {
+      queen.phaseManager = queen.phaseManager || {};
+      queen.phaseManager.currentPhase = data.phase;
+    }
+
     // Play phase change sound
     if (typeof AudioManager !== 'undefined' && AudioManager.isReady && AudioManager.isReady()) {
       const phaseMap = {
@@ -658,7 +815,10 @@ function register(socket) {
 
     // Trigger phase transition visual at queen location
     if (typeof QueenVisuals !== 'undefined' && QueenVisuals.triggerPhaseTransition) {
-      QueenVisuals.triggerPhaseTransition(data.x, data.y, data.phase);
+      QueenVisuals.triggerPhaseTransition(data.queenId, data.x, data.y, {
+        from: previousPhase,
+        to: data.phase
+      });
     } else if (typeof ParticleSystem !== 'undefined') {
       // Fallback shockwave effect
       const phaseColors = {
@@ -851,6 +1011,11 @@ function register(socket) {
   });
 
   socket.on('base:destroyed', (data) => {
+    const visualBaseType = typeof data.baseType === 'string' &&
+      data.baseType.startsWith('assimilated_')
+      ? 'swarm_hive'
+      : data.baseType;
+
     // Play faction-specific base destruction sound (8-second sequences)
     if (typeof AudioManager !== 'undefined' && AudioManager.isReady && AudioManager.isReady()) {
       const baseSoundMap = {
@@ -860,7 +1025,7 @@ function register(socket) {
         'void_rift': 'base_destruction_void',
         'mining_claim': 'base_destruction_mining'
       };
-      const soundId = baseSoundMap[data.baseType] || 'base_destruction';
+      const soundId = baseSoundMap[visualBaseType] || 'base_destruction';
       AudioManager.playAt(soundId, data.x || 0, data.y || 0);
     }
 
@@ -881,7 +1046,7 @@ function register(socket) {
       BaseDestructionSequence.trigger(
         data.x || 0,
         data.y || 0,
-        data.baseType || 'pirate_outpost',
+        visualBaseType || 'pirate_outpost',
         data.size || 80
       );
     } else if (typeof ParticleSystem !== 'undefined') {
@@ -917,6 +1082,13 @@ function register(socket) {
   socket.on('bases:nearby', (bases) => {
     if (typeof Entities !== 'undefined') {
       Entities.updateBases(bases);
+    }
+  });
+
+  socket.on('relic:strategicContacts', (contacts) => {
+    if (typeof RadarEntities !== 'undefined' &&
+        typeof RadarEntities.setStrategicContacts === 'function') {
+      RadarEntities.setStrategicContacts(contacts);
     }
   });
 
@@ -1055,7 +1227,7 @@ function register(socket) {
     // Mark raging guards with visual indicator
     if (typeof Entities !== 'undefined' && data.ragingGuards) {
       for (const guard of data.ragingGuards) {
-        const npc = Entities.npcs.get(guard.npcId);
+        const npc = Entities.npcs.get(guard.id);
         if (npc) {
           npc.isEnraged = true;
           npc.enrageExpires = Date.now() + (data.rageDuration || 10000);
@@ -1106,23 +1278,32 @@ function register(socket) {
   // Void Leviathan gravity well ability
   socket.on('void:gravityWell', (data) => {
     Logger.log('Gravity well:', data.phase, 'at', data.position);
+    const leviathanId = data.leviathanId ?? data.npcId;
+    const wellId = `gravity_well_${leviathanId}`;
 
     if (typeof GravityWellEffect !== 'undefined') {
-      const wellId = `gravity_well_${data.npcId}`;
       if (data.phase === 'warning') {
         GravityWellEffect.create(wellId, data.position.x, data.position.y, 'warning', data.radius);
-        // Play warning sound
-        if (typeof AudioManager !== 'undefined' && AudioManager.isReady && AudioManager.isReady()) {
-          AudioManager.playAt('void_gravity_warning', data.position.x, data.position.y);
-        }
       } else if (data.phase === 'active') {
         GravityWellEffect.setPhase(wellId, 'active');
-        // Play active vortex sound
-        if (typeof AudioManager !== 'undefined' && AudioManager.isReady && AudioManager.isReady()) {
-          AudioManager.playAt('void_gravity_active', data.position.x, data.position.y);
-        }
       } else if (data.phase === 'end') {
         GravityWellEffect.setPhase(wellId, 'end');
+      }
+    }
+
+    // Audio lifecycle is independent from rendering and readiness. The manager
+    // records one semantic loop per Leviathan and restores only live wells.
+    if (typeof AudioManager !== 'undefined') {
+      if (data.phase === 'warning' && typeof AudioManager.playAt === 'function') {
+        AudioManager.playAt('void_gravity_warning', data.position.x, data.position.y);
+      } else if (data.phase === 'active' && typeof AudioManager.startLoop === 'function') {
+        AudioManager.startLoop(
+          'void_gravity_active',
+          { x: data.position.x, y: data.position.y },
+          wellId
+        );
+      } else if (data.phase === 'end' && typeof AudioManager.stopLoop === 'function') {
+        AudioManager.stopLoop(wellId);
       }
     }
   });
@@ -1159,18 +1340,14 @@ function register(socket) {
   socket.on('void:spawnMinions', (data) => {
     Logger.log('Void minion spawn:', data.riftCount, 'rifts at', data.position);
 
-    // Create rift portals around the spawn position
+    // Render the exact portals selected by the authoritative server. Choosing
+    // a second random ring here makes the warning disagree with the spawn.
     if (typeof VoidEffects !== 'undefined') {
-      const riftPositions = [];
-      for (let i = 0; i < data.riftCount; i++) {
-        const angle = (i / data.riftCount) * Math.PI * 2;
-        const radius = 80 + Math.random() * 40;
-        riftPositions.push({
-          x: data.position.x + Math.cos(angle) * radius,
-          y: data.position.y + Math.sin(angle) * radius
-        });
-      }
-      VoidEffects.spawnMinions(riftPositions);
+      const riftPositions = Array.isArray(data.riftPositions)
+        ? data.riftPositions.filter(position =>
+          Number.isFinite(position?.x) && Number.isFinite(position?.y))
+        : [];
+      if (riftPositions.length > 0) VoidEffects.spawnMinions(riftPositions);
     }
 
     // Play rift opening sound
@@ -1196,6 +1373,9 @@ function register(socket) {
     // Remove NPC after rift animation completes (1 second)
     setTimeout(() => {
       Entities.removeNPC(data.npcId);
+      if (typeof VoidParticles !== 'undefined') {
+        VoidParticles.removeNPC(data.npcId);
+      }
     }, 1000);
   });
 
@@ -1354,8 +1534,8 @@ function register(socket) {
 
 // Export for use in Network module
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { register };
+  module.exports = { register, retireNpcVisibility };
 } else {
   window.NetworkHandlers = window.NetworkHandlers || {};
-  window.NetworkHandlers.npc = { register };
+  window.NetworkHandlers.npc = { register, retireNpcVisibility };
 }

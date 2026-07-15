@@ -8,47 +8,119 @@ const ShipUpgradePanel = {
   inventory: {},
   credits: 0,
   isUpgrading: false,
+  isAwaitingInventorySync: false,
+  isAwaitingFullSync: false,
+  isVisible: false,
+  lastError: null,
+  _upgradeTimeoutId: null,
+  _errorTimeoutId: null,
 
-  // Component display info
+  // Component display info. Every value is derived from the same shared
+  // constants used by the authoritative server; keep presentation math here
+  // free of independent balance constants.
   COMPONENT_INFO: {
     engine: {
       name: 'Engine',
-      description: 'Increases ship speed and maneuverability',
-      stats: (tier) => ({
-        'Max Speed': { value: `${(100 * Math.pow(1.5, tier - 1)).toFixed(0)}%`, change: tier < 5 ? '+50%' : null },
-        'Acceleration': { value: `${(100 * Math.pow(1.3, tier - 1)).toFixed(0)}%`, change: tier < 5 ? '+30%' : null }
-      })
+      description: 'Increases maximum flight speed',
+      stats: (tier) => {
+        const config = window.CONSTANTS || {};
+        const multiplier = config.TIER_MULTIPLIER || 1;
+        const currentScale = Math.pow(multiplier, tier - 1);
+        const nextScale = Math.pow(multiplier, tier);
+        const currentSpeed = (config.BASE_SPEED || 0) * currentScale;
+        const nextSpeed = (config.BASE_SPEED || 0) * nextScale;
+        return {
+          'Max Speed': {
+            value: `${currentSpeed.toFixed(0)} u/s`,
+            change: tier < (config.MAX_TIER || 5) ? `+${(nextSpeed - currentSpeed).toFixed(0)} u/s` : null
+          },
+          'Speed Multiplier': {
+            value: `${currentScale.toFixed(2)}x`,
+            change: tier < (config.MAX_TIER || 5) ? `+${(nextScale - currentScale).toFixed(2)}x` : null
+          }
+        };
+      }
     },
     weapon: {
       name: 'Weapons',
-      description: 'Increases weapon damage and range',
-      stats: (tier) => ({
-        'Damage': { value: `${(10 * Math.pow(1.5, tier - 1)).toFixed(1)}`, change: tier < 5 ? '+50%' : null },
-        'Range': { value: `${(200 * Math.pow(1.5, tier - 1)).toFixed(0)}`, change: tier < 5 ? '+50%' : null },
-        'Cooldown': { value: `${(500 / Math.pow(1.5, tier - 1)).toFixed(0)}ms`, change: tier < 5 ? '-33%' : null }
-      })
+      description: 'Increases weapon damage, range, and fire rate',
+      stats: (tier) => {
+        const config = window.CONSTANTS || {};
+        const multiplier = config.TIER_MULTIPLIER || 1;
+        const maxTier = config.MAX_TIER || 5;
+        const currentDamage = (config.BASE_WEAPON_DAMAGE || 0) * Math.pow(multiplier, tier - 1);
+        const nextDamage = (config.BASE_WEAPON_DAMAGE || 0) * Math.pow(multiplier, tier);
+        const ranges = config.WEAPON_RANGES || [];
+        const currentRange = ranges[tier] || (config.BASE_WEAPON_RANGE || 0) * Math.pow(multiplier, tier - 1);
+        const nextRange = ranges[tier + 1] || currentRange;
+        const currentCooldown = (config.BASE_WEAPON_COOLDOWN || 0) / Math.pow(multiplier, tier - 1);
+        const nextCooldown = (config.BASE_WEAPON_COOLDOWN || 0) / Math.pow(multiplier, tier);
+        return {
+          'Damage': {
+            value: currentDamage.toFixed(1),
+            change: tier < maxTier ? `+${(nextDamage - currentDamage).toFixed(1)}` : null
+          },
+          'Range': {
+            value: `${currentRange.toFixed(0)} units`,
+            change: tier < maxTier && nextRange !== currentRange ? `+${(nextRange - currentRange).toFixed(0)}` : null
+          },
+          'Base Cooldown': {
+            value: `${currentCooldown.toFixed(0)}ms`,
+            change: tier < maxTier ? `-${(currentCooldown - nextCooldown).toFixed(0)}ms` : null
+          }
+        };
+      }
     },
     shield: {
       name: 'Shields',
-      description: 'Increases shield capacity and recharge rate',
-      stats: (tier) => ({
-        'Capacity': { value: `${(50 * Math.pow(1.5, tier - 1)).toFixed(0)} HP`, change: tier < 5 ? '+50%' : null },
-        'Recharge': { value: `${(5 * Math.pow(1.3, tier - 1)).toFixed(1)} HP/s`, change: tier < 5 ? '+30%' : null }
-      })
+      description: 'Increases maximum shield capacity',
+      stats: (tier) => {
+        const config = window.CONSTANTS || {};
+        const multiplier = config.SHIELD_TIER_MULTIPLIER || 1;
+        const current = (config.DEFAULT_SHIELD_HP || 0) * Math.pow(multiplier, tier - 1);
+        const next = (config.DEFAULT_SHIELD_HP || 0) * Math.pow(multiplier, tier);
+        return {
+          'Capacity': {
+            value: `${current.toFixed(0)} HP`,
+            change: tier < (config.MAX_TIER || 5) ? `+${(next - current).toFixed(0)} HP` : null
+          }
+        };
+      }
     },
     mining: {
       name: 'Mining Beam',
       description: 'Increases mining speed and yield',
-      stats: (tier) => ({
-        'Mining Speed': { value: `${(100 * Math.pow(1.4, tier - 1)).toFixed(0)}%`, change: tier < 5 ? '+40%' : null },
-        'Yield Bonus': { value: `+${((tier - 1) * 10)}%`, change: tier < 5 ? '+10%' : null }
-      })
+      stats: (tier) => {
+        const config = window.CONSTANTS || {};
+        const multiplier = config.TIER_MULTIPLIER || 1;
+        const maxTier = config.MAX_TIER || 5;
+        const currentScale = Math.pow(multiplier, tier - 1);
+        const nextScale = Math.pow(multiplier, tier);
+        const currentTime = (config.BASE_MINING_TIME || 0) / currentScale;
+        const nextTime = (config.BASE_MINING_TIME || 0) / nextScale;
+        const currentYield = Math.max(1, Math.floor(
+          config.MINING_YIELD_BY_TIER?.[tier] || config.BASE_MINING_YIELD || 1
+        ));
+        const nextYield = Math.max(1, Math.floor(
+          config.MINING_YIELD_BY_TIER?.[tier + 1] || currentYield
+        ));
+        return {
+          'Cycle Time': {
+            value: `${(currentTime / 1000).toFixed(2)}s`,
+            change: tier < maxTier ? `-${((currentTime - nextTime) / 1000).toFixed(2)}s` : null
+          },
+          'Yield': {
+            value: `${currentYield} unit${currentYield === 1 ? '' : 's'}`,
+            change: tier < maxTier && nextYield !== currentYield ? `+${nextYield - currentYield}` : null
+          }
+        };
+      }
     },
     cargo: {
       name: 'Cargo Hold',
       description: 'Increases cargo capacity',
       stats: (tier) => {
-        const capacities = [0, 100, 250, 500, 750, 2000];
+        const capacities = window.CONSTANTS?.CARGO_CAPACITY || [];
         const current = capacities[tier];
         const next = capacities[tier + 1];
         const change = next ? `+${next - current}` : null;
@@ -59,39 +131,101 @@ const ShipUpgradePanel = {
     },
     radar: {
       name: 'Radar',
-      description: 'Increases detection range and target tracking',
-      stats: (tier) => ({
-        'Range': { value: `${(500 * Math.pow(1.5, tier - 1)).toFixed(0)} units`, change: tier < 5 ? '+50%' : null },
-        'Tracking': { value: `${tier * 2} targets`, change: tier < 5 ? '+2' : null }
-      })
+      description: 'Increases detection range and unlocks tactical overlays',
+      stats: (tier) => {
+        const config = window.CONSTANTS || {};
+        const currentTier = config.RADAR_TIERS?.[tier] || {};
+        const nextTier = config.RADAR_TIERS?.[tier + 1];
+        const fallbackRange = (config.BASE_RADAR_RANGE || 0) * Math.pow(config.TIER_MULTIPLIER || 1, tier - 1);
+        const currentRange = currentTier.range || fallbackRange;
+        return {
+          'Range': {
+            value: `${currentRange.toFixed(0)} units`,
+            change: nextTier ? `+${(nextTier.range - currentRange).toFixed(0)}` : null
+          },
+          'Radar Mode': {
+            value: currentTier.description || `Tier ${tier}`,
+            change: null
+          }
+        };
+      }
     },
     energy_core: {
       name: 'Energy Core',
       description: 'Reduces cooldowns, boosts shield regen, enables thrust boost',
       stats: (tier) => {
-        const cooldownReduction = [0, 5, 10, 15, 20, 25][tier];
-        const shieldBonus = [0, 0.5, 1.0, 1.5, 2.0, 2.5][tier];
-        const boostDuration = [0, 1.0, 1.25, 1.5, 1.75, 2.0][tier];
-        const boostCooldown = [0, 15, 13, 11, 9, 7][tier];
+        const config = window.CONSTANTS || {};
+        const energy = config.ENERGY_CORE || {};
+        const boost = energy.BOOST || {};
+        const nextTier = Math.min(tier + 1, config.MAX_TIER || 5);
+        const cooldownReduction = energy.COOLDOWN_REDUCTION?.[tier] || 0;
+        const nextCooldownReduction = energy.COOLDOWN_REDUCTION?.[nextTier] || cooldownReduction;
+        const shieldBonus = energy.SHIELD_REGEN_BONUS?.[tier] || 0;
+        const nextShieldBonus = energy.SHIELD_REGEN_BONUS?.[nextTier] ?? shieldBonus;
+        const boostDuration = boost.DURATION?.[tier] || 0;
+        const nextBoostDuration = boost.DURATION?.[nextTier] ?? boostDuration;
+        const speedMultiplier = boost.SPEED_MULTIPLIER?.[tier] || 1;
+        const nextSpeedMultiplier = boost.SPEED_MULTIPLIER?.[nextTier] ?? speedMultiplier;
+        const boostCooldown = boost.COOLDOWN?.[tier] || 0;
+        const nextBoostCooldown = boost.COOLDOWN?.[nextTier] ?? boostCooldown;
+        const canUpgrade = tier < (config.MAX_TIER || 5);
         return {
-          'Cooldown Reduction': { value: `-${cooldownReduction}%`, change: tier < 5 ? '-5%' : null },
-          'Shield Regen': { value: `+${shieldBonus.toFixed(1)} HP/s`, change: tier < 5 ? '+0.5' : null },
-          'Boost Duration': { value: `${boostDuration.toFixed(2)}s`, change: tier < 5 ? '+0.25s' : null },
-          'Boost Cooldown': { value: `${boostCooldown}s`, change: tier < 5 ? '-2s' : null }
+          'Cooldown Reduction': {
+            value: `-${(cooldownReduction * 100).toFixed(0)}%`,
+            change: canUpgrade ? `-${((nextCooldownReduction - cooldownReduction) * 100).toFixed(0)}%` : null
+          },
+          'Shield Regen': {
+            value: `+${shieldBonus.toFixed(1)} HP/s`,
+            change: canUpgrade ? `+${(nextShieldBonus - shieldBonus).toFixed(1)}` : null
+          },
+          'Boost Duration': {
+            value: `${(boostDuration / 1000).toFixed(2)}s`,
+            change: canUpgrade ? `+${((nextBoostDuration - boostDuration) / 1000).toFixed(2)}s` : null
+          },
+          'Boost Speed': {
+            value: `${speedMultiplier.toFixed(1)}x`,
+            change: canUpgrade && nextSpeedMultiplier !== speedMultiplier ? `+${(nextSpeedMultiplier - speedMultiplier).toFixed(1)}x` : null
+          },
+          'Boost Cooldown': {
+            value: `${(boostCooldown / 1000).toFixed(0)}s`,
+            change: canUpgrade ? `-${((boostCooldown - nextBoostCooldown) / 1000).toFixed(0)}s` : null
+          }
         };
       }
     },
     hull: {
       name: 'Hull',
-      description: 'Increases damage resistance against all weapon types',
+      description: 'Increases hull integrity and damage resistance',
       stats: (tier) => {
-        const kinetic = [0, 5, 10, 15, 20, 25][tier];
-        const energy = [0, 8, 15, 22, 28, 35][tier];
-        const explosive = [0, 3, 6, 9, 12, 15][tier];
+        const config = window.CONSTANTS || {};
+        const multiplier = config.TIER_MULTIPLIER || 1;
+        const nextTier = Math.min(tier + 1, config.MAX_TIER || 5);
+        const maxHull = (config.DEFAULT_HULL_HP || 0) * Math.pow(multiplier, tier - 1);
+        const nextMaxHull = (config.DEFAULT_HULL_HP || 0) * Math.pow(multiplier, tier);
+        const kinetic = config.HULL?.KINETIC_RESIST?.[tier] || 0;
+        const energy = config.HULL?.ENERGY_RESIST?.[tier] || 0;
+        const explosive = config.HULL?.EXPLOSIVE_RESIST?.[tier] || 0;
+        const nextKinetic = config.HULL?.KINETIC_RESIST?.[nextTier] ?? kinetic;
+        const nextEnergy = config.HULL?.ENERGY_RESIST?.[nextTier] ?? energy;
+        const nextExplosive = config.HULL?.EXPLOSIVE_RESIST?.[nextTier] ?? explosive;
+        const canUpgrade = tier < (config.MAX_TIER || 5);
         return {
-          'Kinetic Resist': { value: `${kinetic}%`, change: tier < 5 ? '+5%' : null },
-          'Energy Resist': { value: `${energy}%`, change: tier < 5 ? '+7%' : null },
-          'Explosive Resist': { value: `${explosive}%`, change: tier < 5 ? '+3%' : null }
+          'Hull Integrity': {
+            value: `${maxHull.toFixed(0)} HP`,
+            change: canUpgrade ? `+${(nextMaxHull - maxHull).toFixed(0)} HP` : null
+          },
+          'Kinetic Resist': {
+            value: `${(kinetic * 100).toFixed(0)}%`,
+            change: canUpgrade ? `+${((nextKinetic - kinetic) * 100).toFixed(0)}%` : null
+          },
+          'Energy Resist': {
+            value: `${(energy * 100).toFixed(0)}%`,
+            change: canUpgrade ? `+${((nextEnergy - energy) * 100).toFixed(0)}%` : null
+          },
+          'Explosive Resist': {
+            value: `${(explosive * 100).toFixed(0)}%`,
+            change: canUpgrade ? `+${((nextExplosive - explosive) * 100).toFixed(0)}%` : null
+          }
         };
       }
     }
@@ -100,6 +234,7 @@ const ShipUpgradePanel = {
   // Resource display names and icons
   RESOURCE_DISPLAY: {
     HYDROGEN: { name: 'Hydrogen', color: '#88ccff' },
+    NITROGEN: { name: 'Nitrogen', color: '#7aa7ff' },
     CARBON: { name: 'Carbon', color: '#555555' },
     IRON: { name: 'Iron', color: '#aa7744' },
     NICKEL: { name: 'Nickel', color: '#99aa88' },
@@ -132,15 +267,69 @@ const ShipUpgradePanel = {
    * @param {HTMLElement} container - Container element for the panel
    */
   init(container) {
+    this.reset({ render: false });
     this.container = container;
+    this.isVisible = false;
     this.render();
+  },
+
+  /**
+   * Clear all account-specific and in-flight upgrade state.
+   * The container is retained so the already-initialized terminal can be
+   * safely reused by a different authenticated account.
+   * @param {Object} options
+   * @param {boolean} options.render - Whether to immediately redraw the panel
+   */
+  reset({ render = true } = {}) {
+    if (this._upgradeTimeoutId) clearTimeout(this._upgradeTimeoutId);
+    if (this._errorTimeoutId) clearTimeout(this._errorTimeoutId);
+
+    this.selectedPart = 'engine';
+    this.shipData = null;
+    this.inventory = {};
+    this.credits = 0;
+    this.isUpgrading = false;
+    this.isAwaitingInventorySync = false;
+    this.isAwaitingFullSync = false;
+    this.lastError = null;
+    this._upgradeTimeoutId = null;
+    this._errorTimeoutId = null;
+
+    if (render) this.render();
+  },
+
+  /**
+   * Tie preview animation work to the terminal's visible Upgrades tab.
+   * The panel remains rendered while hidden so tab switches stay immediate,
+   * but it must not retain a background requestAnimationFrame loop.
+   * @param {boolean} visible
+   */
+  setVisible(visible) {
+    this.isVisible = !!visible;
+    if (!window.ShipPreviewCanvas) return;
+
+    if (this.isVisible && this.container?.querySelector('.ship-preview-canvas')) {
+      window.ShipPreviewCanvas.startAnimation();
+    } else {
+      window.ShipPreviewCanvas.stopAnimation();
+    }
   },
 
   /**
    * Update player data
    * @param {Object} data - { ship, inventory, credits }
+   * @param {Object} options
+   * @param {boolean} options.authoritativeInventory - Whether inventory came
+   *   directly from a server snapshot.
+   * @param {boolean} options.authoritativeShip - Whether ship tiers and the
+   *   inventory came from the same complete server snapshot. Inventory-only
+   *   events cannot resolve a timeout/error whose commit outcome is unknown.
    */
-  updateData(data) {
+  updateData(data = {}, {
+    authoritativeInventory = false,
+    authoritativeShip = false
+  } = {}) {
+    const requiredFullSync = this.isAwaitingFullSync;
     if (data.ship) {
       this.shipData = {
         engineTier: data.ship.engineTier || data.ship.engine_tier || 1,
@@ -154,11 +343,29 @@ const ShipUpgradePanel = {
         color: data.ship.color || '#00ffff'
       };
     }
-    if (data.inventory) {
-      this.inventory = {};
-      data.inventory.forEach(item => {
-        this.inventory[item.resource_type] = item.quantity;
-      });
+    if (Object.prototype.hasOwnProperty.call(data, 'inventory')) {
+      // A terminal refresh may supply cached Player data while an
+      // authoritative request is outstanding. Keep the last display values,
+      // but do not treat that cache as proof that an upgrade is affordable.
+      if (!this.isAwaitingInventorySync || authoritativeInventory) {
+        this.inventory = {};
+        if (Array.isArray(data.inventory)) {
+          data.inventory.forEach(item => {
+            if (!item || typeof item.resource_type !== 'string') return;
+            this.inventory[item.resource_type] = Number(item.quantity) || 0;
+          });
+        } else if (data.inventory && typeof data.inventory === 'object') {
+          for (const [resource, quantity] of Object.entries(data.inventory)) {
+            this.inventory[resource] = Number(quantity) || 0;
+          }
+        }
+      }
+      if (authoritativeInventory && (!requiredFullSync || authoritativeShip)) {
+        this.isAwaitingInventorySync = false;
+      }
+    }
+    if (authoritativeShip && authoritativeInventory) {
+      this.isAwaitingFullSync = false;
     }
     if (typeof data.credits === 'number') {
       this.credits = data.credits;
@@ -212,8 +419,18 @@ const ShipUpgradePanel = {
    * @returns {Object} { canAfford, missingCredits, missingResources }
    */
   checkAffordability(partKey) {
+    if (this.isUpgrading || this.isAwaitingInventorySync || this.isAwaitingFullSync) {
+      return {
+        canAfford: false,
+        synchronizing: true,
+        missingCredits: 0,
+        missingResources: []
+      };
+    }
+
     const currentTier = this.getTier(partKey);
-    if (currentTier >= 5) {
+    const maxTier = window.CONSTANTS?.MAX_TIER || 5;
+    if (currentTier >= maxTier) {
       return { canAfford: false, maxTier: true };
     }
 
@@ -263,7 +480,12 @@ const ShipUpgradePanel = {
     if (!affordability.canAfford) return;
 
     this.isUpgrading = true;
+    this.isAwaitingFullSync = false;
     this.render();
+    if (typeof HUD !== 'undefined' &&
+        typeof HUD.updateUpgradeIndicator === 'function') {
+      HUD.updateUpgradeIndicator();
+    }
 
     // Send upgrade request via socket
     if (typeof Network !== 'undefined' && Network.socket) {
@@ -271,7 +493,13 @@ const ShipUpgradePanel = {
     } else {
       Logger.error('[UPGRADE] Network.socket is undefined!');
       this.isUpgrading = false;
+      this.isAwaitingInventorySync = true;
+      this.isAwaitingFullSync = true;
       this.render();
+      if (typeof HUD !== 'undefined' &&
+          typeof HUD.updateUpgradeIndicator === 'function') {
+        HUD.updateUpgradeIndicator();
+      }
       if (typeof NotificationManager !== 'undefined') {
         NotificationManager.error('Connection error. Please refresh the page.');
       }
@@ -282,10 +510,26 @@ const ShipUpgradePanel = {
     this._upgradeTimeoutId = setTimeout(() => {
       if (this.isUpgrading) {
         this.isUpgrading = false;
+        // The request may have committed even if its response was delayed or
+        // lost. Fail closed until a complete server snapshot proves the current
+        // tier, credits, and consumed resources.
+        this.isAwaitingInventorySync = true;
+        this.isAwaitingFullSync = true;
+        this._upgradeTimeoutId = null;
         this.render();
+        if (typeof Network !== 'undefined' &&
+            typeof Network.requestShipData === 'function') {
+          Network.requestShipData();
+        } else if (typeof Network !== 'undefined' && Network.socket) {
+          Network.socket.emit('ship:getData');
+        }
+        if (typeof HUD !== 'undefined' &&
+            typeof HUD.updateUpgradeIndicator === 'function') {
+          HUD.updateUpgradeIndicator();
+        }
         // Show error notification if no response was received
         if (typeof NotificationManager !== 'undefined') {
-          NotificationManager.error('Upgrade request timed out. Please try again.');
+          NotificationManager.error('Upgrade request timed out. Synchronizing ship data...');
         }
       }
     }, 5000);
@@ -295,12 +539,14 @@ const ShipUpgradePanel = {
    * Handle successful upgrade
    * @param {Object} data - Upgrade result from server
    */
-  onUpgradeSuccess(data) {
+  onUpgradeSuccess(data, { awaitingInventory = true } = {}) {
     if (this._upgradeTimeoutId) {
       clearTimeout(this._upgradeTimeoutId);
       this._upgradeTimeoutId = null;
     }
     this.isUpgrading = false;
+    this.isAwaitingFullSync = false;
+    this.isAwaitingInventorySync = awaitingInventory;
 
     // Play upgrade success sound
     if (typeof AudioManager !== 'undefined') {
@@ -328,6 +574,11 @@ const ShipUpgradePanel = {
       this._upgradeTimeoutId = null;
     }
     this.isUpgrading = false;
+    // The server rejected a request that the client believed was affordable.
+    // Require one complete ship/inventory snapshot before advertising another
+    // purchase; an inventory-only event cannot prove which tier is current.
+    this.isAwaitingInventorySync = true;
+    this.isAwaitingFullSync = true;
     this.lastError = error;
 
     // Play upgrade failed sound
@@ -338,8 +589,10 @@ const ShipUpgradePanel = {
     this.render();
 
     // Clear error after a few seconds
-    setTimeout(() => {
+    if (this._errorTimeoutId) clearTimeout(this._errorTimeoutId);
+    this._errorTimeoutId = setTimeout(() => {
       this.lastError = null;
+      this._errorTimeoutId = null;
       this.render();
     }, 3000);
   },
@@ -368,7 +621,12 @@ const ShipUpgradePanel = {
       if (this.shipData) {
         window.ShipPreviewCanvas.updateShipData(this.shipData);
       }
-      window.ShipPreviewCanvas.startAnimation();
+      if (this.isVisible) {
+        window.ShipPreviewCanvas.startAnimation();
+      } else {
+        window.ShipPreviewCanvas.stopAnimation();
+        window.ShipPreviewCanvas.render();
+      }
     }
 
     // Render part icons with ShipPartShape
@@ -558,14 +816,19 @@ const ShipUpgradePanel = {
     }
 
     const affordability = this.checkAffordability(part);
-    const canUpgrade = affordability.canAfford && !this.isUpgrading;
+    const canUpgrade = affordability.canAfford &&
+      !this.isUpgrading &&
+      !this.isAwaitingInventorySync &&
+      !this.isAwaitingFullSync;
 
-    if (this.isUpgrading) {
+    if (this.isUpgrading || this.isAwaitingInventorySync || this.isAwaitingFullSync) {
       return `
         <button class="upgrade-button unavailable" disabled>
-          <div class="upgrade-loading">
-            <div class="upgrade-loading-spinner"></div>
-          </div>
+          ${this.isUpgrading ? `
+            <div class="upgrade-loading">
+              <div class="upgrade-loading-spinner"></div>
+            </div>
+          ` : 'SYNCING...'}
         </button>
       `;
     }
@@ -598,11 +861,13 @@ const ShipUpgradePanel = {
    * Clean up resources
    */
   destroy() {
+    this.isVisible = false;
     if (window.ShipPreviewCanvas) {
       window.ShipPreviewCanvas.stopAnimation();
       window.ShipPreviewCanvas.destroy();
     }
     this.container = null;
+    this.reset({ render: false });
   }
 };
 

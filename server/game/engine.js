@@ -5,11 +5,52 @@ const npc = require('./npc');
 const combat = require('./combat');
 const mining = require('./mining');
 const loot = require('./loot');
+const wormhole = require('./wormhole');
 const world = require('../world');
 const starDamage = require('./star-damage');
+const { statements } = require('../database');
+const {
+  playerHasRelic,
+  calculateFactionDamage
+} = require('./relic-effects');
+const { createNpcDelta } = require('./npc-delta');
+const { getNpcDamageMultiplier } = require('./npc-combat-modifiers');
+const {
+  getNpcCandidateRange,
+  getNpcDeliveryRange,
+  getNpcEngagementRange
+} = require('./npc-visibility');
+const {
+  createNpcSpawnPayload,
+  createRogueMinerRageEvent,
+  createConsumedNpcDestroyedPayload,
+  createVoidMinionRiftPositions
+} = require('./npc-event-payloads');
 const logger = require('../../shared/logger');
 const Physics = require('../../shared/physics');
+const { getRadarRange } = require('../../shared/utils');
 const SpatialHash = require('./spatial-hash');
+const aiSystem = require('./ai');
+const { getSwarmStrategy, getFormationStrategy } = aiSystem;
+// Keep engine-focused test doubles and older embedders compatible; production
+// AI exports the explicit retention contract.
+const getPlayerTargetRetentionRange =
+  typeof aiSystem.getPlayerTargetRetentionRange === 'function'
+    ? aiSystem.getPlayerTargetRetentionRange
+    : () => 0;
+const clearRetainedPlayerTarget =
+  typeof aiSystem.clearRetainedPlayerTarget === 'function'
+    ? aiSystem.clearRetainedPlayerTarget
+    : () => false;
+const pruneMissingPlayerTargetState =
+  typeof aiSystem.pruneMissingPlayerTargetState === 'function'
+    ? aiSystem.pruneMissingPlayerTargetState
+    : () => 0;
+
+// Shared with the normal faction dispatcher so collective Swarm state is not
+// discarded and no support-strategy objects are allocated in the tick loop.
+const swarmSupportAI = getSwarmStrategy();
+const voidFormationAI = getFormationStrategy();
 
 let io = null;
 let connectedPlayers = null;
@@ -37,6 +78,7 @@ const playerSpatialHash = new SpatialHash(500); // 500 unit cells
 
 // Delta compression: track last NPC state sent to each player
 const playerLastSeen = new Map(); // socketId -> Map<npcId, { x, y, rotation, state, hull, shield, tick }>
+let lastRetainedCleanupPlayerSignature = null;
 
 // Full refresh interval (every 100 ticks = 5 seconds at 20 ticks/sec)
 const FULL_REFRESH_INTERVAL = 100;
@@ -96,7 +138,33 @@ function getSlowModifier(playerId) {
   if (!debuffs || !debuffs.slow || debuffs.slow.expiresAt <= Date.now()) {
     return 1.0;
   }
-  return 1.0 - debuffs.slow.percent;
+  const percent = Number(debuffs.slow.percent);
+  if (!Number.isFinite(percent)) return 1.0;
+  return 1.0 - Math.max(0, Math.min(0.9, percent));
+}
+
+function getPlayerDebuffSnapshot(playerId) {
+  const debuffs = activeDebuffs.get(playerId);
+  const now = Date.now();
+  if (!debuffs?.slow || debuffs.slow.expiresAt <= now) return {};
+  const percent = Number(debuffs.slow.percent);
+  return {
+    slow: {
+      percent: Number.isFinite(percent) ? Math.max(0, Math.min(0.9, percent)) : 0,
+      expiresAt: debuffs.slow.expiresAt
+    }
+  };
+}
+
+/**
+ * Players choosing or traversing a wormhole are outside the simulated world
+ * and therefore cannot be selected for, or receive, any damage source.
+ */
+function canPlayerTakeDamage(player) {
+  const inTransit = player && typeof wormhole.isInTransit === 'function'
+    ? wormhole.isInTransit(player.id)
+    : false;
+  return Boolean(player && !player.isDead && !inTransit);
 }
 
 /**
@@ -157,11 +225,57 @@ function cleanupExpiredDebuffs() {
  * @returns {Object} Death result for event emission
  */
 function handlePlayerDeathWithWreckage(player, killedBy, socketId, killerInfo = {}) {
+  // A lethal source can be followed by another queued hit in the same tick.
+  // Claim the death synchronously before any database, loot, or socket work so
+  // every other authority gate observes the player as dead immediately.
+  if (!player || player.isDead) return null;
+
   // Get death position BEFORE any changes
   const deathPosition = { x: player.position.x, y: player.position.y };
 
-  // Handle death with position for wreckage (no longer respawns immediately)
-  const deathResult = combat.handleDeath(player.id, deathPosition);
+  player.isDead = true;
+  player.deathTime = Date.now();
+  player.deathPosition = deathPosition;
+  mining.cancelMining(player.id);
+  socketModule?.setPlayerStatus?.(player.id, 'idle');
+  if (typeof loot.cancelCollectionsForPlayer === 'function') {
+    loot.cancelCollectionsForPlayer(player.id);
+  }
+  activeDebuffs.delete(player.id);
+  wormhole.cleanupPlayer(player.id);
+
+  let deathResult;
+  try {
+    // Cargo and marketplace escrow settle in one database transaction.
+    deathResult = combat.handleDeath(player.id, deathPosition);
+  } catch (error) {
+    // The player must remain non-actionable even if persistence is temporarily
+    // unavailable. The transaction guarantees that cargo was not half-settled.
+    logger.error(`[DEATH] Failed to settle cargo for player ${player.id}:`, error);
+    let inventory = null;
+    try {
+      inventory = statements.getInventory.all(player.id);
+    } catch (snapshotError) {
+      logger.error(`[DEATH] Failed to read inventory snapshot for player ${player.id}:`, snapshotError);
+    }
+    deathResult = {
+      droppedCargo: [],
+      wreckageContents: [],
+      respawnOptions: {
+        type: 'graveyard',
+        message: 'Returning to The Graveyard...'
+      },
+      deathPosition,
+      playerName: player.username || 'Unknown',
+      marketplaceChanged: false,
+      // Settlement failed atomically, so the persisted inventory is unchanged.
+      // Include the best available authoritative snapshot rather than leaving
+      // affordability UI on an unknowable pre/post-death state.
+      inventory
+    };
+  }
+  player.respawnOptions = deathResult.respawnOptions;
+  let wreckageSpawned = false;
 
   // Spawn player wreckage if there's anything to drop
   if (deathResult.wreckageContents && deathResult.wreckageContents.length > 0) {
@@ -172,28 +286,35 @@ function handlePlayerDeathWithWreckage(player, killedBy, socketId, killerInfo = 
       creditReward: 0
     };
 
-    const wreckage = loot.spawnWreckage(
-      playerEntity,
-      deathPosition,
-      deathResult.wreckageContents,
-      null, // No damage contributors for player wreckage
-      { source: 'player', playerId: player.id }
-    );
+    try {
+      const wreckage = loot.spawnWreckage(
+        playerEntity,
+        deathPosition,
+        deathResult.wreckageContents,
+        null, // No damage contributors for player wreckage
+        { source: 'player', playerId: player.id }
+      );
 
-    // Broadcast wreckage spawn to nearby players
-    broadcastWreckageNear(wreckage, 'wreckage:spawn', {
-      id: wreckage.id,
-      x: wreckage.position.x,
-      y: wreckage.position.y,
-      size: wreckage.size,
-      source: wreckage.source,
-      faction: null,
-      npcType: 'player',
-      npcName: wreckage.npcName,
-      contents: wreckage.contents
-    });
+      if (wreckage) {
+        wreckageSpawned = true;
+        // Broadcast wreckage spawn to nearby players
+        broadcastWreckageNear(wreckage, 'wreckage:spawn', {
+          id: wreckage.id,
+          x: wreckage.position.x,
+          y: wreckage.position.y,
+          size: wreckage.size,
+          source: wreckage.source,
+          faction: null,
+          npcType: 'player',
+          npcName: wreckage.npcName,
+          contents: wreckage.contents
+        });
 
-    logger.log(`[WRECKAGE] Player ${player.id} death spawned wreckage ${wreckage.id} with ${wreckage.contents.length} items`);
+        logger.log(`[WRECKAGE] Player ${player.id} death spawned wreckage ${wreckage.id} with ${wreckage.contents.length} items`);
+      }
+    } catch (error) {
+      logger.error(`[DEATH] Failed to spawn wreckage for player ${player.id}:`, error);
+    }
   }
 
   // Emit death event with respawn OPTIONS (player chooses where to respawn)
@@ -204,21 +325,86 @@ function handlePlayerDeathWithWreckage(player, killedBy, socketId, killerInfo = 
     killerType: killerInfo.type || 'unknown',
     killerName: killerInfo.name || null,
     killerFaction: killerInfo.faction || null,
+    starId: killerInfo.starId || null,
     // Death position for replay/visualization
     deathPosition,
     // Cargo lost info
     droppedCargo: deathResult.droppedCargo,
-    wreckageSpawned: deathResult.wreckageContents && deathResult.wreckageContents.length > 0,
+    // Remaining cargo is authoritative. droppedCargo can include marketplace
+    // escrow and therefore cannot be subtracted safely on the client.
+    inventory: deathResult.inventory,
+    wreckageSpawned,
     // Respawn options for player to choose from
     respawnOptions: deathResult.respawnOptions
   });
 
-  // Mark player as dead - DON'T respawn immediately, wait for respawn:select event
-  player.isDead = true;
-  player.deathTime = Date.now();
-  player.deathPosition = deathPosition;
+  // The death screen is not an authoritative world observer. Retire every NPC
+  // the socket had seen and discard any update queued earlier in this tick so
+  // client dead reckoning cannot keep the last velocity moving indefinitely.
+  retireNpcVisibilityForSocket(socketId);
+
+  if (deathResult.marketplaceChanged) {
+    io.emit('market:update', { action: 'death_settlement' });
+  }
 
   return deathResult;
+}
+
+/**
+ * Resolve one player hit from a Queen acid burst. Keeping this in one path
+ * ensures lethal initial damage receives the same death/wreckage/action cleanup
+ * as every other NPC kill, and never installs a DoT on an already-dead player.
+ */
+function applyQueenAcidBurstDamage(npcEntity, action, socketId, player) {
+  if (!canPlayerTakeDamage(player)) return false;
+
+  const initialDamage = {
+    shieldDamage: action.damage * 0.5,
+    hullDamage: action.damage * 0.5
+  };
+  const result = combat.applyDamage(player.id, initialDamage);
+  if (!result) return false;
+
+  player.hull = result.hull;
+  player.shield = result.shield;
+
+  io.to(socketId).emit('player:damaged', {
+    attackerId: npcEntity.id,
+    attackerType: 'npc',
+    damage: action.damage,
+    hull: result.hull,
+    shield: result.shield,
+    damageType: 'acid'
+  });
+
+  if (result.isDead) {
+    handlePlayerDeathWithWreckage(player, npcEntity.name || 'Swarm Queen', socketId, {
+      cause: 'npc',
+      type: 'npc',
+      name: npcEntity.name || 'Swarm Queen',
+      faction: npcEntity.faction || 'swarm',
+      npcType: npcEntity.type || 'swarm_queen'
+    });
+    return true;
+  }
+
+  applyDebuff(player.id, 'dot', {
+    damage: action.dotDamage,
+    interval: action.dotInterval || 1000,
+    duration: action.dotDuration,
+    sourceId: npcEntity.id,
+    type: 'acid'
+  });
+
+  io.to(socketId).emit('player:debuff', {
+    type: 'dot',
+    dotType: 'acid',
+    damage: action.dotDamage,
+    duration: action.dotDuration,
+    source: 'swarm_queen'
+  });
+
+  return true;
 }
 
 // NPC Accuracy System Configuration
@@ -244,26 +430,297 @@ const NPC_ACCURACY = {
 // Throttle base radar broadcasts (every 500ms)
 let lastBaseBroadcastTime = 0;
 const BASE_BROADCAST_INTERVAL = 500;
+let lastBaseDiscoveryTime = 0;
+const BASE_DISCOVERY_INTERVAL = 500;
 
 // === ACTIVATION AND BROADCAST RANGES ===
-// Max tier 5 radar broadcast range: BASE_RADAR_RANGE * 1.5^4 * 2 = 500 * 5.0625 * 2 = ~5062
-const MAX_TIER_BROADCAST_RANGE = config.BASE_RADAR_RANGE *
-  Math.pow(config.TIER_MULTIPLIER, (config.MAX_TIER || 5) - 1) * 2;
+// Max-tier broadcast range is twice the explicit shared radar-tier range.
+// Base activation intentionally includes an additional loading margin, but
+// that server-side margin must never be used as a client synchronization range.
+const MAX_TIER_BROADCAST_RANGE = getRadarRange(config.MAX_TIER || 5) * 2;
 // Add margin for sector boundary smoothing
 const BASE_ACTIVATION_RANGE = Math.max(config.SECTOR_SIZE * 3, MAX_TIER_BROADCAST_RANGE + 500);
-const BASE_BROADCAST_RANGE = BASE_ACTIVATION_RANGE;
+
+function getPlayerRadarRange(player) {
+  const radarTier = Math.max(
+    1,
+    Math.min(config.MAX_TIER || 5, Math.floor(Number(player?.radarTier) || 1))
+  );
+  return getRadarRange(radarTier);
+}
 
 // Calculate broadcast range for a player based on their radar tier
 function getPlayerBroadcastRange(player) {
-  const radarTier = player.radarTier || 1;
-  const radarRange = config.BASE_RADAR_RANGE * Math.pow(config.TIER_MULTIPLIER, radarTier - 1);
-  return radarRange * 2;
+  return getPlayerRadarRange(player) * 2;
+}
+
+function getPlayerBaseActivationRange(player) {
+  const radarRange = getPlayerRadarRange(player);
+  const ownsStarMap = Array.isArray(player?.relicTypes) &&
+    player.relicTypes.includes('ANCIENT_STAR_MAP');
+  const effects = config.RELIC_TYPES?.ANCIENT_STAR_MAP?.effects || {};
+  const contactMultiplier = ownsStarMap
+    ? Math.max(1, Number(effects.strategicContactRangeMultiplier) || 2)
+    : 1;
+  return Math.max(
+    config.SECTOR_SIZE * 3,
+    // Base populations must stay loaded everywhere their ordinary NPC updates
+    // are deliverable, plus a margin that prevents boundary churn.
+    getPlayerBroadcastRange(player) + 500,
+    radarRange * contactMultiplier + 500
+  );
+}
+
+/**
+ * Keep NPC authority alive everywhere the player can legitimately receive or
+ * engage that NPC. Base activation intentionally extends beyond ordinary radar,
+ * so using a fixed +/-1 sector simulation window leaves live base populations
+ * frozen while their last client velocity continues to render.
+ */
+function getNpcSimulationRange(npcEntity, player) {
+  const targetRetentionRange = getPlayerTargetRetentionRange(npcEntity);
+  return Math.max(
+    getPlayerBaseActivationRange(player),
+    getNpcDeliveryRange(
+      npcEntity,
+      player,
+      getPlayerBroadcastRange(player),
+      targetRetentionRange
+    ),
+    getNpcEngagementRange(npcEntity)
+  );
+}
+
+function shouldSimulateNpc(npcEntity, players) {
+  if (!npcEntity?.position || !Number.isFinite(npcEntity.position.x) ||
+      !Number.isFinite(npcEntity.position.y)) {
+    return false;
+  }
+
+  const retentionRange = getPlayerTargetRetentionRange(npcEntity);
+  const retainedTargetId = retentionRange > 0 &&
+    npcEntity.targetPlayer !== null && npcEntity.targetPlayer !== undefined
+    ? String(npcEntity.targetPlayer)
+    : null;
+
+  return players.some(player => {
+    // Run one authoritative cleanup tick even when a retained target has moved
+    // beyond both its strategy limit and the normal simulation radius. The AI
+    // filter will omit it and the owning strategy will clear its rage/raid map.
+    if (retainedTargetId !== null && String(player?.id) === retainedTargetId) {
+      return true;
+    }
+    const range = getNpcSimulationRange(npcEntity, player);
+    const dx = player.position.x - npcEntity.position.x;
+    const dy = player.position.y - npcEntity.position.y;
+    return dx * dx + dy * dy <= range * range;
+  });
+}
+
+/**
+ * Strategy-retained aggression must not survive the loss of its authoritative
+ * player. This runs even with no eligible players, when distance-based AI
+ * simulation has no candidate that could otherwise clear the strategy maps.
+ */
+function clearMissingRetainedPlayerTargets(players) {
+  const livePlayerIds = new Set();
+  for (const player of players || []) {
+    if (player?.id !== null && player?.id !== undefined) {
+      livePlayerIds.add(String(player.id));
+    }
+  }
+
+  // Dormant base populations retain their exact NPC objects and strategy maps
+  // for later restoration. Include them so a reconnect cannot revive rage or
+  // Pirate intel that was active before the base unloaded.
+  const stateEntities = new Map(npc.activeNPCs || []);
+  for (const base of npc.dormantBases?.values?.() || []) {
+    if (!Array.isArray(base?.dormantNPCs)) continue;
+    for (const npcEntity of base.dormantNPCs) {
+      if (npcEntity?.id !== null && npcEntity?.id !== undefined &&
+          !stateEntities.has(npcEntity.id)) {
+        stateEntities.set(npcEntity.id, npcEntity);
+      }
+    }
+  }
+
+  let clearedCount = pruneMissingPlayerTargetState(
+    livePlayerIds,
+    stateEntities
+  );
+  for (const npcEntity of stateEntities.values()) {
+    const targetId = npcEntity?.targetPlayer;
+    if (targetId === null || targetId === undefined ||
+        getPlayerTargetRetentionRange(npcEntity) <= 0 ||
+        livePlayerIds.has(String(targetId))) {
+      continue;
+    }
+    if (clearRetainedPlayerTarget(npcEntity)) clearedCount++;
+  }
+  return clearedCount;
+}
+
+function clearMissingRetainedPlayerTargetsIfChanged(players) {
+  const livePlayerSignature = JSON.stringify(
+    (players || [])
+      .map(player => String(player?.id))
+      .sort()
+  );
+  if (livePlayerSignature === lastRetainedCleanupPlayerSignature) return 0;
+
+  lastRetainedCleanupPlayerSignature = livePlayerSignature;
+  return clearMissingRetainedPlayerTargets(players);
+}
+
+function getActiveNpcById(npcId) {
+  return npc.getNPC?.(npcId) || npc.activeNPCs?.get?.(npcId) || null;
+}
+
+function updateNpcVelocity(npcEntity, previousPosition, deltaTime) {
+  npcEntity.velocity = npcEntity.velocity || { x: 0, y: 0 };
+  const dtSec = deltaTime / 1000;
+  if (dtSec > 0) {
+    npcEntity.velocity.x = (npcEntity.position.x - previousPosition.x) / dtSec;
+    npcEntity.velocity.y = (npcEntity.position.y - previousPosition.y) / dtSec;
+  } else {
+    npcEntity.velocity.x = 0;
+    npcEntity.velocity.y = 0;
+  }
+  npcEntity._vx = npcEntity.velocity.x;
+  npcEntity._vy = npcEntity.velocity.y;
+  return npcEntity.velocity;
+}
+
+function tryBlockNpcDamage(npcEntity, attackerId) {
+  if (npcEntity.type !== 'pirate_dreadnought' ||
+      !npcEntity.invulnerableChance ||
+      Math.random() >= npcEntity.invulnerableChance) {
+    return null;
+  }
+
+  logger.log(`[PIRATE] Dreadnought ${npcEntity.id} invulnerable proc! Broadcasting to nearby players.`);
+  broadcastNearNpc(npcEntity, 'npc:invulnerable', {
+    npcId: npcEntity.id,
+    x: npcEntity.position.x,
+    y: npcEntity.position.y,
+    attackerId
+  });
+  return { blocked: true, invulnerable: true, npcId: npcEntity.id };
+}
+
+function handleNpcFireAtNpc(attacker, target, action) {
+  if (!attacker || !target || attacker.id === target.id || target.hull <= 0) {
+    return null;
+  }
+
+  const dx = target.position.x - attacker.position.x;
+  const dy = target.position.y - attacker.position.y;
+  const distance = Math.hypot(dx, dy);
+  const maxRange = Math.max(0, Number(attacker.weaponRange) || 0) * 1.1;
+  if (!Number.isFinite(distance) || distance > maxRange) return null;
+
+  const weaponType = action.weaponType || attacker.weaponType || 'kinetic';
+  const weaponTier = action.weaponTier || attacker.weaponTier || 1;
+  const configuredDamage = Number(action.baseDamage ?? attacker.weaponDamage);
+  const calculatedDamage = combat.calculateDamage(weaponType, weaponTier, 1);
+  const totalDamage = Number.isFinite(configuredDamage) && configuredDamage > 0
+    ? configuredDamage
+    : calculatedDamage.shieldDamage + calculatedDamage.hullDamage;
+  const shieldPiercing = Math.max(
+    0,
+    Math.min(1, Number(action.shieldPiercing ?? attacker.shieldPiercing) || 0)
+  );
+
+  // Resolve the target's proc before advertising a hit. Otherwise an
+  // invulnerable Dreadnought visibly takes damage from an NPC even though the
+  // authoritative damage path rejects the shot.
+  const blocked = tryBlockNpcDamage(target, attacker.id);
+
+  broadcastNearNpc(attacker, 'combat:npcFire', {
+    npcId: attacker.id,
+    npcType: attacker.type,
+    faction: attacker.faction,
+    weaponType,
+    sourceX: attacker.position.x,
+    sourceY: attacker.position.y,
+    targetX: target.position.x,
+    targetY: target.position.y,
+    targetNpcId: target.id,
+    rotation: attacker.rotation,
+    hitInfo: blocked ? null : {
+      isShieldHit: target.shield > 0,
+      damage: Math.round(totalDamage),
+      shieldPiercing: shieldPiercing > 0
+    }
+  });
+
+  if (blocked) return blocked;
+
+  // Reuse the canonical NPC death/wreckage/formation path, but do not register
+  // an NPC id as a player reward contributor.
+  return playerAttackNPC(
+    null,
+    target.id,
+    weaponType,
+    weaponTier,
+    totalDamage,
+    {
+      sourceNpcId: attacker.id,
+      shieldPiercing,
+      skipInvulnerabilityCheck: true
+    }
+  );
+}
+
+function isStrategicBoss(entity) {
+  const type = String(entity?.type || '').toLowerCase();
+  return entity?.isBoss === true || entity?.isQueen === true ||
+    type === 'swarm_queen' || type === 'void_leviathan' ||
+    type.includes('dreadnought') || type.includes('foreman') ||
+    type.includes('barnacle_king');
+}
+
+function buildStrategicContacts(position, radarRange, strategicRange, maxContacts, bases, npcs) {
+  const contacts = new Map();
+  const add = (entity, contactType) => {
+    const entityPosition = entity?.position || entity;
+    const x = Number(entityPosition?.x);
+    const y = Number(entityPosition?.y);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return;
+    const distance = Math.hypot(x - position.x, y - position.y);
+    if (distance <= radarRange || distance > strategicRange) return;
+    const id = String(entity.id || `${contactType}:${x}:${y}`);
+    contacts.set(`${contactType}:${id}`, {
+      id,
+      x,
+      y,
+      faction: entity.faction || null,
+      contactType,
+      distance
+    });
+  };
+
+  for (const base of bases || []) {
+    if (base?.faction && !base.destroyed) add(base, 'base');
+  }
+  for (const entity of npcs || []) {
+    if (isStrategicBoss(entity)) add(entity, 'boss');
+  }
+
+  return [...contacts.values()]
+    .sort((a, b) => a.distance - b.distance)
+    .slice(0, Math.max(1, Math.floor(Number(maxContacts) || 8)))
+    .map(({ distance, ...contact }) => contact);
 }
 
 function init(socketIo, players, sockModule) {
   io = socketIo;
   connectedPlayers = players;
   socketModule = sockModule;
+  playerSpatialHash.rebuild(players || new Map());
+  playerLastSeen.clear();
+  npcBatches.clear();
+  lastRetainedCleanupPlayerSignature = null;
 }
 
 function start() {
@@ -296,6 +753,10 @@ function tick() {
   lastTickTime = now;
 
   try {
+    if (currentTick % FULL_REFRESH_INTERVAL === 0) {
+      npc.cleanupFormations();
+    }
+
     // Update all game systems
     updatePlayers(deltaTime);
     updateBases(deltaTime);  // Check for bases near players and spawn NPCs
@@ -321,7 +782,9 @@ function updatePlayers(deltaTime) {
 
   // Update shield recharge for all players
   for (const [socketId, player] of connectedPlayers) {
-    const shieldUpdate = combat.updateShieldRecharge(player.id, deltaTime);
+    if (!player || player.isDead) continue;
+
+    const shieldUpdate = combat.updateShieldRecharge(player.id, deltaTime, player.energyCoreTier || 1);
     if (shieldUpdate) {
       player.shield = shieldUpdate.shield;
       // Notify player of shield update
@@ -330,6 +793,8 @@ function updatePlayers(deltaTime) {
         shield: player.shield
       });
     }
+
+    if (!canPlayerTakeDamage(player)) continue;
 
     // Process DoT damage from debuffs (queen acid, etc.)
     const dotDamage = processPlayerDoTs(player.id);
@@ -369,21 +834,30 @@ function updatePlayers(deltaTime) {
 }
 
 function updateBases(deltaTime) {
-  if (!connectedPlayers || connectedPlayers.size === 0) return;
+  if (!connectedPlayers) return;
 
-  const players = [...connectedPlayers.values()];
+  const players = [...connectedPlayers.values()].filter(player =>
+    canPlayerTakeDamage(player) &&
+    Number.isFinite(player.position?.x) && Number.isFinite(player.position?.y)
+  );
   const now = Date.now();
   const BASE_DEACTIVATION_TIME = 60000; // 1 minute without nearby players
+  const shouldDiscoverBases = now - lastBaseDiscoveryTime >= BASE_DISCOVERY_INTERVAL;
+  if (shouldDiscoverBases) lastBaseDiscoveryTime = now;
 
   // Find all sectors with players and get bases from those sectors
   // Use Map to store sector coordinates directly, avoiding string parsing in loop
   const activeSectors = new Map();
-  for (const player of players) {
+  for (const player of shouldDiscoverBases ? players : []) {
     const sectorX = Math.floor(player.position.x / config.SECTOR_SIZE);
     const sectorY = Math.floor(player.position.y / config.SECTOR_SIZE);
 
-    // Include adjacent sectors (5x5 grid to match client rendering range)
-    const ACTIVE_SECTOR_RADIUS = 2;
+    // Discover every sector that can contain a base inside the authoritative
+    // activation radius. This is intentionally independent of client viewport
+    // size; high-tier radar and Ancient Star Map contacts extend much farther.
+    const ACTIVE_SECTOR_RADIUS = Math.ceil(
+      getPlayerBaseActivationRange(player) / config.SECTOR_SIZE
+    );
     for (let dx = -ACTIVE_SECTOR_RADIUS; dx <= ACTIVE_SECTOR_RADIUS; dx++) {
       for (let dy = -ACTIVE_SECTOR_RADIUS; dy <= ACTIVE_SECTOR_RADIUS; dy++) {
         const sx = sectorX + dx;
@@ -410,11 +884,18 @@ function updateBases(deltaTime) {
 
       // Check if any player is within activation range
       let hasNearbyPlayer = false;
-      for (const player of players) {
+      const candidates = playerSpatialHash.query(
+        baseX,
+        baseY,
+        BASE_ACTIVATION_RANGE
+      );
+      for (const socketId of candidates) {
+        const player = connectedPlayers.get(socketId);
+        if (!player || player.isDead || !player.position) continue;
         const dx = player.position.x - baseX;
         const dy = player.position.y - baseY;
-        const dist = Math.sqrt(dx * dx + dy * dy);
-        if (dist < BASE_ACTIVATION_RANGE) {
+        const playerActivationRange = getPlayerBaseActivationRange(player);
+        if (dx * dx + dy * dy < playerActivationRange * playerActivationRange) {
           hasNearbyPlayer = true;
           break;
         }
@@ -431,37 +912,35 @@ function updateBases(deltaTime) {
             for (const npcId of activeBase.spawnedNPCs) {
               const npcEntity = npc.getNPC(npcId);
               if (npcEntity) {
-                broadcastNearNpc(npcEntity, 'npc:spawn', {
-                  id: npcEntity.id,
-                  type: npcEntity.type,
-                  name: npcEntity.name,
-                  faction: npcEntity.faction,
-                  x: npcEntity.position.x,
-                  y: npcEntity.position.y,
-                  rotation: npcEntity.rotation,
-                  hull: npcEntity.hull,
-                  hullMax: npcEntity.hullMax,
-                  shield: npcEntity.shield,
-                  shieldMax: npcEntity.shieldMax
-                });
+                broadcastNearNpc(
+                  npcEntity,
+                  'npc:spawn',
+                  createNpcSpawnPayload(npcEntity)
+                );
               }
             }
           }
         }
         lastBaseCheck.set(base.id, now);
-      } else {
-        // Check if base should be deactivated
-        const lastCheck = lastBaseCheck.get(base.id) || 0;
-        if (now - lastCheck > BASE_DEACTIVATION_TIME && npc.activeBases.has(base.id)) {
-          npc.deactivateBase(base.id);
-          lastBaseCheck.delete(base.id);
-        }
       }
     }
   }
 
   // Update base spawning for all active bases
   npc.updateBaseSpawning(players);
+
+  // A base's sector drops out of activeSectors as soon as players travel away,
+  // so stale checks must iterate the active registry rather than only sectors
+  // visited this tick. Run after spawning bookkeeping so recent NPC deaths are
+  // converted to pending timers before the population is unloaded.
+  for (const [baseId, activeBase] of npc.activeBases) {
+    if (activeBase.destroyed) continue;
+    const lastNearbyAt = lastBaseCheck.get(baseId);
+    if (lastNearbyAt && now - lastNearbyAt > BASE_DEACTIVATION_TIME) {
+      npc.deactivateBase(baseId);
+      lastBaseCheck.delete(baseId);
+    }
+  }
 
   // Check for newly spawned NPCs and broadcast them
   for (const [baseId, activeBase] of npc.activeBases) {
@@ -500,19 +979,11 @@ function updateBases(deltaTime) {
       const npcEntity = npc.getNPC(npcId);
       // Only broadcast NPCs that were just spawned (within last tick)
       if (npcEntity && now - activeBase.lastSpawnTime < deltaTime * 2) {
-        broadcastNearNpc(npcEntity, 'npc:spawn', {
-          id: npcEntity.id,
-          type: npcEntity.type,
-          name: npcEntity.name,
-          faction: npcEntity.faction,
-          x: npcEntity.position.x,
-          y: npcEntity.position.y,
-          rotation: npcEntity.rotation,
-          hull: npcEntity.hull,
-          hullMax: npcEntity.hullMax,
-          shield: npcEntity.shield,
-          shieldMax: npcEntity.shieldMax
-        });
+        broadcastNearNpc(
+          npcEntity,
+          'npc:spawn',
+          createNpcSpawnPayload(npcEntity)
+        );
       }
     }
   }
@@ -556,14 +1027,25 @@ function updateBases(deltaTime) {
 }
 
 function updateNPCs(deltaTime) {
-  if (!connectedPlayers || connectedPlayers.size === 0) return;
+  if (!connectedPlayers) return;
 
   // Get all player positions for NPC AI
-  const players = [...connectedPlayers.values()];
+  const players = [...connectedPlayers.values()].filter(player =>
+    canPlayerTakeDamage(player) &&
+    Number.isFinite(player.position?.x) && Number.isFinite(player.position?.y)
+  );
+  clearMissingRetainedPlayerTargetsIfChanged(players);
+  if (players.length === 0) {
+    // Visibility still has work to do when every connected player is dead or in
+    // transit. In particular, retire their last velocity-bearing NPC snapshots.
+    flushNpcBatches();
+    return;
+  }
 
-  // Find active sectors (where players are)
-  // Use Map to store sector coordinates directly, avoiding string parsing in loop
-  const activeSectors = new Map();
+  // Procedural sector NPCs are spawned only around the player's immediate
+  // neighborhood. Simulation authority below is distance-based and wider so
+  // already-active/base NPCs cannot freeze while still deliverable.
+  const spawnSectors = new Map();
   for (const player of players) {
     const sectorX = Math.floor(player.position.x / config.SECTOR_SIZE);
     const sectorY = Math.floor(player.position.y / config.SECTOR_SIZE);
@@ -574,15 +1056,15 @@ function updateNPCs(deltaTime) {
         const sx = sectorX + dx;
         const sy = sectorY + dy;
         const key = `${sx}_${sy}`;
-        if (!activeSectors.has(key)) {
-          activeSectors.set(key, { x: sx, y: sy });
+        if (!spawnSectors.has(key)) {
+          spawnSectors.set(key, { x: sx, y: sy });
         }
       }
     }
   }
 
   // Spawn NPCs in active sectors
-  for (const [sectorKey, coords] of activeSectors) {
+  for (const [sectorKey, coords] of spawnSectors) {
     const spawned = npc.spawnNPCsForSector(coords.x, coords.y);
 
     // Notify nearby players of new NPCs
@@ -606,19 +1088,30 @@ function updateNPCs(deltaTime) {
   // Update all NPCs
   const npcsToRemove = [];  // Track NPCs to remove after iteration (for despawning)
   for (const [npcId, npcEntity] of npc.activeNPCs) {
-    // Check if NPC is in an active sector
-    const npcSectorX = Math.floor(npcEntity.position.x / config.SECTOR_SIZE);
-    const npcSectorY = Math.floor(npcEntity.position.y / config.SECTOR_SIZE);
-    const npcSectorKey = `${npcSectorX}_${npcSectorY}`;
-
-    if (!activeSectors.has(npcSectorKey)) {
-      // NPC is in inactive sector, skip update
-      continue;
-    }
-
-    // Save pre-AI position for velocity computation
+    // Preserve the pre-anchor position so orbital base motion becomes canonical
+    // NPC velocity, while evaluating visibility at the newly anchored position.
     const prevX = npcEntity.position.x;
     const prevY = npcEntity.position.y;
+    if (npcEntity.attachedToBase) {
+      // An attachment without a live or dormant authoritative base is invalid.
+      // Retire it canonically instead of freezing a targetable worm forever.
+      if (!npc.reanchorAttachedDrone(npcEntity)) {
+        npcsToRemove.push(npcId);
+        continue;
+      }
+    }
+
+    if (!shouldSimulateNpc(npcEntity, players)) {
+      // Clear canonical velocity when authority goes dormant. Visibility exit
+      // reconciliation removes this entity from clients that just lost range;
+      // retaining the last non-zero velocity would otherwise create a phantom.
+      npcEntity.velocity = npcEntity.velocity || { x: 0, y: 0 };
+      npcEntity.velocity.x = 0;
+      npcEntity.velocity.y = 0;
+      npcEntity._vx = 0;
+      npcEntity._vy = 0;
+      continue;
+    }
 
     // ============================================
     // SWARM EGG HATCHING - Skip AI for eggs, only broadcast position
@@ -632,6 +1125,9 @@ function updateNPCs(deltaTime) {
         npcEntity.hatchTime = null; // Clear hatch time so isHatching returns false
       }
       // Eggs are stationary - zero velocity
+      npcEntity.velocity = npcEntity.velocity || { x: 0, y: 0 };
+      npcEntity.velocity.x = 0;
+      npcEntity.velocity.y = 0;
       npcEntity._vx = 0;
       npcEntity._vy = 0;
       // Queue the NPC update for batched delivery (state will be 'hatching' until complete)
@@ -672,14 +1168,26 @@ function updateNPCs(deltaTime) {
     }
 
     // Get players in NPC's aggro range for AI (exclude dead players)
-    const nearbyPlayers = players.filter(p => {
-      // Don't target dead players
-      if (p.isDead) return false;
+    const nearbyPlayers = [];
+    const aggroRange = Math.max(0, Number(npcEntity.aggroRange) || 0);
+    const aggroRangeSq = aggroRange * aggroRange;
+    const playerCandidates = playerSpatialHash.query(
+      npcEntity.position.x,
+      npcEntity.position.y,
+      aggroRange
+    );
+    for (const socketId of playerCandidates) {
+      const candidate = connectedPlayers.get(socketId);
+      if (!canPlayerTakeDamage(candidate) || !candidate.position) continue;
+      const dx = candidate.position.x - npcEntity.position.x;
+      const dy = candidate.position.y - npcEntity.position.y;
+      if (dx * dx + dy * dy <= aggroRangeSq) nearbyPlayers.push(candidate);
+    }
 
-      const dx = p.position.x - npcEntity.position.x;
-      const dy = p.position.y - npcEntity.position.y;
-      return Math.sqrt(dx * dx + dy * dy) <= npcEntity.aggroRange;
-    });
+    // Passive factions can be hit from outside their normal detection radius.
+    // Preserve an already-authoritative player target so the faction strategy
+    // can pursue it until its own rage/raid retention limit is reached.
+    includeRetainedNpcTargetPlayer(npcEntity, players, nearbyPlayers);
 
     // ============================================
     // SWARM DRONE ASSIMILATION - CHECK FIRST (priority over combat)
@@ -703,9 +1211,11 @@ function updateNPCs(deltaTime) {
           // Use assimilation behavior - ignore players, focus on base
           useAssimilationBehavior = true;
 
-          const SwarmStrategy = require('./ai/swarm');
-          const swarmAI = new SwarmStrategy();
-          const assimAction = swarmAI.updateAssimilateBehavior(npcEntity, targetBase, deltaTime);
+          const assimAction = swarmSupportAI.updateAssimilateBehavior(
+            npcEntity,
+            targetBase,
+            deltaTime
+          );
 
           if (assimAction && assimAction.action === 'assimilate') {
             // Process the drone sacrifice
@@ -724,7 +1234,7 @@ function updateNPCs(deltaTime) {
               // Broadcast progress update
               socketModule.broadcastAssimilationProgress({
                 baseId: assimAction.baseId,
-                progress: result.progress,
+                progress: result.attachedCount,
                 threshold: result.threshold,
                 position: assimAction.position // For client visual effects
               });
@@ -733,7 +1243,7 @@ function updateNPCs(deltaTime) {
               logger.info(`[ASSIMILATE] Checking conversion: isComplete=${result.isComplete}, hasConversion=${!!result.conversion}`);
               if (result.isComplete && result.conversion) {
                 logger.info(`[ASSIMILATE] Base converted! Broadcasting and checking queen spawn...`);
-                socketModule.broadcastBaseAssimilated({
+                broadcastBaseAssimilated({
                   baseId: assimAction.baseId,
                   newType: result.conversion.newType,
                   originalFaction: result.conversion.originalFaction,
@@ -771,36 +1281,48 @@ function updateNPCs(deltaTime) {
       action = npc.updateNPC(npcEntity, nearbyPlayers, deltaTime);
     }
 
+    // An emitted fire action and the NPC's retained target must agree before
+    // recipient selection. Long-range targets therefore receive the attacker
+    // update before its weapon event and damage notification.
+    if (action?.action === 'fire' && action.target?.id !== undefined) {
+      const targetNpc = getActiveNpcById(action.target.id);
+      if (targetNpc && targetNpc.id !== npcEntity.id) {
+        npcEntity.targetNPC = targetNpc.id;
+        if (String(npcEntity.targetPlayer) === String(targetNpc.id)) {
+          npcEntity.targetPlayer = null;
+        }
+      } else if (typeof action.target.id !== 'string') {
+        npcEntity.targetPlayer = action.target.id;
+        npcEntity.targetNPC = null;
+      }
+    }
+
     // Update NPC shield recharge
     npc.updateNPCShieldRecharge(npcEntity, deltaTime);
 
     // Check for queen guard mode for swarm NPCs
     const activeQueen = npc.getActiveQueen();
-    if (activeQueen && npcEntity.faction === 'swarm' && npcEntity.type !== 'swarm_queen') {
-      const SwarmStrategy = require('./ai/swarm');
-      const swarmAI = new SwarmStrategy();
-
-      if (swarmAI.shouldGuardQueen(npcEntity, activeQueen)) {
+    if (activeQueen && !npcEntity.attachedToBase &&
+        npcEntity.faction === 'swarm' && npcEntity.type !== 'swarm_queen') {
+      if (swarmSupportAI.shouldGuardQueen(npcEntity, activeQueen)) {
         // Normalize queen position (handle both queen.position.x and queen.x formats)
         const queenX = activeQueen.position?.x ?? activeQueen.x;
         const queenY = activeQueen.position?.y ?? activeQueen.y;
         const guardRange = config.SWARM_QUEEN_SPAWN?.QUEEN_GUARD_RANGE ?? 500;
 
         // Get nearby guards for formation spacing
-        const nearbyGuards = [];
-        for (const [otherId, otherNpc] of npc.activeNPCs) {
-          if (otherId !== npcId && otherNpc.faction === 'swarm' && otherNpc.type !== 'swarm_queen') {
-            const dx = otherNpc.position.x - queenX;
-            const dy = otherNpc.position.y - queenY;
-            const dist = Math.sqrt(dx * dx + dy * dy);
-            if (dist <= guardRange) {
-              nearbyGuards.push(otherNpc);
-            }
-          }
-        }
+        const nearbyGuards = npc.getNPCsInRange(
+          { x: queenX, y: queenY },
+          guardRange
+        ).filter(otherNpc =>
+          otherNpc.id !== npcId &&
+          otherNpc.faction === 'swarm' &&
+          otherNpc.type !== 'swarm_queen' &&
+          !otherNpc.attachedToBase
+        );
 
         // Use queen guard AI instead of normal combat
-        const guardAction = swarmAI.updateQueenGuard(
+        const guardAction = swarmSupportAI.updateQueenGuard(
           npcEntity,
           activeQueen,
           nearbyPlayers,
@@ -870,14 +1392,7 @@ function updateNPCs(deltaTime) {
 
     // Compute velocity from position delta for client-side dead reckoning
     // deltaTime is in ms; convert to seconds for units/sec velocity
-    const dtSec = deltaTime / 1000;
-    if (dtSec > 0) {
-      npcEntity._vx = (npcEntity.position.x - prevX) / dtSec;
-      npcEntity._vy = (npcEntity.position.y - prevY) / dtSec;
-    } else {
-      npcEntity._vx = 0;
-      npcEntity._vy = 0;
-    }
+    updateNpcVelocity(npcEntity, { x: prevX, y: prevY }, deltaTime);
 
     // Incrementally update this NPC's position in the spatial hash (no-op if same cell)
     npc.updateNPCInHash(npcId, npcEntity);
@@ -897,8 +1412,11 @@ function updateNPCs(deltaTime) {
       hullMax: npcEntity.hullMax,
       shield: npcEntity.shield,
       shieldMax: npcEntity.shieldMax,
-      vx: npcEntity._vx,
-      vy: npcEntity._vy
+      isBoss: npcEntity.isBoss === true,
+      sizeMultiplier: npcEntity.sizeMultiplier || 1,
+      phase: npcEntity.phaseManager?.currentPhase || npcEntity.phase || null,
+      vx: npcEntity.velocity.x,
+      vy: npcEntity.velocity.y
     };
 
     // Include wreckage collection position for tractor beam animation
@@ -915,12 +1433,25 @@ function updateNPCs(deltaTime) {
 
     // Handle NPC actions
     if (action && action.action === 'fire') {
+      const authoritativeNpcTarget = action.target?.id !== undefined
+        ? getActiveNpcById(action.target.id)
+        : null;
+      if (authoritativeNpcTarget && authoritativeNpcTarget.id !== npcEntity.id) {
+        handleNpcFireAtNpc(npcEntity, authoritativeNpcTarget, action);
+        continue;
+      }
+      if (typeof action.target?.id === 'string') {
+        // The NPC target was removed earlier in this tick; never reinterpret its
+        // string id as a database-backed player id.
+        continue;
+      }
+
       // NPC fired at player - use proper damage calculation
       const targetPlayer = action.target;
 
       // CRITICAL: Skip if target player is already dead
       // Prevents looping death events from multiple NPCs hitting same dead player
-      if (targetPlayer.isDead) {
+      if (!canPlayerTakeDamage(targetPlayer)) {
         continue; // Skip to next NPC
       }
 
@@ -991,8 +1522,13 @@ function updateNPCs(deltaTime) {
         1 // targetShieldTier (could be enhanced to use player shield tier)
       );
 
-      // Scale by NPC's base damage factor (weaponDamage / BASE_WEAPON_DAMAGE ratio)
-      const damageMultiplier = action.baseDamage / config.BASE_WEAPON_DAMAGE;
+      // Scale by the NPC's configured damage and any finite phase modifier
+      // supplied by boss AI (for example, the Swarm Queen phases).
+      const damageMultiplier = getNpcDamageMultiplier(
+        action.baseDamage,
+        config.BASE_WEAPON_DAMAGE,
+        action.damageMultiplier
+      );
       damage.shieldDamage *= damageMultiplier;
       damage.hullDamage *= damageMultiplier;
 
@@ -1077,6 +1613,12 @@ function updateNPCs(deltaTime) {
           }
         }
       }
+    } else if (action && action.action === 'scavenger:drillCharge') {
+      // The drill is lethal by design, so its wind-up must be visible to the
+      // target and nearby observers rather than existing only in server AI.
+      if (socketModule?.broadcastDrillCharge) {
+        socketModule.broadcastDrillCharge(npcEntity, action);
+      }
     } else if (action && action.action === 'web_snare') {
       // ============================================
       // QUEEN SPECIAL ATTACK: Web Snare
@@ -1102,6 +1644,7 @@ function updateNPCs(deltaTime) {
 
       setTimeout(() => {
         for (const [socketId, player] of connectedPlayers) {
+          if (!canPlayerTakeDamage(player) || !player.position) continue;
           const dx = player.position.x - action.targetX;
           const dy = player.position.y - action.targetY;
           const dist = Math.sqrt(dx * dx + dy * dy);
@@ -1148,46 +1691,13 @@ function updateNPCs(deltaTime) {
 
       setTimeout(() => {
         for (const [socketId, player] of connectedPlayers) {
+          if (!canPlayerTakeDamage(player) || !player.position) continue;
           const dx = player.position.x - action.targetX;
           const dy = player.position.y - action.targetY;
           const dist = Math.sqrt(dx * dx + dy * dy);
 
           if (dist <= action.radius) {
-            // Apply initial damage
-            const initialDamage = { shieldDamage: action.damage * 0.5, hullDamage: action.damage * 0.5 };
-            const result = combat.applyDamage(player.id, initialDamage);
-
-            if (result) {
-              player.hull = result.hull;
-              player.shield = result.shield;
-
-              io.to(socketId).emit('player:damaged', {
-                attackerId: npcId,
-                attackerType: 'npc',
-                damage: action.damage,
-                hull: result.hull,
-                shield: result.shield,
-                damageType: 'acid'
-              });
-            }
-
-            // Apply DoT debuff
-            applyDebuff(player.id, 'dot', {
-              damage: action.dotDamage,
-              interval: action.dotInterval || 1000,
-              duration: action.dotDuration,
-              sourceId: npcId,
-              type: 'acid'
-            });
-
-            // Notify player of DoT
-            io.to(socketId).emit('player:debuff', {
-              type: 'dot',
-              dotType: 'acid',
-              damage: action.dotDamage,
-              duration: action.dotDuration,
-              source: 'swarm_queen'
-            });
+            applyQueenAcidBurstDamage(npcEntity, action, socketId, player);
           }
         }
       }, travelTime);
@@ -1231,7 +1741,11 @@ function updateNPCs(deltaTime) {
       broadcastNearNpc(npcEntity, 'scavenger:haulerGrow', {
         npcId: action.npcId,
         wreckageCount: action.wreckageCount,
-        sizeMultiplier: action.sizeMultiplier
+        sizeMultiplier: action.sizeMultiplier,
+        position: {
+          x: npcEntity.position.x,
+          y: npcEntity.position.y
+        }
       });
     } else if (action && action.action === 'scavenger:rageClear') {
       // ============================================
@@ -1265,61 +1779,13 @@ function updateNPCs(deltaTime) {
           isNPC: true
         });
       }
-      const hauler = npc.getNPC(npcId);
-      if (hauler && hauler.type === 'scavenger_hauler') {
-        // Create Barnacle King at Hauler position
-        const kingType = npc.NPC_TYPES.scavenger_barnacle_king;
-        const kingId = `npc_barnacle_king_${Date.now()}`;
-
-        const barnacleKing = {
-          id: kingId,
-          type: 'scavenger_barnacle_king',
-          name: kingType.name,
-          faction: 'scavenger',
-          position: { x: hauler.position.x, y: hauler.position.y },
-          x: hauler.position.x,
-          y: hauler.position.y,
-          vx: 0,
-          vy: 0,
-          rotation: hauler.rotation,
-          hull: kingType.hull,
-          hullMax: kingType.hull,
-          maxHull: kingType.hull,
-          shield: kingType.shield,
-          shieldMax: kingType.shield,
-          maxShield: kingType.shield,
-          speed: kingType.speed,
-          weaponType: kingType.weaponType,
-          weaponTier: kingType.weaponTier,
-          weaponDamage: kingType.weaponDamage,
-          weaponRange: kingType.weaponRange,
-          aggroRange: kingType.aggroRange,
-          lastFireTime: 0,
-          state: 'patrol',
-          targetId: null,
-          isBoss: true,
-          damageContributors: new Map(),
-          // Inherit wreckage contents from Hauler
-          carriedWreckage: hauler.carriedWreckage || [],
-          // Inherit homeBase if Hauler had one
-          homeBaseId: hauler.homeBaseId,
-          homeBasePosition: hauler.homeBasePosition,
-          patrolRadius: hauler.patrolRadius,
-          spawnPoint: hauler.spawnPoint
-        };
-
-        // Add to active NPCs
-        npc.activeNPCs.set(kingId, barnacleKing);
-        npc.insertNPCInHash(kingId, barnacleKing.position.x, barnacleKing.position.y);
-
-        // Remove Hauler from activeNPCs
-        npc.activeNPCs.delete(npcId);
-        npc.removeNPCFromHash(npcId);
-
+      const barnacleKing = npc.transformHaulerToBarnacleKing(npcId);
+      if (barnacleKing) {
         // Broadcast transformation
         broadcastNearNpc(barnacleKing, 'scavenger:barnacleKingSpawn', {
-          kingId: kingId,
+          kingId: barnacleKing.id,
           haulerId: npcId,
+          name: barnacleKing.name,
           x: barnacleKing.position.x,
           y: barnacleKing.position.y,
           rotation: barnacleKing.rotation,
@@ -1328,7 +1794,7 @@ function updateNPCs(deltaTime) {
           wreckageCount: barnacleKing.carriedWreckage.length
         });
 
-        logger.info(`[SCAVENGER] Hauler ${npcId} transformed into Barnacle King ${kingId} at (${Math.round(barnacleKing.x)}, ${Math.round(barnacleKing.y)})`);
+        logger.info(`[SCAVENGER] Hauler ${npcId} transformed into Barnacle King ${barnacleKing.id} at (${Math.round(barnacleKing.x)}, ${Math.round(barnacleKing.y)})`);
       }
     } else if (action && action.action === 'scavenger:dumped') {
       // ============================================
@@ -1403,22 +1869,11 @@ function updateNPCs(deltaTime) {
       if (depositResult && depositResult.spawnResult) {
         const spawnedNPC = depositResult.spawnResult;
         // Broadcast new NPC spawn
-        broadcastNearNpc(spawnedNPC, 'npc:spawn', {
-          npc: {
-            id: spawnedNPC.id,
-            type: spawnedNPC.type,
-            name: spawnedNPC.name,
-            faction: spawnedNPC.faction,
-            x: spawnedNPC.position.x,
-            y: spawnedNPC.position.y,
-            rotation: spawnedNPC.rotation,
-            hull: spawnedNPC.hull,
-            hullMax: spawnedNPC.hullMax,
-            shield: spawnedNPC.shield,
-            shieldMax: spawnedNPC.shieldMax,
-            isBoss: spawnedNPC.isBoss
-          }
-        });
+        broadcastNearNpc(
+          spawnedNPC,
+          'npc:spawn',
+          createNpcSpawnPayload(spawnedNPC)
+        );
 
         // Special announcement for Foreman spawn (5000 unit radius)
         if (spawnedNPC.isForeman || spawnedNPC.type === 'rogue_foreman') {
@@ -1435,14 +1890,13 @@ function updateNPCs(deltaTime) {
       // ============================================
       // ROGUE MINER: Rage mode triggered
       // ============================================
-      broadcastNearNpc(npcEntity, 'npc:action', {
-        action: 'rage',
-        faction: 'rogue_miner',
-        triggeredBy: action.triggeredBy,
-        targetId: action.targetId,
-        enragedNPCs: action.enragedNPCs,
-        rageRange: action.rageRange
-      });
+      const rageEvent = createRogueMinerRageEvent(npcEntity, action);
+      broadcastInRange(
+        rageEvent.position,
+        rageEvent.range,
+        'npc:action',
+        rageEvent.payload
+      );
       logger.info(`[ROGUE_MINER] ${npcEntity.name} triggered rage - ${action.enragedNPCs.length} miners enraged`);
     } else if (action && action.action === 'rogueMiner:rageClear') {
       // ============================================
@@ -1460,12 +1914,17 @@ function updateNPCs(deltaTime) {
       broadcastInRange(npcEntity.position, action.broadcastRange || 1000, 'pirate:intel', {
         scoutId: npcId,
         scoutPos: { x: npcEntity.position.x, y: npcEntity.position.y },
-        targetInfo: action.targetInfo,
-        alertedPirateCount: action.alertedPirates?.length || 0,
+        targetInfo: action.targetInfo || action.intel || null,
+        alertedPirateCount: Array.isArray(action.alertedPirates)
+          ? action.alertedPirates.length
+          : Math.max(0, Number(action.alertedPirateCount) || 0),
         baseId: action.baseId,
         timestamp: Date.now()
       });
-      logger.log(`[PIRATE] Scout ${npcId} broadcast intel to ${action.alertedPirates?.length || 0} pirates`);
+      const alertedPirateCount = Array.isArray(action.alertedPirates)
+        ? action.alertedPirates.length
+        : Math.max(0, Number(action.alertedPirateCount) || 0);
+      logger.log(`[PIRATE] Scout ${npcId} broadcast intel to ${alertedPirateCount} pirates`);
     } else if (action && action.action === 'pirate:boostDive') {
       // ============================================
       // PIRATE: Fighter/Dreadnought performing boost dive attack
@@ -1473,12 +1932,12 @@ function updateNPCs(deltaTime) {
       broadcastNearNpc(npcEntity, 'pirate:boostDive', {
         npcId: npcId,
         npcType: npcEntity.type,
-        startX: action.startX,
-        startY: action.startY,
-        targetX: action.targetX,
-        targetY: action.targetY,
+        startX: action.startX ?? action.fromX,
+        startY: action.startY ?? action.fromY,
+        targetX: action.targetX ?? action.toX,
+        targetY: action.targetY ?? action.toY,
         speedMultiplier: action.speedMultiplier || 2.5,
-        duration: action.duration
+        duration: action.duration || 0
       });
     } else if (action && action.action === 'pirate:steal') {
       // ============================================
@@ -1516,7 +1975,10 @@ function updateNPCs(deltaTime) {
         hullMax: npcEntity.hullMax,
         shield: npcEntity.shield,
         shieldMax: npcEntity.shieldMax,
-        healRate: action.healRate
+        healRate: action.healRate,
+        shieldHealRate: action.shieldHealRate,
+        x: action.x ?? npcEntity.position.x,
+        y: action.y ?? npcEntity.position.y
       });
     } else if (action && action.action === 'void_gravity_well') {
       // ============================================
@@ -1543,7 +2005,7 @@ function updateNPCs(deltaTime) {
 
         if (!playerSocketId) continue;
         const player = connectedPlayers.get(playerSocketId);
-        if (!player || player.isDead) continue;
+        if (!canPlayerTakeDamage(player)) continue;
 
         // Calculate damage based on distance from center
         const distRatio = affected.distance / action.radius;
@@ -1618,16 +2080,40 @@ function updateNPCs(deltaTime) {
         if (action.targetNpcId) {
           const consumedNpc = npc.activeNPCs.get(action.targetNpcId);
           if (consumedNpc) {
+            const formationInfo = npc.getFormationForNpc(action.targetNpcId);
+            let successionResult = null;
+            if (formationInfo?.isLeader && formationInfo.memberIds.size > 0) {
+              successionResult = npc.handleLeaderDeath(formationInfo.formationId);
+            }
+
             // Broadcast the consumed NPC's destruction
-            broadcastNearNpc(consumedNpc, 'npc:destroyed', {
-              npcId: action.targetNpcId,
-              x: consumedNpc.position.x,
-              y: consumedNpc.position.y,
-              faction: consumedNpc.faction,
-              deathEffect: 'void_consume'
-            });
-            npc.activeNPCs.delete(action.targetNpcId);
-            npc.removeNPCFromHash(action.targetNpcId);
+            broadcastNearNpc(
+              consumedNpc,
+              'npc:destroyed',
+              createConsumedNpcDestroyedPayload(consumedNpc)
+            );
+
+            if (successionResult?.success && successionResult.newLeader) {
+              voidFormationAI.setFormationState(
+                formationInfo.formationId,
+                'confusion',
+                successionResult.newLeader.id
+              );
+              broadcastNearNpc(consumedNpc, 'formation:leaderChange', {
+                formationId: formationInfo.formationId,
+                oldLeaderId: action.targetNpcId,
+                oldLeaderType: consumedNpc.type,
+                newLeaderId: successionResult.newLeader.id,
+                newLeaderType: successionResult.newLeader.type,
+                newLeaderName: successionResult.newLeader.name,
+                newLeaderPosition: successionResult.newLeader.position,
+                memberIds: successionResult.memberIds,
+                confusionDuration: 1000,
+                reformationDuration: 2000
+              });
+            }
+
+            npc.removeNPC(action.targetNpcId, { scheduleBaseRespawn: true });
           }
         }
       }
@@ -1635,10 +2121,17 @@ function updateNPCs(deltaTime) {
       // ============================================
       // VOID LEVIATHAN: Spawn minions from rifts
       // ============================================
+      // Generate the portals once so the warning animation and delayed server
+      // spawns share the exact same authoritative positions.
+      const riftPositions = createVoidMinionRiftPositions(
+        action.position,
+        action.riftCount
+      );
       broadcastNearNpc(npcEntity, 'void:spawnMinions', {
         leviathanId: action.leviathanId,
         position: action.position,
-        riftCount: action.riftCount,
+        riftCount: riftPositions.length,
+        riftPositions,
         trigger: action.trigger,
         healthThreshold: action.healthThreshold
       });
@@ -1648,12 +2141,8 @@ function updateNPCs(deltaTime) {
       const minionsPerRift = minionConfig?.minionsPerRift || { min: 1, max: 2 };
 
       setTimeout(() => {
-        for (let i = 0; i < action.riftCount; i++) {
-          // Spawn rifts in a circle around the Leviathan
-          const angle = (i / action.riftCount) * Math.PI * 2;
-          const distance = 150 + Math.random() * 100;
-          const riftX = action.position.x + Math.cos(angle) * distance;
-          const riftY = action.position.y + Math.sin(angle) * distance;
+        for (let i = 0; i < riftPositions.length; i++) {
+          const { x: riftX, y: riftY } = riftPositions[i];
 
           // Spawn 1-2 minions per rift
           const minionCount = minionsPerRift.min + Math.floor(Math.random() * (minionsPerRift.max - minionsPerRift.min + 1));
@@ -1689,6 +2178,7 @@ function updateNPCs(deltaTime) {
             };
 
             npc.activeNPCs.set(minionId, minion);
+            npc.insertNPCInHash(minionId, minion.position.x, minion.position.y);
 
             // Register minion with Leviathan AI
             const { voidLeviathanAI } = require('./ai/void-leviathan');
@@ -1716,6 +2206,12 @@ function updateNPCs(deltaTime) {
       // ============================================
       // VOID NPC: Retreat into rift portal
       // ============================================
+      // The NPC remains in the simulation for its one-second phase-out. Do not
+      // rebroadcast or schedule the same retreat on every 20 Hz tick.
+      if (scheduledRiftRespawns.has(action.npcId)) {
+        continue;
+      }
+
       broadcastNearNpc(npcEntity, 'void:riftRetreat', {
         npcId: action.npcId,
         riftPosition: action.riftPosition,
@@ -1724,18 +2220,15 @@ function updateNPCs(deltaTime) {
 
       // Store NPC data for respawn before deletion
       const retreatingNpc = npc.activeNPCs.get(action.npcId);
-
-      // Skip if already scheduled for respawn (prevent duplicate timers)
-      if (scheduledRiftRespawns.has(action.npcId)) {
-        continue;
-      }
+      scheduledRiftRespawns.add(action.npcId);
 
       // Don't respawn Leviathans through rift retreat - they have their own spawn system
       if (retreatingNpc && retreatingNpc.type === 'void_leviathan') {
         // Mark for removal after rift animation
         setTimeout(() => {
-          npc.activeNPCs.delete(action.npcId);
-          npc.removeNPCFromHash(action.npcId);
+          npc.removeNPC(action.npcId);
+          npc.handleLeviathanDeath(action.npcId);
+          scheduledRiftRespawns.delete(action.npcId);
         }, 1000);
         continue;
       }
@@ -1748,13 +2241,12 @@ function updateNPCs(deltaTime) {
         baseId: retreatingNpc.homeBaseId || retreatingNpc.baseId
       } : null;
 
-      // Mark as scheduled
-      scheduledRiftRespawns.add(action.npcId);
-
       // Mark for removal after rift animation
       setTimeout(() => {
-        npc.activeNPCs.delete(action.npcId);
-        npc.removeNPCFromHash(action.npcId);
+        npc.removeNPC(action.npcId);
+        if (!respawnData) {
+          scheduledRiftRespawns.delete(action.npcId);
+        }
       }, 1000);
 
       // Schedule respawn after 10-15 seconds with full health
@@ -1816,8 +2308,7 @@ function updateNPCs(deltaTime) {
     if (npcToRemove && npcToRemove.attachedToBase) {
       logger.warn(`[WORM_DESPAWN] Attached worm ${npcId} being despawned while attached to base ${npcToRemove.attachedToBase}`);
     }
-    npc.activeNPCs.delete(npcId);
-    npc.removeNPCFromHash(npcId);
+    npc.removeNPC(npcId);
   }
 
   // ============================================
@@ -1840,6 +2331,27 @@ function updateNPCs(deltaTime) {
   flushNpcBatches();
 }
 
+/**
+ * Add an NPC's retained living player target to the AI candidate list when the
+ * spatial aggro query did not include it. Strategies remain responsible for
+ * enforcing their faction-specific chase/clear distances.
+ */
+function includeRetainedNpcTargetPlayer(npcEntity, alivePlayers, nearbyPlayers) {
+  if (getPlayerTargetRetentionRange(npcEntity) <= 0 ||
+      npcEntity?.targetPlayer === null || npcEntity?.targetPlayer === undefined) {
+    return nearbyPlayers;
+  }
+
+  const targetId = String(npcEntity.targetPlayer);
+  if (nearbyPlayers.some(player => String(player?.id) === targetId)) {
+    return nearbyPlayers;
+  }
+
+  const retainedTarget = alivePlayers.find(player => String(player?.id) === targetId);
+  if (retainedTarget) nearbyPlayers.push(retainedTarget);
+  return nearbyPlayers;
+}
+
 function updateMining(deltaTime) {
   // Mining updates are handled per-player when they send mining events
   // This could be used for mining progress broadcasts if needed
@@ -1847,19 +2359,21 @@ function updateMining(deltaTime) {
 
 function updateWreckage(deltaTime) {
   // Cleanup expired wreckage
-  const expired = loot.cleanupExpiredWreckage();
-
-  // Notify players of despawned wreckage
-  for (const wreckageId of expired) {
-    if (io) {
-      io.emit('wreckage:despawn', { id: wreckageId });
-    }
-  }
+  loot.cleanupExpiredWreckage(wreckage => {
+    if (!io) return;
+    broadcastWreckageNear(wreckage, 'wreckage:despawn', { id: wreckage.id });
+  });
 }
 
 function updateStarDamage(deltaTime) {
   // Apply heat damage from stars to nearby players
-  starDamage.update(connectedPlayers, io, deltaTime);
+  starDamage.update(
+    connectedPlayers,
+    io,
+    deltaTime,
+    socketModule?.setPlayerStatus,
+    handlePlayerDeathWithWreckage
+  );
 }
 
 // Track comet warnings to avoid spamming
@@ -1868,7 +2382,11 @@ const cometWarningsSent = new Map(); // cometId -> lastWarningTime
 function updateComets(deltaTime) {
   if (!connectedPlayers || connectedPlayers.size === 0) return;
 
-  const players = [...connectedPlayers.values()];
+  const players = [...connectedPlayers.values()].filter(player =>
+    canPlayerTakeDamage(player) &&
+    Number.isFinite(player.position?.x) && Number.isFinite(player.position?.y)
+  );
+  if (players.length === 0) return;
   const now = Date.now();
   const orbitTime = Physics.getOrbitTime();
 
@@ -1898,11 +2416,17 @@ function updateComets(deltaTime) {
   }
 
   // Check each active sector for comets
+  const seenCometIds = new Set();
   for (const [sectorKey, coords] of activeSectors) {
     const sector = world.generateSector(coords.x, coords.y);
     if (!sector.comets || sector.comets.length === 0) continue;
 
     for (const comet of sector.comets) {
+      // Comet Bezier bounds intentionally overlap sector caches. Process each
+      // stable hazard once per update so overlap cannot multiply damage.
+      if (comet.id && seenCometIds.has(comet.id)) continue;
+      if (comet.id) seenCometIds.add(comet.id);
+
       // Compute comet position using physics
       const cometState = Physics.computeCometPosition(comet, orbitTime);
 
@@ -1916,6 +2440,7 @@ function updateComets(deltaTime) {
 
           // Broadcast warning to players near the comet's trajectory
           for (const [socketId, player] of connectedPlayers) {
+            if (!canPlayerTakeDamage(player) || !player.position) continue;
             const dx = player.position.x - cometState.x;
             const dy = player.position.y - cometState.y;
             const dist = Math.sqrt(dx * dx + dy * dy);
@@ -1941,6 +2466,7 @@ function updateComets(deltaTime) {
         const cometRadius = comet.size * 0.5; // Collision radius is half the visual size
 
         for (const [socketId, player] of connectedPlayers) {
+          if (!canPlayerTakeDamage(player) || !player.position) continue;
           const dx = player.position.x - cometState.x;
           const dy = player.position.y - cometState.y;
           const dist = Math.sqrt(dx * dx + dy * dy);
@@ -2008,17 +2534,37 @@ function broadcastNearbyBasesToPlayers(now) {
   lastBaseBroadcastTime = now;
 
   for (const [socketId, player] of connectedPlayers) {
-    // Use the larger of radar range or broadcast range for consistent sync
-    // This ensures players see bases even at sector edges
-    const radarRange = config.BASE_RADAR_RANGE * Math.pow(config.TIER_MULTIPLIER, (player.radarTier || 1) - 1);
-    const syncRange = Math.max(radarRange, BASE_BROADCAST_RANGE);
+    if (!player?.position || player.isDead) continue;
 
-    // Get bases within sync range (using existing npc.getBasesInRange)
-    const nearbyBases = npc.getBasesInRange(player.position, syncRange);
+    // Exact base coordinates are radar data. The larger activation radius is
+    // only for keeping server simulation warm and must not leak into payloads.
+    const radarRange = getPlayerRadarRange(player);
+    const nearbyBases = npc.getBasesInRange(player.position, radarRange);
 
-    // Only send if there are bases to report
-    if (nearbyBases.length > 0) {
-      io.to(socketId).emit('bases:nearby', nearbyBases);
+    // Empty snapshots are significant: they let the client age out bases that
+    // have just moved beyond this recipient's radar range.
+    io.to(socketId).emit('bases:nearby', nearbyBases);
+
+    // Ancient Star Map contacts are a deliberately sparse, server-authoritative
+    // bearing feed. It avoids generating or scanning distant procedural sectors
+    // in the 60 Hz client world query and does not expose combat/health state.
+    if (Array.isArray(player.relicTypes) && player.relicTypes.includes('ANCIENT_STAR_MAP')) {
+      const effects = config.RELIC_TYPES?.ANCIENT_STAR_MAP?.effects || {};
+      const strategicRange = radarRange * Math.max(
+        1,
+        Number(effects.strategicContactRangeMultiplier) || 2
+      );
+      const strategicBases = npc.getBasesInRange(player.position, strategicRange);
+      const strategicNpcs = npc.getNPCsInRange(player.position, strategicRange);
+      const contacts = buildStrategicContacts(
+        player.position,
+        radarRange,
+        strategicRange,
+        effects.maxStrategicContacts,
+        strategicBases,
+        strategicNpcs
+      );
+      io.to(socketId).emit('relic:strategicContacts', contacts);
     }
   }
 }
@@ -2067,9 +2613,17 @@ function shouldSendNpcUpdate(dist, data, socketId) {
   if (lastSeenMap) {
     const prev = lastSeenMap.get(data.id);
     if (prev) {
+      if (data.type !== prev.type) return true;
+      if (data.name !== prev.name) return true;
+      if (data.faction !== prev.faction) return true;
       if (data.hull !== prev.hull) return true;
+      if (data.hullMax !== prev.hullMax) return true;
       if (data.shield !== prev.shield) return true;
+      if (data.shieldMax !== prev.shieldMax) return true;
       if (data.state !== prev.state) return true;
+      if (data.isBoss !== prev.isBoss) return true;
+      if (data.sizeMultiplier !== prev.sizeMultiplier) return true;
+      if (data.phase !== prev.phase) return true;
     }
   }
   // No previous state means first encounter - always send
@@ -2092,20 +2646,33 @@ function shouldSendNpcUpdate(dist, data, socketId) {
 function queueNpcUpdate(npcEntity, data) {
   if (!connectedPlayers) return;
 
+  const targetRetentionRange = getPlayerTargetRetentionRange(npcEntity);
+
   // Query spatial hash for nearby players instead of scanning all players
   const candidates = playerSpatialHash.query(
-    npcEntity.position.x, npcEntity.position.y, MAX_TIER_BROADCAST_RANGE
+    npcEntity.position.x,
+    npcEntity.position.y,
+    getNpcCandidateRange(
+      npcEntity,
+      MAX_TIER_BROADCAST_RANGE,
+      targetRetentionRange
+    )
   );
 
   for (const socketId of candidates) {
     const player = connectedPlayers.get(socketId);
-    if (!player) continue;
+    if (!canPlayerTakeDamage(player)) continue;
 
     const dx = player.position.x - npcEntity.position.x;
     const dy = player.position.y - npcEntity.position.y;
     const dist = Math.sqrt(dx * dx + dy * dy);
 
-    const broadcastRange = getPlayerBroadcastRange(player);
+    const broadcastRange = getNpcDeliveryRange(
+      npcEntity,
+      player,
+      getPlayerBroadcastRange(player),
+      targetRetentionRange
+    );
     if (dist <= broadcastRange) {
       // Distance-based throttling: skip update for far-away NPCs on non-scheduled ticks
       if (!shouldSendNpcUpdate(dist, data, socketId)) continue;
@@ -2132,65 +2699,87 @@ function buildNpcDelta(socketId, fullData) {
   }
   const lastSeen = playerLastSeen.get(socketId);
   const npcId = fullData.id;
-  const prev = lastSeen.get(npcId);
-
-  // Full state if: first time seeing this NPC, or periodic refresh
-  const needsFull = !prev || (currentTick - prev.tick >= FULL_REFRESH_INTERVAL);
-
-  // Normalize optional position fields (null when absent)
-  const collectingWreckagePos = fullData.collectingWreckagePos || null;
-  const miningTargetPos = fullData.miningTargetPos || null;
-
-  if (needsFull) {
-    // Send full state with flag
-    lastSeen.set(npcId, {
-      x: fullData.x, y: fullData.y,
-      rotation: fullData.rotation,
-      state: fullData.state,
-      hull: fullData.hull,
-      shield: fullData.shield,
-      collectingWreckagePos,
-      miningTargetPos,
-      tick: currentTick
-    });
-    return { ...fullData, f: 1 }; // f=1 means full state
-  }
-
-  // Build delta: always include id, x, y, rotation, velocity
-  const delta = {
-    id: npcId,
-    x: fullData.x,
-    y: fullData.y,
-    rotation: fullData.rotation,
-    vx: fullData.vx || 0,
-    vy: fullData.vy || 0
-  };
-
-  // Only include changed fields
-  if (fullData.state !== prev.state) delta.state = fullData.state;
-  if (fullData.hull !== prev.hull) delta.hull = fullData.hull;
-  if (fullData.shield !== prev.shield) delta.shield = fullData.shield;
-  // Include beam targets when they change (including transitions to/from null)
-  if (collectingWreckagePos !== prev.collectingWreckagePos) {
-    delta.collectingWreckagePos = collectingWreckagePos;
-  }
-  if (miningTargetPos !== prev.miningTargetPos) {
-    delta.miningTargetPos = miningTargetPos;
-  }
-
-  // Update last seen
-  lastSeen.set(npcId, {
-    x: fullData.x, y: fullData.y,
-    rotation: fullData.rotation,
-    state: fullData.state,
-    hull: fullData.hull,
-    shield: fullData.shield,
-    collectingWreckagePos,
-    miningTargetPos,
-    tick: currentTick
-  });
-
+  const { delta, nextState } = createNpcDelta(
+    lastSeen.get(npcId),
+    fullData,
+    currentTick,
+    FULL_REFRESH_INTERVAL
+  );
+  lastSeen.set(npcId, nextState);
   return delta;
+}
+
+/**
+ * Remember an explicit spawn delivery before the first batched state arrives.
+ * A null snapshot deliberately keeps the next delta as a full refresh while
+ * still making death/range reconciliation aware that the client owns the NPC.
+ */
+function trackNpcSpawnVisibility(socketId, npcId) {
+  if (typeof npcId !== 'string' || npcId.length === 0) return;
+  if (!playerLastSeen.has(socketId)) {
+    playerLastSeen.set(socketId, new Map());
+  }
+  const lastSeen = playerLastSeen.get(socketId);
+  if (!lastSeen.has(npcId)) lastSeen.set(npcId, null);
+}
+
+/**
+ * Retire all NPC visibility owned by one socket without playing death effects.
+ * Pending deltas are discarded so a leave event cannot be followed by an older
+ * update that recreates the entity on the client.
+ */
+function retireNpcVisibilityForSocket(socketId) {
+  const lastSeen = playerLastSeen.get(socketId);
+  if (lastSeen && io) {
+    for (const npcId of lastSeen.keys()) {
+      io.to(socketId).emit('npc:leave', { id: npcId });
+    }
+  }
+  playerLastSeen.delete(socketId);
+  npcBatches.delete(socketId);
+}
+
+/**
+ * Explicitly retire NPCs from clients when they leave authoritative delivery
+ * range. Delta state otherwise remembers the entity forever and the client can
+ * keep blending its last velocity against an obsolete target position.
+ */
+function reconcileNpcVisibility() {
+  if (!connectedPlayers || !io) return;
+
+  for (const [socketId, lastSeen] of playerLastSeen) {
+    const player = connectedPlayers.get(socketId);
+    if (!player) continue;
+    if (!canPlayerTakeDamage(player)) {
+      retireNpcVisibilityForSocket(socketId);
+      continue;
+    }
+
+    for (const npcId of [...lastSeen.keys()]) {
+      const npcEntity = getActiveNpcById(npcId);
+      if (!npcEntity?.position) {
+        // Rich destruction events may already have removed the entity, but leave
+        // is deliberately idempotent and also covers silent lifecycle removals.
+        io.to(socketId).emit('npc:leave', { id: npcId });
+        lastSeen.delete(npcId);
+        continue;
+      }
+
+      const dx = player.position.x - npcEntity.position.x;
+      const dy = player.position.y - npcEntity.position.y;
+      const targetRetentionRange = getPlayerTargetRetentionRange(npcEntity);
+      const deliveryRange = getNpcDeliveryRange(
+        npcEntity,
+        player,
+        getPlayerBroadcastRange(player),
+        targetRetentionRange
+      );
+      if (dx * dx + dy * dy > deliveryRange * deliveryRange) {
+        io.to(socketId).emit('npc:leave', { id: npcId });
+        lastSeen.delete(npcId);
+      }
+    }
+  }
 }
 
 /**
@@ -2199,9 +2788,20 @@ function buildNpcDelta(socketId, fullData) {
  * Also cleans up stale playerLastSeen entries for disconnected players.
  */
 function flushNpcBatches() {
+  reconcileNpcVisibility();
+
   for (const [socketId, batch] of npcBatches) {
-    if (batch.length > 0) {
-      io.to(socketId).emit('npc:batch', batch);
+    const player = connectedPlayers?.get(socketId);
+    const visibleIds = playerLastSeen.get(socketId);
+    if (!canPlayerTakeDamage(player) || !visibleIds) continue;
+
+    // Reconciliation runs after actions. An NPC may therefore have died, been
+    // despawned, or left range after its update was queued earlier in this tick.
+    const authoritativeBatch = batch.filter(update =>
+      update?.id && visibleIds.has(update.id) && getActiveNpcById(update.id)
+    );
+    if (authoritativeBatch.length > 0) {
+      io.to(socketId).emit('npc:batch', authoritativeBatch);
     }
   }
   npcBatches.clear();
@@ -2217,22 +2817,38 @@ function flushNpcBatches() {
 function broadcastNearNpc(npcEntity, event, data) {
   if (!connectedPlayers) return;
 
+  const targetRetentionRange = getPlayerTargetRetentionRange(npcEntity);
+
   // Query spatial hash for nearby players instead of scanning all players
   const candidates = playerSpatialHash.query(
-    npcEntity.position.x, npcEntity.position.y, MAX_TIER_BROADCAST_RANGE
+    npcEntity.position.x,
+    npcEntity.position.y,
+    getNpcCandidateRange(
+      npcEntity,
+      MAX_TIER_BROADCAST_RANGE,
+      targetRetentionRange
+    )
   );
 
   for (const socketId of candidates) {
     const player = connectedPlayers.get(socketId);
-    if (!player) continue;
+    if (!canPlayerTakeDamage(player)) continue;
 
     const dx = player.position.x - npcEntity.position.x;
     const dy = player.position.y - npcEntity.position.y;
     const dist = Math.sqrt(dx * dx + dy * dy);
 
-    // Use player's tier-based broadcast range
-    const broadcastRange = getPlayerBroadcastRange(player);
+    // Targets must see their attacker throughout its authoritative range.
+    const broadcastRange = getNpcDeliveryRange(
+      npcEntity,
+      player,
+      getPlayerBroadcastRange(player),
+      targetRetentionRange
+    );
     if (dist <= broadcastRange) {
+      if (event === 'npc:spawn') {
+        trackNpcSpawnVisibility(socketId, data?.id);
+      }
       io.to(socketId).emit(event, data);
     }
   }
@@ -2247,38 +2863,162 @@ function broadcastInRange(position, range, event, data) {
 
   for (const socketId of candidates) {
     const player = connectedPlayers.get(socketId);
-    if (!player) continue;
+    if (!canPlayerTakeDamage(player)) continue;
 
     const dx = player.position.x - position.x;
     const dy = player.position.y - position.y;
     const dist = Math.sqrt(dx * dx + dy * dy);
 
     if (dist <= range) {
+      if (event === 'npc:spawn') {
+        trackNpcSpawnVisibility(socketId, data?.id);
+      }
       io.to(socketId).emit(event, data);
     }
   }
 }
 
+/**
+ * Deliver an assimilation transition through engine-owned visibility state.
+ * The event can create converted NPC entities on the client, so every delivered
+ * NPC id must participate in the same leave/death reconciliation as a spawn.
+ */
+function broadcastBaseAssimilated(data) {
+  const position = data?.position;
+  if (!connectedPlayers || !io ||
+      !Number.isFinite(position?.x) || !Number.isFinite(position?.y)) {
+    return 0;
+  }
+
+  const convertedNpcs = Array.isArray(data.convertedNpcs)
+    ? data.convertedNpcs
+    : [];
+  const payload = {
+    baseId: data.baseId,
+    newType: data.newType,
+    originalFaction: data.originalFaction,
+    convertedNpcs,
+    position,
+    consumedDroneIds: Array.isArray(data.consumedDroneIds)
+      ? data.consumedDroneIds
+      : []
+  };
+  const candidates = playerSpatialHash.query(
+    position.x,
+    position.y,
+    MAX_TIER_BROADCAST_RANGE
+  );
+  let delivered = 0;
+
+  for (const socketId of candidates) {
+    const player = connectedPlayers.get(socketId);
+    if (!canPlayerTakeDamage(player) || !player.position) continue;
+
+    const distance = Math.hypot(
+      player.position.x - position.x,
+      player.position.y - position.y
+    );
+    if (distance > getPlayerBroadcastRange(player)) continue;
+
+    for (const conversion of convertedNpcs) {
+      trackNpcSpawnVisibility(socketId, conversion?.id || conversion?.npcId);
+    }
+    io.to(socketId).emit('swarm:baseAssimilated', payload);
+    delivered++;
+  }
+
+  return delivered;
+}
+
+/**
+ * Complete all side effects for an NPC killed by Swarm linked health. The
+ * linked-damage pass deliberately retains dead entities until this function
+ * has detached assimilation worms, created wreckage, emitted death state, and
+ * removed the entity from both the active map and spatial hash.
+ */
+function handleLinkedSwarmDeath(linked, sourceNpc, attackerId) {
+  const linkedNpc = linked.entity || npc.getNPC(linked.id);
+  if (!linkedNpc) return null;
+
+  if (linkedNpc.attachedToBase) {
+    const detachResult = npc.detachDroneFromBase(linked.id);
+    if (detachResult && socketModule?.broadcastAssimilationProgress) {
+      socketModule.broadcastAssimilationProgress({
+        baseId: detachResult.baseId,
+        progress: detachResult.remainingDrones,
+        threshold: detachResult.threshold,
+        position: linkedNpc.position,
+        droneKilled: linked.id,
+        killedBy: attackerId
+      });
+    }
+  }
+
+  const wasHatchingEgg = linkedNpc.faction === 'swarm' && linkedNpc.hatchTime &&
+    (Date.now() - linkedNpc.hatchTime) < (linkedNpc.hatchDuration || 2500);
+  const contributors = linkedNpc.damageContributors instanceof Map
+    ? Array.from(linkedNpc.damageContributors.keys())
+    : [attackerId].filter(Boolean);
+  const participants = contributors.length > 0 ? contributors : [attackerId].filter(Boolean);
+  let wreckage = null;
+
+  if (!wasHatchingEgg) {
+    wreckage = loot.spawnWreckage(
+      linkedNpc,
+      linkedNpc.position,
+      null,
+      linkedNpc.damageContributors || sourceNpc.damageContributors
+    );
+    broadcastWreckageNear(wreckage, 'wreckage:spawn', {
+      id: wreckage.id,
+      x: wreckage.position.x,
+      y: wreckage.position.y,
+      size: wreckage.size,
+      source: wreckage.source,
+      faction: wreckage.faction,
+      npcType: wreckage.npcType,
+      npcName: wreckage.npcName,
+      contentCount: wreckage.contents.length,
+      despawnTime: wreckage.despawnTime
+    });
+  }
+
+  broadcastNearNpc(linkedNpc, 'npc:destroyed', {
+    id: linked.id,
+    destroyedBy: attackerId,
+    participants,
+    participantCount: Math.max(1, participants.length),
+    teamMultiplier: npc.TEAM_MULTIPLIERS[Math.min(Math.max(1, participants.length), 4)] || 1,
+    creditsPerPlayer: linkedNpc.creditReward || 0,
+    faction: linkedNpc.faction,
+    deathEffect: wasHatchingEgg ? 'egg_pop' : (linkedNpc.deathEffect || 'dissolve'),
+    wreckageId: wreckage?.id || null,
+    linkedDeath: true
+  });
+
+  npc.removeNPC(linked.id);
+  return wreckage;
+}
+
 // Handle player attacking NPC
 // damageOverride: optional parameter to override damage calculation (used for chain lightning falloff)
-function playerAttackNPC(attackerId, npcId, weaponType, weaponTier, damageOverride) {
+function playerAttackNPC(
+  attackerId,
+  npcId,
+  weaponType,
+  weaponTier,
+  damageOverride,
+  attackContext = {}
+) {
   const npcEntity = npc.getNPC(npcId);
   if (!npcEntity) return null;
 
   // DREADNOUGHT INVULNERABILITY CHECK
   // Pirate dreadnoughts have a chance to negate all damage
-  if (npcEntity.type === 'pirate_dreadnought' && npcEntity.invulnerableChance) {
-    if (Math.random() < npcEntity.invulnerableChance) {
-      // Damage blocked - broadcast invulnerable effect
-      logger.log(`[PIRATE] Dreadnought ${npcId} invulnerable proc! Broadcasting to nearby players.`);
-      broadcastNearNpc(npcEntity, 'npc:invulnerable', {
-        npcId: npcId,
-        x: npcEntity.position.x,
-        y: npcEntity.position.y,
-        attackerId: attackerId
-      });
-      return { blocked: true, invulnerable: true, npcId };
-    }
+  const sourceId = attackContext?.sourceNpcId ?? attackerId;
+  if (!attackContext?.skipInvulnerabilityCheck) {
+    const blocked = tryBlockNpcDamage(npcEntity, sourceId);
+    if (blocked) return blocked;
   }
 
   // Calculate damage using proper damage calculation, or use override if provided
@@ -2290,21 +3030,33 @@ function playerAttackNPC(attackerId, npcId, weaponType, weaponTier, damageOverri
     totalDamage = damage.shieldDamage + damage.hullDamage;
   }
 
+  totalDamage = calculateFactionDamage(
+    totalDamage,
+    npcEntity.faction,
+    playerHasRelic(statements, attackerId, 'VOID_CRYSTAL')
+  );
+
   // Apply damage to NPC with attacker tracking
-  const result = npc.damageNPC(npcId, totalDamage, attackerId);
+  const result = npc.damageNPC(npcId, totalDamage, attackerId, {
+    sourceNpcId: attackContext?.sourceNpcId ?? null,
+    shieldPiercing: attackContext?.shieldPiercing ?? 0
+  });
 
   if (result && result.destroyed) {
     // Check if this was an attached assimilation drone
     if (npcEntity.attachedToBase) {
-      const detachResult = npc.detachDroneFromBase(npcId);
+      // damageNPC removes destroyed entities before returning, so pass the
+      // retained entity to let assimilation bookkeeping finish correctly.
+      const detachResult = npc.detachDroneFromBase(npcId, npcEntity);
       if (detachResult && socketModule) {
         // Broadcast the detachment so clients know the assimilation progress changed
         socketModule.broadcastAssimilationProgress({
           baseId: detachResult.baseId,
-          attachedCount: detachResult.remainingDrones,
+          progress: detachResult.remainingDrones,
           threshold: detachResult.threshold,
+          position: npcEntity.position,
           droneKilled: npcId,
-          killedBy: attackerId
+          killedBy: sourceId
         });
       }
     }
@@ -2350,7 +3102,7 @@ function playerAttackNPC(attackerId, npcId, weaponType, weaponTier, damageOverri
     // Broadcast NPC death with team info (use 'egg_pop' effect for hatching eggs)
     broadcastNearNpc(npcEntity, 'npc:destroyed', {
       id: npcId,
-      destroyedBy: attackerId,
+      destroyedBy: sourceId,
       participants: result.participants,
       participantCount: result.participantCount,
       teamMultiplier: result.teamMultiplier,
@@ -2366,6 +3118,11 @@ function playerAttackNPC(attackerId, npcId, weaponType, weaponTier, damageOverri
       if (formationInfo && formationInfo.memberIds.size > 0) {
         const successionResult = npc.handleLeaderDeath(formationInfo.formationId);
         if (successionResult.success && successionResult.newLeader) {
+          voidFormationAI.setFormationState(
+            formationInfo.formationId,
+            'confusion',
+            successionResult.newLeader.id
+          );
           broadcastNearNpc(npcEntity, 'formation:leaderChange', {
             formationId: formationInfo.formationId,
             oldLeaderId: npcId,
@@ -2386,6 +3143,15 @@ function playerAttackNPC(attackerId, npcId, weaponType, weaponTier, damageOverri
     if (npcEntity.type === 'swarm_queen') {
       const queenX = npcEntity.position?.x ?? npcEntity.x;
       const queenY = npcEntity.position?.y ?? npcEntity.y;
+
+      // `damageNPC` has already removed the entity from the active registry,
+      // but the singleton must also be cleared or the aura/guard systems keep
+      // treating a dead Queen as authoritative forever.
+      npc.handleQueenDeath(npcId);
+      if (socketModule?.broadcastQueenDeath) {
+        socketModule.broadcastQueenDeath(npcId, { x: queenX, y: queenY });
+      }
+
       const rageRange = 500; // Guards within 500 units enter rage
       const rageDuration = 30000; // 30 seconds of rage
       const ragingGuards = [];
@@ -2487,7 +3253,7 @@ function playerAttackNPC(attackerId, npcId, weaponType, weaponTier, damageOverri
   if (result) {
     broadcastNearNpc(npcEntity, 'combat:npcHit', {
       npcId: npcId,
-      attackerId: attackerId,
+      attackerId: sourceId,
       damage: Math.round(totalDamage),
       hull: result.hull,
       shield: result.shield,
@@ -2504,12 +3270,12 @@ function playerAttackNPC(attackerId, npcId, weaponType, weaponTier, damageOverri
         x: npcEntity.position.x,
         y: npcEntity.position.y
       });
-      logger.info(`[SCAVENGER] ${npcEntity.name} (${npcEntity.type}) enraged - targeting ${attackerId}`);
+      logger.info(`[SCAVENGER] ${npcEntity.name} (${npcEntity.type}) enraged - targeting ${sourceId}`);
     }
 
     // Apply linked health damage for Swarm faction
     if (npcEntity.linkedHealth && npcEntity.faction === 'swarm') {
-      const linkedResults = npc.applySwarmLinkedDamage(npcEntity, totalDamage);
+      const linkedResults = npc.applySwarmLinkedDamage(npcEntity, totalDamage, attackerId);
 
       if (linkedResults.length > 0) {
         // Broadcast linked damage event for visual feedback
@@ -2523,45 +3289,15 @@ function playerAttackNPC(attackerId, npcId, weaponType, weaponTier, damageOverri
             destroyed: r.destroyed,
             hull: r.hull,
             hullMax: r.hullMax,
-            x: npc.getNPC(r.id)?.position?.x || 0,
-            y: npc.getNPC(r.id)?.position?.y || 0
+            x: r.position?.x ?? 0,
+            y: r.position?.y ?? 0
           }))
         });
 
         // Handle any linked deaths
         for (const linked of linkedResults) {
           if (linked.destroyed) {
-            const linkedNpc = npc.getNPC(linked.id);
-            if (linkedNpc) {
-              // Spawn wreckage for linked death (inherit parent NPC's damage contributors for team credit)
-              const wreckage = loot.spawnWreckage(linkedNpc, linkedNpc.position, null, npcEntity.damageContributors);
-
-              broadcastNearNpc(linkedNpc, 'npc:destroyed', {
-                id: linked.id,
-                destroyedBy: attackerId,
-                participants: [attackerId],
-                participantCount: 1,
-                teamMultiplier: 1,
-                creditsPerPlayer: linkedNpc.creditReward || 0,
-                faction: linkedNpc.faction,
-                deathEffect: linkedNpc.deathEffect || 'dissolve',
-                wreckageId: wreckage.id,
-                linkedDeath: true
-              });
-
-              broadcastWreckageNear(wreckage, 'wreckage:spawn', {
-                id: wreckage.id,
-                x: wreckage.position.x,
-                y: wreckage.position.y,
-                size: wreckage.size,
-                source: wreckage.source,
-                faction: wreckage.faction,
-                npcType: wreckage.npcType,
-                npcName: wreckage.npcName,
-                contentCount: wreckage.contents.length,
-                despawnTime: wreckage.despawnTime
-              });
-            }
+            handleLinkedSwarmDeath(linked, npcEntity, sourceId);
           }
         }
       }
@@ -2596,7 +3332,12 @@ function playerAttackBase(attackerId, baseId, weaponType, weaponTier) {
 
   // Calculate damage using proper damage calculation
   const damage = combat.calculateDamage(weaponType, weaponTier, 1);
-  const totalDamage = damage.shieldDamage + damage.hullDamage;
+  let totalDamage = damage.shieldDamage + damage.hullDamage;
+  totalDamage = calculateFactionDamage(
+    totalDamage,
+    activeBase.faction || baseObj.faction,
+    playerHasRelic(statements, attackerId, 'VOID_CRYSTAL')
+  );
 
   // Apply damage to base with attacker tracking
   const result = npc.damageBase(baseId, totalDamage, attackerId);
@@ -2604,17 +3345,23 @@ function playerAttackBase(attackerId, baseId, weaponType, weaponTier) {
   if (result && result.destroyed) {
     // Generate loot for the base
     const baseLoot = result.loot;
+    const destroyedBaseType = result.baseType || activeBase.type || baseObj.type;
+    const destroyedFaction = result.faction || activeBase.faction || baseObj.faction;
+    const destroyedBaseName = result.baseName || activeBase.name || baseObj.name;
 
     // Create wreckage-like object for the base
     // Note: creditReward is 0 because credits are already awarded at destruction time
     // (see socket.js combat:fire handler for bases). Wreckage only contains resource loot.
+    const wreckageContributors = new Map(
+      (result.participants || []).map(participantId => [participantId, 1])
+    );
     const wreckage = loot.spawnWreckage({
       id: baseId,
-      name: baseObj.name,
-      faction: baseObj.faction,
-      type: 'base',
+      name: destroyedBaseName,
+      faction: destroyedFaction,
+      type: destroyedBaseType,
       creditReward: 0
-    }, { x: currentX, y: currentY }, baseLoot, null);
+    }, { x: currentX, y: currentY }, baseLoot, wreckageContributors, { source: 'base' });
 
     // Broadcast base destruction with team info and visual data
     // Use computed position for broadcasting range check and visual coordinates
@@ -2625,13 +3372,13 @@ function playerAttackBase(attackerId, baseId, weaponType, weaponTier) {
       participantCount: result.participantCount,
       teamMultiplier: result.teamMultiplier,
       creditsPerPlayer: result.creditsPerPlayer,
-      faction: baseObj.faction,
+      faction: destroyedFaction,
       respawnTime: result.respawnTime,
       wreckageId: wreckage.id,
       // Visual data for destruction sequence
       x: currentX,
       y: currentY,
-      baseType: baseObj.type,
+      baseType: destroyedBaseType,
       size: baseObj.size || 80,
       // Assimilation drones that died with the base (client should remove worm visuals)
       destroyedDrones: result.destroyedDrones || []
@@ -2651,6 +3398,24 @@ function playerAttackBase(attackerId, baseId, weaponType, weaponTier) {
       despawnTime: wreckage.despawnTime
     });
 
+    // damageBase transitions surviving Dreadnoughts directly into their
+    // permanent enraged state, so the ordinary AI action branch is bypassed.
+    // Announce that transition at the same authoritative destruction point.
+    for (const orphanedNpcId of result.orphanedNpcIds || []) {
+      const orphanedNpc = npc.getNPC(orphanedNpcId);
+      if (orphanedNpc?.type !== 'pirate_dreadnought' ||
+          orphanedNpc.state !== 'enraged') {
+        continue;
+      }
+      broadcastInRange(orphanedNpc.position, 3000, 'pirate:dreadnoughtEnraged', {
+        npcId: orphanedNpc.id,
+        x: orphanedNpc.position.x,
+        y: orphanedNpc.position.y,
+        destroyedBaseId: baseId,
+        timestamp: Date.now()
+      });
+    }
+
     // Add wreckage to result for socket handler
     result.wreckage = wreckage;
 
@@ -2668,7 +3433,7 @@ function playerAttackBase(attackerId, baseId, weaponType, weaponTier) {
       maxHealth: result.maxHealth,
       x: currentX,
       y: currentY,
-      faction: baseObj.faction,
+      faction: activeBase.faction || baseObj.faction,
       size: baseObj.size || 80
     });
   }
@@ -2754,6 +3519,27 @@ module.exports = {
   getWreckage,
   removeWreckage,
   getAllNPCs,
+  getPlayerRadarRange,
+  getPlayerBroadcastRange,
+  getPlayerBaseActivationRange,
+  getNpcSimulationRange,
+  shouldSimulateNpc,
+  clearMissingRetainedPlayerTargets,
+  includeRetainedNpcTargetPlayer,
+  updateNPCs,
+  updateNpcVelocity,
+  handleNpcFireAtNpc,
+  buildStrategicContacts,
+  broadcastNearbyBasesToPlayers,
+  broadcastNearNpc,
+  broadcastInRange,
+  broadcastBaseAssimilated,
+  queueNpcUpdate,
+  flushNpcBatches,
+  getSlowModifier,
+  getPlayerDebuffSnapshot,
+  canPlayerTakeDamage,
+  applyQueenAcidBurstDamage,
   loot,
   insertPlayerInHash,
   removePlayerFromHash,

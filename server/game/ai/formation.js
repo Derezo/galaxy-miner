@@ -42,6 +42,13 @@ class FormationStrategy {
     // Check all states for this NPC
     for (const [formationId, stateInfo] of this.formationStates) {
       if (stateInfo.newLeaderId === npc.id || npc.formationId === formationId) {
+        // Succession is a two-stage server behavior: one second of confusion,
+        // then two seconds reforming around the promoted leader.
+        if (stateInfo.state === 'confusion' &&
+            Date.now() - stateInfo.stateStartTime >= 1000) {
+          stateInfo.state = 'reforming';
+          stateInfo.stateStartTime = Date.now();
+        }
         return stateInfo;
       }
     }
@@ -54,9 +61,11 @@ class FormationStrategy {
   cleanupFormationStates() {
     const now = Date.now();
     for (const [formationId, stateInfo] of this.formationStates) {
-      // Confusion lasts 1 second, reforming lasts 2 seconds
-      const maxDuration = stateInfo.state === 'confusion' ? 1000 : 3000;
-      if (now - stateInfo.stateStartTime > maxDuration) {
+      const elapsed = now - stateInfo.stateStartTime;
+      if (stateInfo.state === 'confusion' && elapsed >= 1000) {
+        stateInfo.state = 'reforming';
+        stateInfo.stateStartTime = now;
+      } else if (stateInfo.state === 'reforming' && elapsed >= 2000) {
         this.formationStates.delete(formationId);
       }
     }
@@ -86,7 +95,13 @@ class FormationStrategy {
 
       if (formationState.state === 'reforming') {
         // During reformation: move toward new leader, no combat
-        return this.updateReformation(npc, nearbyAllies, deltaTime, formationState);
+        return this.updateReformation(
+          npc,
+          nearbyAllies,
+          deltaTime,
+          formationState,
+          context
+        );
       }
     }
 
@@ -210,6 +225,11 @@ class FormationStrategy {
     const dx = target.position.x - npc.position.x;
     const dy = target.position.y - npc.position.y;
     const dist = Math.sqrt(dx * dx + dy * dy);
+
+    // At exact overlap there is no defined direction in which to back away.
+    // Stay put for this tick rather than dividing by zero and corrupting the
+    // authoritative position with NaN; firing can still resolve at distance 0.
+    if (!Number.isFinite(dist) || dist <= 1e-6) return;
 
     // Face target
     npc.rotation = Math.atan2(dy, dx);
@@ -530,20 +550,40 @@ class FormationStrategy {
    * @param {Array} allies - Nearby allies
    * @param {number} deltaTime - Time since last update
    * @param {Object} stateInfo - Formation state info
+   * @param {Object} context - AI context containing the authoritative NPC map
    */
-  updateReformation(npc, allies, deltaTime, stateInfo) {
+  updateReformation(npc, allies, deltaTime, stateInfo, context = {}) {
     npc.state = 'reforming';
     npc.targetPlayer = null;
 
-    // Find the new leader
-    const newLeader = allies.find(a => a.id === stateInfo.newLeaderId);
+    const formationAllies = context.allNPCs instanceof Map
+      ? Array.from(context.allNPCs.values()).filter(entity =>
+        entity.id !== npc.id &&
+        entity.faction === npc.faction &&
+        (!npc.formationId || entity.formationId === npc.formationId)
+      )
+      : allies;
+
+    // The promoted NPC is not included in its own nearby-allies list. Followers
+    // may also be farther away than the 500-unit ally query during confusion,
+    // so resolve succession from the authoritative map before the local copy.
+    const newLeader = npc.id === stateInfo.newLeaderId
+      ? npc
+      : (context.allNPCs instanceof Map
+        ? context.allNPCs.get(stateInfo.newLeaderId)
+        : null) ||
+        formationAllies.find(a => a.id === stateInfo.newLeaderId);
     if (!newLeader) {
       // New leader not found, just drift
       return this.updateConfusion(npc, deltaTime, 0);
     }
 
+    // The promoted leader anchors the reforming formation; it must not try to
+    // follow itself or fall back to confusion because self is absent in allies.
+    if (newLeader === npc) return null;
+
     // Move toward formation position around new leader
-    const formationInfo = this.getFormationRole(npc, allies);
+    const formationInfo = this.getFormationRole(npc, formationAllies);
     this.followLeader(npc, newLeader, formationInfo.index, deltaTime);
 
     // No firing during reformation

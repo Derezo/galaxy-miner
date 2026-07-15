@@ -195,6 +195,13 @@ const DerelictRenderer = {
    * @param {Object} playerPosition - Player world position for proximity checks
    */
   draw(ctx, camera, playerPosition) {
+    const viewportWidth = (typeof RenderContext !== 'undefined' && RenderContext.width)
+      || ctx.canvas.clientWidth
+      || ctx.canvas.width;
+    const viewportHeight = (typeof RenderContext !== 'undefined' && RenderContext.height)
+      || ctx.canvas.clientHeight
+      || ctx.canvas.height;
+
     for (const [id, derelict] of this.derelicts) {
       // Convert to screen coordinates
       const screenX = derelict.x - camera.x;
@@ -202,8 +209,8 @@ const DerelictRenderer = {
 
       // Skip if off screen (with margin for large size)
       const margin = derelict.size * 1.5;
-      if (screenX < -margin || screenX > ctx.canvas.width / window.devicePixelRatio + margin ||
-          screenY < -margin || screenY > ctx.canvas.height / window.devicePixelRatio + margin) {
+      if (screenX < -margin || screenX > viewportWidth + margin ||
+          screenY < -margin || screenY > viewportHeight + margin) {
         continue;
       }
 
@@ -239,17 +246,8 @@ const DerelictRenderer = {
    * @param {Object} playerPosition - Player world position
    */
   drawPrompts(ctx, camera, playerPosition) {
-    if (!playerPosition) return;
-
-    const interactionRange = CONSTANTS.DERELICT_CONFIG?.INTERACTION_RANGE || 100;
-
-    for (const [id, derelict] of this.derelicts) {
-      const screenX = derelict.x - camera.x + ctx.canvas.width / 2;
-      const screenY = derelict.y - camera.y + ctx.canvas.height / 2;
-
-      // Interaction prompt is now handled by DOM element (salvage-hint)
-      // See player.js updateNearestMineable() for hint display logic
-    }
+    // Interaction prompts are handled by the DOM salvage hint. Keep this method
+    // as a compatibility hook without scanning every derelict a second time.
   },
 
   /**

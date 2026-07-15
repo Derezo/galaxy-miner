@@ -1,513 +1,144 @@
 # Loot Pools System
 
-## Overview
+NPC and faction-base wreckage uses a centralized faction-first generator in `server/game/loot-pools.js`. A source type selects a faction and difficulty template; the template determines slot counts and rarity weights; the faction determines which resources, buffs, components, and relics can fill those rolls.
 
-The Loot Pools system is a centralized, faction-first architecture for generating loot drops from NPCs and faction bases. It provides consistent, balanced rewards based on enemy type, faction, and difficulty tier, with support for resources, buffs, components, and relics.
+Credits are attached by the NPC/base reward flow outside this module. Collection, cargo limits, team allocation, relic ownership, and durable inventory writes are handled by the server socket helpers.
 
-## Purpose
+## Generation flow
 
-- **Consistency**: All loot generation flows through a single system
-- **Balance**: Tier-based templates ensure appropriate rewards for difficulty
-- **Faction Identity**: Each faction has unique resource pools and special drops
-- **Deduplication**: Map-based accumulation prevents duplicate resource entries
-- **Maintainability**: Adding new NPCs only requires faction + tier mapping
-
-## Architecture
-
-### Faction-First Design
-
-The system uses a three-layer approach:
-
-1. **Faction Definitions** (`FACTION_LOOT`) - Resource pools, relics, buffs, components per faction
-2. **Tier Templates** (`TIER_TEMPLATES`) - Drop profiles for low/mid/high/boss/base difficulty
-3. **NPC Mapping** (`NPC_LOOT_MAPPING`) - Maps each NPC type to faction + tier
-
-This eliminates duplication and makes the system data-driven.
-
-## Loot Generation Flow
-
-```
-NPC dies → Look up faction + tier → Select tier template → 
-  Roll resource slots → Pick from faction pool → Accumulate (dedupe) → 
-  Roll special drops (buffs/components/relics) → Return contents
+```text
+NPC/base type
+  -> faction + tier mapping
+  -> guaranteed and bonus resource slots
+  -> rarity roll restricted to non-empty faction buckets
+  -> resource selection and quantity roll
+  -> duplicate resources combined
+  -> independent buff/component/relic rolls
+  -> encounter-specific relic rolls
 ```
 
-## Faction Definitions
+Rarity weights are renormalized over buckets that the faction can actually supply. This matters for Void enemies, whose common bucket is empty: a common result cannot silently erase a guaranteed slot.
 
-Each faction has unique resource affinities and special drop tables:
+## Faction pools
 
-### Pirates
+| Faction | Common | Uncommon | Rare | Ultrarare |
+| --- | --- | --- | --- | --- |
+| Pirate | Iron, Carbon, Nickel | Copper, Titanium, Helium-3 | Platinum, Dark Matter, Quantum Crystals | Exotic Matter, Antimatter |
+| Scavenger | Iron, Nickel, Silicon | Copper, Silver, Cobalt, Lithium | Gold, Platinum, Iridium | Exotic Matter |
+| Swarm | Carbon, Phosphorus, Nitrogen, Hydrogen, Sulfur | Helium-3, Ice Crystals | Dark Matter, Quantum Crystals | Exotic Matter, Antimatter, Void Crystals |
+| Void | None | Neon | Xenon, Dark Matter, Quantum Crystals | Exotic Matter, Antimatter, Neutronium, Void Crystals |
+| Rogue Miner | Iron, Silicon | Copper, Titanium, Cobalt, Lithium | Gold, Uranium, Iridium, Platinum, Quantum Crystals | Exotic Matter |
 
-**Resources**:
-- Common: Iron, Carbon, Nickel
-- Uncommon: Copper, Titanium, Helium-3
-- Rare: Platinum, Dark Matter, Quantum Crystals
-- Ultrarare: Exotic Matter, Antimatter
+| Faction | Buff pool | Component pool | Boss relic pool |
+| --- | --- | --- | --- |
+| Pirate | Shield Boost, Speed Burst, Damage Amp | Engine Core, Weapon Matrix | Pirate Treasure, Skull and Bones |
+| Scavenger | Shield Boost, Speed Burst | Mining Capacitor, Engine Core | Pirate Treasure, Ancient Star Map, Scrap Siphon |
+| Swarm | Speed Burst, Damage Amp | Engine Core, Mining Capacitor | Swarm Hive Core |
+| Void | Damage Amp, Radar Pulse | Weapon Matrix, Shield Cell | Void Crystal, Wormhole Gem, Ancient Star Map, Subspace Warp Drive |
+| Rogue Miner | Shield Boost, Radar Pulse | Mining Capacitor, Shield Cell | Ancient Star Map, Pirate Treasure, Mining Rites |
 
-**Special Drops**:
-- Relics: Pirate Treasure
-- Buffs: Shield Boost, Speed Burst, Damage Amp
-- Components: Engine Core, Weapon Matrix
+## Tier templates
 
-**Identity**: Balanced loot with focus on weapons and engines
+Each bonus slot rolls independently. Resource results from multiple slots are combined by type before wreckage is spawned.
 
-### Scavengers
+| Tier | Guaranteed slots | Bonus slots | Rarity weights (C/U/R/UR) | Buff | Component | Faction relic |
+| --- | ---: | --- | --- | ---: | ---: | ---: |
+| Low | 1 | 2 at 80% each | 60% / 35% / 5% / 0% | 5% | 1% | None |
+| Mid | 2 | 2 at 85% each | 40% / 45% / 14% / 1% | 15% | 5% | None |
+| High | 2 | 3 at 90% each | 20% / 45% / 30% / 5% | 25% | 10% | None |
+| Boss | 3 | 3 at 95% each | 10% / 30% / 45% / 15% | 50% | 30% | 15% |
+| Base | 2 | 2 at 70% each | 5% / 15% / 60% / 20% | 40% | 50% | None |
 
-**Resources**:
-- Common: Iron, Nickel, Silicon
-- Uncommon: Copper, Silver, Cobalt, Lithium
-- Rare: Gold, Platinum, Iridium
-- Ultrarare: Exotic Matter
+Quantity ranges depend on the selected rarity:
 
-**Special Drops**:
-- Relics: Pirate Treasure, Ancient Star Map
-- Buffs: Shield Boost, Speed Burst
-- Components: Mining Capacitor, Engine Core
+| Tier | Common | Uncommon | Rare | Ultrarare |
+| --- | --- | --- | --- | --- |
+| Low | 2–5 | 1–3 | 1–2 | 1 |
+| Mid | 2–6 | 2–4 | 1–3 | 1 |
+| High | 3–6 | 2–5 | 2–4 | 1–2 |
+| Boss | 3–8 | 3–6 | 2–5 | 1–3 |
+| Base | 1–2 | 2–4 | 3–8 | 1–3 |
 
-**Identity**: Salvaged materials, mining equipment, scavenged relics
+The 15% boss relic roll selects one entry uniformly from that faction's boss relic pool. Bases do not use the generic relic roll, though the Pirate Outpost has an explicit Pirate Treasure chance described below.
 
-### Swarm
+## NPC and base mapping
 
-**Resources**:
-- Common: Carbon, Phosphorus, Nitrogen, Hydrogen (organic)
-- Uncommon: Helium-3, Sulfur, Ice Crystals
-- Rare: Dark Matter, Quantum Crystals
-- Ultrarare: Exotic Matter, Antimatter, Void Crystals
+| Faction | Low | Mid | High | Boss | Base |
+| --- | --- | --- | --- | --- | --- |
+| Pirate | Pirate Scout | Pirate Fighter | Pirate Captain | Pirate Dreadnought | Pirate Outpost |
+| Scavenger | Scavenger Scrapper, Scavenger Salvager | Scavenger Collector | Scavenger Hauler | Barnacle King | Scavenger Yard |
+| Swarm | Swarm Drone, Swarm Worker | Swarm Warrior | — | Swarm Queen | Swarm Hive |
+| Void | Void Whisper | Void Shadow | Void Phantom | Void Leviathan | Void Rift |
+| Rogue Miner | Rogue Prospector | Rogue Driller | Rogue Excavator | Rogue Foreman | Mining Claim |
 
-**Special Drops**:
-- Relics: Swarm Hive Core
-- Buffs: Speed Burst, Damage Amp
-- Components: Engine Core, Mining Capacitor
+An `assimilated_*` source is treated as a Swarm base for rewards even when it retains the geometry of its original hub.
 
-**Identity**: Organic/biological materials, extreme mobility, hive relics
+## All relic acquisition sources
 
-### Void Entities
+All nine defined relics are obtainable from the live loot tables.
 
-**Resources**:
-- Common: NONE (void entities never drop common resources)
-- Uncommon: Xenon, Dark Matter, Neon
-- Rare: Quantum Crystals, Exotic Matter
-- Ultrarare: Antimatter, Neutronium, Void Crystals
+| Relic | Sources |
+| --- | --- |
+| Ancient Star Map | Scavenger, Void, or Rogue Miner boss faction-relic roll |
+| Void Crystal | Void boss faction-relic roll |
+| Swarm Hive Core | Swarm Queen faction-relic roll |
+| Pirate Treasure | Pirate, Scavenger, or Rogue Miner boss faction-relic roll; destroyed Pirate Outpost has an additional 5% roll |
+| Wormhole Gem | Void boss faction-relic roll |
+| Scrap Siphon | Scavenger boss faction-relic roll; guaranteed in Barnacle King loot |
+| Mining Rites | Rogue Miner boss faction-relic roll; guaranteed in Rogue Foreman loot |
+| Skull and Bones | Pirate boss faction-relic roll; guaranteed in Pirate Dreadnought loot |
+| Subspace Warp Drive | Void boss faction-relic roll; Void Leviathan has an additional independent 25% roll |
 
-**Special Drops**:
-- Relics: Void Crystal, Wormhole Gem, Ancient Star Map
-- Buffs: Damage Amp, Radar Pulse
-- Components: Weapon Matrix, Shield Cell
+Relics are unique per player in SQLite. A duplicate does not create a second owned relic or a conversion payout; see [Relics](relics.md).
 
-**Identity**: Only rare/exotic drops, mysterious relics, dimensional materials
+## Team allocation
 
-### Rogue Miners
+Damage contributors define the reward team. Credit and item allocation follow different rules:
 
-**Resources**:
-- Common: Iron, Copper, Silicon
-- Uncommon: Titanium, Cobalt, Lithium
-- Rare: Gold, Uranium, Iridium, Platinum
-- Ultrarare: Exotic Matter, Quantum Crystals
+- Credits use the configured team pool multiplier: 1× for one contributor, 1.5× for two, 2× for three, and 2.5× for four or more. The integer pool is divided across contributors without rounding inflation. Any remainder is distributed deterministically.
+- Pirate Treasure is applied to each recipient's own credit share, not to the shared pool for players who do not own it.
+- With no contribution record, the collector is treated as the solo credit owner.
+- Common and uncommon resources are divided across damage contributors. The contributing collector receives the remainder; if the collector did not contribute, the first contributor receives it.
+- Rare and ultrarare resources, buffs, components, and relics go to the collector. Teammates receive a rare-drop notification.
+- Every resource share is capped independently by its recipient's server-authoritative cargo space. Rejected or overflow units remain in the wreckage settlement instead of disappearing.
+- Credits do not consume cargo capacity.
 
-**Special Drops**:
-- Relics: Ancient Star Map, Pirate Treasure
-- Buffs: Shield Boost, Radar Pulse
-- Components: Mining Capacitor, Shield Cell
+For example, a three-contributor wreckage with 100 base credits creates a 200-credit team pool before owner-specific Pirate Treasure bonuses. A stack of common Iron is split among the three contributors, while a rare Iridium stack remains with the collector.
 
-**Identity**: Rich mineral deposits, mining gear, prospecting tools
-
-## Tier Templates
-
-Tier templates define drop profiles with guaranteed and bonus slots:
-
-### Low Tier (Scouts, Scrappers, Drones)
-
-```javascript
-{
-  slots: { guaranteed: 1, bonus: { count: 2, chance: 0.8 } },
-  rarityWeights: {
-    common:    { weight: 0.60, quantityRange: [2, 5] },
-    uncommon:  { weight: 0.35, quantityRange: [1, 3] },
-    rare:      { weight: 0.05, quantityRange: [1, 2] },
-    ultrarare: { weight: 0.00, quantityRange: [1, 1] }
-  },
-  specialDrops: {
-    buff:      { chance: 0.05 },   // 5% buff chance
-    component: { chance: 0.01 },   // 1% component chance
-    relic:     null                 // No relics
-  }
-}
-```
-
-**Expected drops**: 1-3 resource types, mostly common/uncommon, rare buffs
-
-### Mid Tier (Fighters, Salvagers, Workers)
-
-```javascript
-{
-  slots: { guaranteed: 2, bonus: { count: 2, chance: 0.85 } },
-  rarityWeights: {
-    common:    { weight: 0.40, quantityRange: [2, 6] },
-    uncommon:  { weight: 0.45, quantityRange: [2, 4] },
-    rare:      { weight: 0.14, quantityRange: [1, 3] },
-    ultrarare: { weight: 0.01, quantityRange: [1, 1] }
-  },
-  specialDrops: {
-    buff:      { chance: 0.15 },   // 15% buff chance
-    component: { chance: 0.05 },   // 5% component chance
-    relic:     null
-  }
-}
-```
-
-**Expected drops**: 2-4 resource types, balanced mix, occasional rare materials
-
-### High Tier (Captains, Collectors, Warriors)
-
-```javascript
-{
-  slots: { guaranteed: 2, bonus: { count: 3, chance: 0.9 } },
-  rarityWeights: {
-    common:    { weight: 0.20, quantityRange: [3, 6] },
-    uncommon:  { weight: 0.45, quantityRange: [2, 5] },
-    rare:      { weight: 0.30, quantityRange: [2, 4] },
-    ultrarare: { weight: 0.05, quantityRange: [1, 2] }
-  },
-  specialDrops: {
-    buff:      { chance: 0.25 },   // 25% buff chance
-    component: { chance: 0.10 },   // 10% component chance
-    relic:     null
-  }
-}
-```
-
-**Expected drops**: 2-5 resource types, lots of rare materials, good buff/component chance
-
-### Boss Tier (Dreadnoughts, Queens, Leviathans)
-
-```javascript
-{
-  slots: { guaranteed: 3, bonus: { count: 3, chance: 0.95 } },
-  rarityWeights: {
-    common:    { weight: 0.10, quantityRange: [3, 8] },
-    uncommon:  { weight: 0.30, quantityRange: [3, 6] },
-    rare:      { weight: 0.45, quantityRange: [2, 5] },
-    ultrarare: { weight: 0.15, quantityRange: [1, 3] }
-  },
-  specialDrops: {
-    buff:      { chance: 0.50 },   // 50% buff chance
-    component: { chance: 0.30 },   // 30% component chance
-    relic:     { chance: 0.15 }    // 15% relic chance (BOSS EXCLUSIVE)
-  }
-}
-```
-
-**Expected drops**: 3-6 resource types, high rare/ultrarare, relics only from bosses
-
-### Base Tier (Faction Bases)
-
-```javascript
-{
-  slots: { guaranteed: 2, bonus: { count: 2, chance: 0.7 } },
-  rarityWeights: {
-    common:    { weight: 0.05, quantityRange: [1, 2] },
-    uncommon:  { weight: 0.15, quantityRange: [2, 4] },
-    rare:      { weight: 0.60, quantityRange: [3, 8] },    // Bases give LOTS of rare
-    ultrarare: { weight: 0.20, quantityRange: [1, 3] }
-  },
-  specialDrops: {
-    buff:      { chance: 0.40 },   // 40% buff chance
-    component: { chance: 0.50 },   // 50% component chance
-    relic:     null                 // Bases don't drop relics
-  }
-}
-```
-
-**Expected drops**: 2-4 resource types, heavy focus on rare/ultrarare, high component chance
-
-## Loot Drop Mechanics
-
-### Resource Accumulation
-
-The system uses **Map-based deduplication** to prevent duplicate entries:
-
-```javascript
-const loot = new Map();  // resourceType -> quantity
-
-// Roll each slot
-for (let i = 0; i < totalSlots; i++) {
-  const rarity = weightedRarityPick(template.rarityWeights);
-  const resource = randomPick(faction.resources[rarity]);
-  const quantity = randomInRange(template.rarityWeights[rarity].quantityRange);
-
-  // Accumulate (auto-dedupes)
-  loot.set(resource, (loot.get(resource) || 0) + quantity);
-}
-
-// Convert to array
-for (const [resourceType, quantity] of loot) {
-  contents.push({ type: 'resource', resourceType, quantity, rarity });
-}
-```
-
-**Result**: Same resource from multiple slots combines into single entry with summed quantity
-
-### Special Drops
-
-After resources, rolls for special items (independent probabilities):
-
-```javascript
-// Buffs (temporary power-ups)
-if (Math.random() < template.specialDrops.buff.chance) {
-  const buffType = randomPick(faction.buffs);
-  contents.push({ type: 'buff', buffType });
-}
-
-// Components (upgrade materials)
-if (Math.random() < template.specialDrops.component.chance) {
-  const componentType = randomPick(faction.components);
-  contents.push({ type: 'component', componentType });
-}
-
-// Relics (boss-exclusive, ultrarare collectibles)
-if (template.specialDrops.relic && Math.random() < template.specialDrops.relic.chance) {
-  const relicType = randomPick(faction.relics);
-  contents.push({ type: 'relic', relicType });
-}
-```
-
-### Loot Content Format
+## Loot item format
 
 ```javascript
 [
-  // Credits (handled by calling code, not loot pools)
   { type: 'credits', amount: 100 },
-
-  // Resources
   { type: 'resource', resourceType: 'IRON', quantity: 8, rarity: 'common' },
-  { type: 'resource', resourceType: 'PLATINUM', quantity: 3, rarity: 'rare' },
-
-  // Buffs
   { type: 'buff', buffType: 'SHIELD_BOOST' },
-
-  // Components
   { type: 'component', componentType: 'WEAPON_MATRIX' },
-
-  // Relics (boss only)
   { type: 'relic', relicType: 'VOID_CRYSTAL' }
 ]
 ```
 
-## Team Loot Distribution
+`generateLoot(npcType)` produces resource and special-item entries. Credits are supplied by the calling combat/base system.
 
-Team multipliers apply to **credits only**, not resources:
+## Extending the system
 
-| Team Size | Credits Multiplier | Per-Player Share |
-|-----------|-------------------|------------------|
-| 1 (Solo) | 1.0x (100%) | 100% |
-| 2 (Duo) | 1.5x (150%) | 75% each |
-| 3 (Trio) | 2.0x (200%) | 66% each |
-| 4+ (Squad) | 2.5x (250%) | 62.5% each |
+1. Define the NPC/base combat type in the appropriate faction system.
+2. Add its faction and tier to `NPC_LOOT_MAPPING`.
+3. Reuse an existing faction pool, or deliberately update `FACTION_LOOT` and the resource-economy documentation.
+4. Add focused generation and acquisition tests. Empty rarity buckets must remain safe.
 
-**Resources**: Full loot list given to ONE player (highest damage contributor)
+## Key files
 
-**Credits**: Multiplied total split evenly among all participants
+| Responsibility | File |
+| --- | --- |
+| Faction pools, templates, mapping | `server/game/loot-pools.js` |
+| Wreckage lifecycle | `server/game/loot.js` |
+| Team allocation and durable collection | `server/socket/helpers.js` |
+| Faction and item definitions | `shared/constants.js` |
+| NPC/base reward integration | `server/game/npc.js`, `server/game/engine.js` |
 
-**Example**:
-- NPC drops 100 credits + 10 Iron + 3 Platinum
-- Killed by 3-player team
-- Credits: 100 × 2.0 = 200 total, 66 per player
-- Resources: All items go to player with most damage
+## See also
 
-## NPC Loot Mapping
-
-All NPCs mapped to faction + tier in `/server/game/loot-pools.js`:
-
-```javascript
-const NPC_LOOT_MAPPING = {
-  // Pirates
-  pirate_scout:       { faction: 'pirate', tier: 'low' },
-  pirate_fighter:     { faction: 'pirate', tier: 'mid' },
-  pirate_captain:     { faction: 'pirate', tier: 'high' },
-  pirate_dreadnought: { faction: 'pirate', tier: 'boss' },
-  pirate_outpost:     { faction: 'pirate', tier: 'base' },
-
-  // Scavengers
-  scavenger_scrapper:  { faction: 'scavenger', tier: 'low' },
-  scavenger_salvager:  { faction: 'scavenger', tier: 'low' },
-  scavenger_collector: { faction: 'scavenger', tier: 'mid' },
-  scavenger_hauler:    { faction: 'scavenger', tier: 'high' },
-  scavenger_yard:      { faction: 'scavenger', tier: 'base' },
-
-  // Swarm
-  swarm_drone:   { faction: 'swarm', tier: 'low' },
-  swarm_worker:  { faction: 'swarm', tier: 'low' },
-  swarm_warrior: { faction: 'swarm', tier: 'mid' },
-  swarm_queen:   { faction: 'swarm', tier: 'boss' },
-  swarm_hive:    { faction: 'swarm', tier: 'base' },
-
-  // Void Entities
-  void_whisper:   { faction: 'void', tier: 'low' },
-  void_shadow:    { faction: 'void', tier: 'mid' },
-  void_phantom:   { faction: 'void', tier: 'high' },
-  void_leviathan: { faction: 'void', tier: 'boss' },
-  void_rift:      { faction: 'void', tier: 'base' },
-
-  // Rogue Miners
-  rogue_prospector: { faction: 'rogue_miner', tier: 'low' },
-  rogue_driller:    { faction: 'rogue_miner', tier: 'mid' },
-  rogue_excavator:  { faction: 'rogue_miner', tier: 'high' },
-  rogue_foreman:    { faction: 'rogue_miner', tier: 'boss' },
-  mining_claim:     { faction: 'rogue_miner', tier: 'base' }
-};
-```
-
-## Usage API
-
-### Main Function
-
-```javascript
-const LootPools = require('./loot-pools.js');
-
-// Generate loot for any NPC or base
-const loot = LootPools.generateLoot('pirate_captain');
-// Returns array of loot items
-
-// Spawn wreckage with loot
-const wreckage = spawnWreckage(npc, position, loot);
-```
-
-### Helper Functions
-
-```javascript
-// Get faction/tier for an NPC
-const mapping = LootPools.getMappingForNpc('swarm_queen');
-// { faction: 'swarm', tier: 'boss' }
-
-// Get faction loot definition
-const factionLoot = LootPools.getFactionLoot('void');
-// { resources, relics, buffs, components }
-
-// Get tier template
-const template = LootPools.getTierTemplate('boss');
-// { slots, rarityWeights, specialDrops }
-
-// Check if NPC is boss tier
-const isBoss = LootPools.isBossTier('void_leviathan');
-// true
-```
-
-## Related Files
-
-### Core System
-- `/server/game/loot-pools.js` - Centralized loot generation (358 lines)
-- `/server/game/loot.js` - Wreckage spawning and collection
-- `/shared/constants.js` - Resource types, buff types, relic types
-
-### Integration Points
-- `/server/game/npc.js` - Calls `generateLoot()` on NPC death
-- `/server/game/combat.js` - Tracks damage contributors for team distribution
-- `/server/socket.js` - Handles loot collection events
-
-## Configuration
-
-All configuration is data-driven and easily modifiable:
-
-### Adding a New NPC
-
-1. Add to `NPC_TYPES` in `/server/game/npc.js` with stats
-2. Add to `NPC_LOOT_MAPPING` in `/server/game/loot-pools.js`:
-   ```javascript
-   new_enemy_type: { faction: 'pirate', tier: 'mid' }
-   ```
-3. Done! Loot automatically generated from faction + tier
-
-### Adjusting Drop Rates
-
-Edit tier templates in `TIER_TEMPLATES`:
-
-```javascript
-boss: {
-  slots: { guaranteed: 3, bonus: { count: 3, chance: 0.95 } },
-  rarityWeights: {
-    // Adjust weights (must sum to 1.0)
-    rare: { weight: 0.60, quantityRange: [3, 8] },  // 60% chance
-    // Adjust quantity ranges
-    ultrarare: { weight: 0.20, quantityRange: [2, 5] }  // More ultrarare
-  },
-  specialDrops: {
-    relic: { chance: 0.25 }  // Increase boss relic chance to 25%
-  }
-}
-```
-
-### Modifying Faction Resources
-
-Edit `FACTION_LOOT` to change resource pools:
-
-```javascript
-pirate: {
-  resources: {
-    // Add new resource types
-    rare: ['PLATINUM', 'DARK_MATTER', 'IRIDIUM'],
-    // Change pools
-    ultrarare: ['NEUTRONIUM']  // Pirates now drop Neutronium
-  }
-}
-```
-
-## Design Rationale
-
-### Why Faction-First?
-
-- **Consistency**: All pirates drop similar materials
-- **Identity**: Void entities feel alien (no commons)
-- **Maintainability**: One place to change faction behavior
-- **Extensibility**: New factions just need resource/relic definitions
-
-### Why Map-Based Deduplication?
-
-- **Clean Output**: No duplicate "Iron x3" + "Iron x5" entries
-- **Simpler UI**: Wreckage shows combined quantities
-- **Performance**: O(1) accumulation vs O(n) array search
-
-### Why Tier Templates?
-
-- **Balance**: Ensures boss loot is meaningfully better
-- **Tuning**: Adjust all low-tier drops at once
-- **Clarity**: Difficulty progression is explicit
-
-## Examples
-
-### Boss Loot (Swarm Queen)
-
-```javascript
-const loot = LootPools.generateLoot('swarm_queen');
-// Example output:
-[
-  { type: 'resource', resourceType: 'DARK_MATTER', quantity: 4, rarity: 'rare' },
-  { type: 'resource', resourceType: 'ANTIMATTER', quantity: 2, rarity: 'ultrarare' },
-  { type: 'resource', resourceType: 'VOID_CRYSTALS', quantity: 1, rarity: 'ultrarare' },
-  { type: 'resource', resourceType: 'CARBON', quantity: 5, rarity: 'common' },
-  { type: 'buff', buffType: 'DAMAGE_AMP' },
-  { type: 'component', componentType: 'ENGINE_CORE' },
-  { type: 'relic', relicType: 'SWARM_HIVE_CORE' }
-]
-```
-
-### Low-Tier Loot (Pirate Scout)
-
-```javascript
-const loot = LootPools.generateLoot('pirate_scout');
-// Example output:
-[
-  { type: 'resource', resourceType: 'IRON', quantity: 3, rarity: 'common' },
-  { type: 'resource', resourceType: 'COPPER', quantity: 2, rarity: 'uncommon' }
-]
-```
-
-### Void Entity Loot (No Commons)
-
-```javascript
-const loot = LootPools.generateLoot('void_whisper');
-// Example output (never has common rarity):
-[
-  { type: 'resource', resourceType: 'XENON', quantity: 2, rarity: 'uncommon' },
-  { type: 'resource', resourceType: 'DARK_MATTER', quantity: 1, rarity: 'uncommon' }
-]
-```
+- [Relics](relics.md)
+- [Resources](resources.md)
+- [Wreckage](wreckage-system.md)
+- [NPC Factions](npc-factions.md)

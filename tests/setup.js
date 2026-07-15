@@ -6,6 +6,7 @@
 const Database = require('better-sqlite3');
 const fs = require('fs');
 const path = require('path');
+const CONSTANTS = require('../shared/constants');
 
 /**
  * Create an in-memory SQLite database with the full schema applied
@@ -59,10 +60,10 @@ function createTestShip(db, userId, shipData = {}) {
     velocity_y: 0,
     current_sector_x: 0,
     current_sector_y: 0,
-    hull_hp: 100,
-    hull_max: 100,
-    shield_hp: 50,
-    shield_max: 50,
+    hull_hp: CONSTANTS.DEFAULT_HULL_HP,
+    hull_max: CONSTANTS.DEFAULT_HULL_HP,
+    shield_hp: CONSTANTS.DEFAULT_SHIELD_HP,
+    shield_max: CONSTANTS.DEFAULT_SHIELD_HP,
     credits: 100,
     engine_tier: 1,
     weapon_type: 'kinetic',

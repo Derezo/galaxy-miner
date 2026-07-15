@@ -6,6 +6,7 @@ const config = require('./config');
 const { statements } = require('./database');
 const Physics = require('../shared/physics');
 const StarSystem = require('../shared/star-system');
+const ResourceSelection = require('../shared/resource-selection');
 const logger = require('../shared/logger');
 const {
   isGraveyardSector: isGraveyardSectorFn,
@@ -63,13 +64,8 @@ function getPlanetType(rng) {
 }
 
 function getPlanetResources(rng) {
-  const resources = [];
-  const types = Object.keys(config.RESOURCE_TYPES);
   const count = 1 + Math.floor(rng() * 3);
-  for (let i = 0; i < count; i++) {
-    resources.push(types[Math.floor(rng() * types.length)]);
-  }
-  return resources;
+  return ResourceSelection.selectResources(config.RESOURCE_TYPES, rng, count);
 }
 
 function getAsteroidResources(rng) {
@@ -113,6 +109,7 @@ function generateSectorFromStarSystem(sectorX, sectorY) {
     asteroids: [],
     wormholes: [],
     bases: [],
+    comets: [],
     derelicts: [], // Ancient derelict ships in The Graveyard
     systems: [] // Reference to parent star systems
   };
@@ -137,7 +134,10 @@ function generateSectorFromStarSystem(sectorX, sectorY) {
       sector.stars.push({
         ...system.primaryStar,
         systemId: system.id,
-        isBinary: !!system.binaryInfo
+        isBinary: !!system.binaryInfo,
+        isPrimaryBinary: system.binaryInfo ? true : undefined,
+        binaryRole: system.binaryInfo ? 'primary' : null,
+        binaryInfo: system.binaryInfo || null
       });
     }
 
@@ -148,7 +148,9 @@ function generateSectorFromStarSystem(sectorX, sectorY) {
         sector.stars.push({
           ...secondary,
           systemId: system.id,
+          isBinary: true,
           isPrimaryBinary: false,
+          binaryRole: 'secondary',
           binaryInfo: system.binaryInfo
         });
       }
@@ -167,7 +169,8 @@ function generateSectorFromStarSystem(sectorX, sectorY) {
           ...planet,
           starX: starX,
           starY: starY,
-          systemId: system.id
+          systemId: system.id,
+          parentStarRole: StarSystem.getStarRole(system, planet.starId)
         });
       }
     }
@@ -183,6 +186,7 @@ function generateSectorFromStarSystem(sectorX, sectorY) {
           starX: system.primaryStar.x,
           starY: system.primaryStar.y,
           systemId: system.id,
+          parentStarRole: StarSystem.getStarRole(system, asteroid.starId),
           isOrbital: true
         });
       }
@@ -245,7 +249,8 @@ function generateSectorFromStarSystem(sectorX, sectorY) {
             ...base,
             starX: starX,
             starY: starY,
-            systemId: system.id
+            systemId: system.id,
+            parentStarRole: StarSystem.getStarRole(system, base.starId)
           });
         }
       } else if (isInSector(base.x, base.y)) {
@@ -258,7 +263,8 @@ function generateSectorFromStarSystem(sectorX, sectorY) {
           ...base,
           starX: starX,
           starY: starY,
-          systemId: system.id
+          systemId: system.id,
+          parentStarRole: StarSystem.getStarRole(system, base.starId)
         });
       }
     }
@@ -277,6 +283,16 @@ function generateSectorFromStarSystem(sectorX, sectorY) {
       }
     }
 
+    // Comet paths can span several sectors. Use the shared Bezier bounds so
+    // client and server expose the same stable comet IDs along the whole path.
+    for (const comet of StarSystem.getCometsForSector(system, sectorX, sectorY)) {
+      sector.comets.push({
+        ...comet,
+        systemId: system.id,
+        parentStarRole: StarSystem.getStarRole(system, comet.starId)
+      });
+    }
+
     // Add mining claim objects (asteroids/planets generated near mining claims)
     if (system.miningClaimObjects) {
       for (const obj of system.miningClaimObjects) {
@@ -287,6 +303,7 @@ function generateSectorFromStarSystem(sectorX, sectorY) {
               starX: system.primaryStar.x,
               starY: system.primaryStar.y,
               systemId: system.id,
+              parentStarRole: null,
               isOrbital: false  // Mining claim objects don't orbit
             });
           } else {
@@ -296,6 +313,7 @@ function generateSectorFromStarSystem(sectorX, sectorY) {
               starX: system.primaryStar.x,
               starY: system.primaryStar.y,
               systemId: system.id,
+              parentStarRole: null,
               isOrbital: false  // Mining claim objects don't orbit
             });
           }
@@ -539,6 +557,7 @@ function generateSectorLegacy(sectorX, sectorY) {
     asteroids: [],
     wormholes: [],
     bases: [],
+    comets: [],
     derelicts: [] // Ancient derelict ships in The Graveyard
   };
 
@@ -788,6 +807,8 @@ function findInSector(sector, type, objectId) {
     return sector.wormholes.find(w => w.id === objectId);
   } else if (type === 'base') {
     return sector.bases.find(b => b.id === objectId);
+  } else if (type === 'comet') {
+    return sector.comets?.find(c => c.id === objectId);
   } else if (type === 'derelict') {
     return sector.derelicts ? sector.derelicts.find(d => d.id === objectId) : null;
   }
@@ -951,6 +972,8 @@ function getStarSystemObjectById(objectId, debug = false) {
     result = system.bases.find(b => b.id === objectId);
   } else if (type === 'wormhole') {
     result = system.wormholes.find(w => w.id === objectId);
+  } else if (type === 'comet') {
+    result = system.comets?.find(c => c.id === objectId) || null;
   }
 
   if (debug) {
@@ -1036,23 +1059,30 @@ function getObjectPosition(objectId, time) {
   const object = getObjectById(objectId);
   if (!object) return null;
 
-  time = time || Physics.getPhysicsTime();
-  const orbitTime = Physics.getOrbitTime();
+  const orbitTime = time !== undefined ? time : Physics.getOrbitTime();
+  time = orbitTime;
+
+  // StarSystem objects are resolved directly against their owning system.
+  // Raw planets intentionally do not need sector-local star clones or fallback
+  // coordinates, and binary roles are determined from stable star IDs.
+  if (objectId.startsWith('ss_')) {
+    const systemId = StarSystem.getSystemIdFromObjectId(objectId);
+    const system = systemId ? StarSystem.getStarSystemById(systemId) : null;
+    const position = system
+      ? StarSystem.resolveObjectPosition(system, object, orbitTime)
+      : null;
+
+    if (!position || !Number.isFinite(position.x) || !Number.isFinite(position.y)) {
+      return null;
+    }
+    return position;
+  }
 
   // Parse object type from ID - handle different formats
   const parts = objectId.split('_');
   let type, sector;
 
-  if (objectId.startsWith('ss_')) {
-    // StarSystem format: ss_{superX}_{superY}_{systemIndex}_{type}_{objectIndex}
-    type = parts[4]; // type is at index 4
-    // Get sector from object's position or starX/starY
-    const objX = object.starX !== undefined ? object.starX : (object.x || 0);
-    const objY = object.starY !== undefined ? object.starY : (object.y || 0);
-    const sectorX = Math.floor(objX / config.SECTOR_SIZE);
-    const sectorY = Math.floor(objY / config.SECTOR_SIZE);
-    sector = generateSector(sectorX, sectorY);
-  } else if (objectId.startsWith('graveyard_')) {
+  if (objectId.startsWith('graveyard_')) {
     // Graveyard base format: graveyard_{baseType}_{index}
     // These are static bases, just return their position
     type = 'base';

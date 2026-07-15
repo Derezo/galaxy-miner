@@ -56,6 +56,23 @@ const VirtualJoystick = {
     }
 
     this.knob = this.element.querySelector('.joystick-knob');
+    this.setSize(this.config.size);
+  },
+
+  /**
+   * Resize both the rendered control and its input travel consistently.
+   */
+  setSize(size) {
+    const normalizedSize = Math.max(80, Math.min(160, Number(size) || 120));
+    const scale = normalizedSize / 120;
+    this.config.size = normalizedSize;
+    this.config.knobSize = Math.round(50 * scale);
+    this.config.maxDistance = 50 * scale;
+
+    if (this.element?.style && typeof this.element.style.setProperty === 'function') {
+      this.element.style.setProperty('--joystick-size', `${normalizedSize}px`);
+      this.element.style.setProperty('--joystick-knob-size', `${this.config.knobSize}px`);
+    }
   },
 
   bindEvents() {
@@ -69,12 +86,7 @@ const VirtualJoystick = {
     canvas.addEventListener('touchstart', (e) => this.onTouchStart(e), { passive: false });
     canvas.addEventListener('touchmove', (e) => this.onTouchMove(e), { passive: false });
     canvas.addEventListener('touchend', (e) => this.onTouchEnd(e), { passive: false });
-    // touchcancel should always reset - canceled touches may not appear in changedTouches
-    canvas.addEventListener('touchcancel', () => {
-      if (this.touchId !== null) {
-        this.reset();
-      }
-    }, { passive: false });
+    canvas.addEventListener('touchcancel', (e) => this.onTouchCancel(e), { passive: false });
   },
 
   /**
@@ -149,6 +161,18 @@ const VirtualJoystick = {
     }
   },
 
+  onTouchCancel(e) {
+    if (this.touchId === null) return;
+
+    const canceledOwner = Array.from(e.changedTouches || [])
+      .some(touch => touch.identifier === this.touchId);
+    const ownerStillActive = Array.from(e.touches || [])
+      .some(touch => touch.identifier === this.touchId);
+    if (canceledOwner || (e.touches && !ownerStillActive)) {
+      this.reset();
+    }
+  },
+
   /**
    * Reset joystick to inactive state
    * Ensures touchId is cleared to allow new touch interactions
@@ -157,7 +181,10 @@ const VirtualJoystick = {
     this.touchId = null;
     this.active = false;
     this.thrust = 0;
-    this.element.classList.remove('active');
+    // Desktop initialization intentionally leaves the DOM controls absent.
+    if (this.element) {
+      this.element.classList.remove('active');
+    }
 
     // Reset knob position
     if (this.knob) {

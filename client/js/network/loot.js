@@ -140,15 +140,20 @@ function register(socket) {
     window.Logger.category('relics', 'Siphon multi-collect complete:', data.wreckageIds);
     Player.onMultiCollectComplete(data);
 
+    const removedIds = Array.isArray(data.wreckageIds) ? data.wreckageIds : [];
+    const attemptedIds = Array.isArray(data.attemptedWreckageIds)
+      ? data.attemptedWreckageIds
+      : removedIds;
+
     // Delay wreckage removal to let animation complete (minimum 600ms animation)
     // The animation was started with Math.max(600, totalTime), so wait that long
     const animDelay = 650; // slightly longer than min animation duration
     setTimeout(() => {
       window.Logger.category('relics', 'Siphon removing wreckage after animation delay');
       if (typeof Entities !== 'undefined') {
-        Entities.clearSiphonAnimations(data.wreckageIds);
+        Entities.clearSiphonAnimations(attemptedIds);
       }
-      for (const wreckageId of data.wreckageIds) {
+      for (const wreckageId of removedIds) {
         Entities.removeWreckage(wreckageId);
       }
     }, animDelay);
@@ -217,27 +222,39 @@ function register(socket) {
   socket.on('relic:collected', (data) => {
     window.Logger.category('relics', 'Relic collected:', data.relicType);
 
+    const normalizedType = String(data.relicType || '').toUpperCase();
+    if (!normalizedType) return;
+    const obtainedAt = new Date().toISOString();
+
     // Add relic to player's collection
     if (typeof Player !== 'undefined') {
       if (!Player.relics) Player.relics = [];
-      Player.relics.push({
-        relic_type: data.relicType,
-        obtained_at: new Date().toISOString()
-      });
+      const alreadyOwned = Player.relics.some(relic =>
+        String(relic.relic_type || '').toUpperCase() === normalizedType
+      );
+      if (!alreadyOwned) {
+        Player.relics.push({ relic_type: normalizedType, obtained_at: obtainedAt });
+      }
     }
 
     // Update UIState
     if (typeof UIState !== 'undefined') {
       const currentRelics = UIState.get('relics') || [];
-      UIState.set('relics', [...currentRelics, {
-        relic_type: data.relicType,
-        obtained_at: new Date().toISOString()
-      }]);
+      const alreadyTracked = currentRelics.some(relic =>
+        String(relic.relic_type || '').toUpperCase() === normalizedType
+      );
+      if (!alreadyTracked) {
+        UIState.set('relics', [...currentRelics, {
+          relic_type: normalizedType,
+          obtained_at: obtainedAt
+        }]);
+      }
     }
 
-    // Show reward pop-up
-    if (typeof NotificationManager !== 'undefined') {
-      NotificationManager.queueReward({ relics: [data.relicType] });
+    // Loot completion already renders the reward. Other acquisition sources can
+    // omit showReward:false and still use this event for their popup.
+    if (data.showReward !== false && typeof NotificationManager !== 'undefined') {
+      NotificationManager.queueReward({ relics: [normalizedType] });
     }
 
     // Refresh RelicsPanel if open
@@ -249,6 +266,13 @@ function register(socket) {
   // Skull and Bones plunder events
   socket.on('relic:plunderSuccess', (data) => {
     Logger.log('[Plunder] Plunder success!', data);
+
+    if (typeof Player !== 'undefined') {
+      const cooldown = Number(data.playerCooldown)
+        || CONSTANTS.RELIC_TYPES?.SKULL_AND_BONES?.cooldown
+        || 15000;
+      Player.plunderCooldownEnd = Date.now() + cooldown;
+    }
 
     // Show plunder rewards using the same reward display as mining/wreckage
     if (typeof NotificationManager !== 'undefined') {
@@ -272,15 +296,29 @@ function register(socket) {
       FloatingTextSystem.add(data.position.x, data.position.y, 'PLUNDERED!', '#ffd700');
     }
 
+    if (data.cargoLimited && typeof NotificationManager !== 'undefined') {
+      NotificationManager.info('Cargo limit reached; unclaimed base reserves remain');
+    } else if (data.baseDepleted && typeof NotificationManager !== 'undefined') {
+      NotificationManager.info('Base reserves depleted until its next lifecycle');
+    }
+
     // Credits and inventory are updated by the server's 'inventory:update' event
     // which fires immediately after plunderSuccess (see server/socket/relic.js)
   });
 
   socket.on('relic:plunderFailed', (data) => {
     Logger.log('[Plunder] Plunder failed:', data.reason);
-    NotificationManager.error(data.reason || 'Plunder failed');
-    // Reset cooldown on failure
-    Player.plunderCooldownEnd = 0;
+    const remaining = Math.max(0, Number(data.cooldownRemaining) || 0);
+    const suffix = remaining > 0 ? ` (${Math.ceil(remaining / 1000)}s)` : '';
+    NotificationManager.error(`${data.reason || 'Plunder failed'}${suffix}`);
+
+    // Only a server-owned player cooldown applies globally. A base alert should
+    // not prevent the player from trying a different base.
+    if (data.cooldownScope === 'player' && remaining > 0) {
+      Player.plunderCooldownEnd = Date.now() + remaining;
+    } else {
+      Player.plunderCooldownEnd = 0;
+    }
   });
 
   // Broadcast when any player plunders (for visual effect)

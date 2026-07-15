@@ -36,7 +36,8 @@ const EntityLayer = {
   drawTractorBeam(ctx, camera) {
     if (!Player.miningTarget || Player.miningProgress <= 0) return;
 
-    const resourceType = Player.miningTarget.resources?.[0] || 'default';
+    const resourceType = Player.miningTarget.activeResourceType ||
+      Player.miningTarget.resources?.[0] || 'default';
     TractorBeamRenderer.draw(
       ctx,
       Player.position,
@@ -84,7 +85,16 @@ const EntityLayer = {
 
       // Use advanced NPC ship geometry if available
       if (typeof NPCShipGeometry !== 'undefined') {
-        NPCShipGeometry.draw(ctx, npc, screen, npc.rotation);
+        NPCShipGeometry.draw(
+          ctx,
+          npc.position,
+          npc.rotation,
+          npc.type,
+          npc.faction,
+          screen,
+          Date.now(),
+          npc
+        );
       } else {
         Renderer.drawNPC(npc, screen);
       }

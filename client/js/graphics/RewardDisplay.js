@@ -249,7 +249,10 @@ const RewardDisplay = {
           'SWARM_HIVE_CORE': 'reward_relic_swarm',
           'PIRATE_TREASURE': 'reward_relic_pirate',
           'WORMHOLE_GEM': 'reward_relic_wormhole',
-          'SUBSPACE_WARP_DRIVE': 'reward_relic_subspace'
+          'SUBSPACE_WARP_DRIVE': 'reward_relic_subspace',
+          'SCRAP_SIPHON': 'reward_component',
+          'MINING_RITES': 'mining_complete',
+          'SKULL_AND_BONES': 'reward_relic_pirate'
         };
         soundId = relicSounds[reward.relicType] || 'reward_relic_starmap';
         break;

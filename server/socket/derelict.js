@@ -9,6 +9,7 @@ const config = require('../config');
 const derelict = require('../game/derelict');
 const loot = require('../game/loot');
 const logger = require('../../shared/logger');
+const { getRadarRange } = require('../../shared/utils');
 
 /**
  * Register derelict socket event handlers
@@ -28,7 +29,7 @@ function register(socket, deps) {
     if (!player) return;
 
     // Get derelicts within radar range (expanded for large derelicts)
-    const radarRange = config.BASE_RADAR_RANGE * Math.pow(config.TIER_MULTIPLIER, player.radarTier - 1) * 2;
+    const radarRange = getRadarRange(player.radarTier) * 2;
     const nearby = derelict.getDerelictsInRange(player.position, radarRange);
 
     socket.emit('derelict:nearby', {
@@ -55,6 +56,10 @@ function register(socket, deps) {
 
       const player = connectedPlayers.get(socket.id);
       if (!player) return;
+      if (player.isDead || deps.wormhole?.isInTransit?.(authenticatedUserId)) {
+        socket.emit('derelict:error', { message: 'Cannot salvage right now' });
+        return;
+      }
 
       // Validate input
       if (!data || typeof data.derelictId !== 'string') {

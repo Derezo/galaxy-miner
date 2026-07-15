@@ -8,6 +8,20 @@ const TerminalUI = {
     const panel = document.getElementById('terminal-panel');
     panel.querySelector('.close-btn').addEventListener('click', () => this.hide());
 
+    if (typeof DeviceDetect !== 'undefined' && DeviceDetect.isMobile &&
+        typeof MobileSettingsPanel !== 'undefined') {
+      const header = panel.querySelector('.panel-header');
+      if (header && !header.querySelector('.mobile-settings-btn')) {
+        const settingsButton = document.createElement('button');
+        settingsButton.className = 'mobile-settings-btn hud-btn';
+        settingsButton.type = 'button';
+        settingsButton.textContent = '⚙ Controls';
+        settingsButton.setAttribute('aria-label', 'Open mobile control settings');
+        settingsButton.addEventListener('click', () => MobileSettingsPanel.show());
+        header.insertBefore(settingsButton, header.querySelector('.close-btn'));
+      }
+    }
+
     // Tab handlers
     const tabs = panel.querySelectorAll('.terminal-tab');
     tabs.forEach(tab => {
@@ -39,6 +53,7 @@ const TerminalUI = {
       const upgradesContainer = document.getElementById('upgrades-content');
       if (upgradesContainer) {
         ShipUpgradePanel.init(upgradesContainer);
+        ShipUpgradePanel.setVisible(false);
       }
     }
 
@@ -68,6 +83,7 @@ const TerminalUI = {
   show() {
     this.visible = true;
     document.getElementById('terminal-panel').classList.remove('hidden');
+    this._syncUpgradePreview();
 
     // Play panel open sound
     if (typeof AudioManager !== 'undefined') {
@@ -85,12 +101,13 @@ const TerminalUI = {
     this.refreshCurrentTab();
   },
 
-  hide() {
+  hide(options = {}) {
     this.visible = false;
     document.getElementById('terminal-panel').classList.add('hidden');
+    this._syncUpgradePreview();
 
     // Play panel close sound
-    if (typeof AudioManager !== 'undefined') {
+    if (!options.silent && typeof AudioManager !== 'undefined') {
       AudioManager.play('ui_close_panel');
     }
 
@@ -139,7 +156,15 @@ const TerminalUI = {
         break;
     }
 
+    this._syncUpgradePreview();
     this.refreshCurrentTab();
+  },
+
+  _syncUpgradePreview() {
+    if (typeof ShipUpgradePanel !== 'undefined' &&
+        typeof ShipUpgradePanel.setVisible === 'function') {
+      ShipUpgradePanel.setVisible(this.visible && this.currentTab === 'upgrades');
+    }
   },
 
   refreshCurrentTab() {

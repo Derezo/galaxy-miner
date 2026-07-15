@@ -47,7 +47,8 @@ Galaxy Miner uses Socket.io for real-time bidirectional communication between cl
    - `chat:message` - Messages broadcast to all players
 
 3. **Proximity-Based**: Events only sent to players within range
-   - Range: 2× player radar range (base 500 units × tier multiplier)
+   - Range: generally 2× each recipient's explicit `RADAR_TIERS` range
+     (1,000 through 5,062 units at tiers 1-5)
    - Used for: player updates, combat, NPCs, mining visualization
 
 **Server Architecture:**
@@ -304,7 +305,7 @@ socket.on('player:update', (data) => {
 });
 ```
 
-**Broadcast Range:** 2x radar range from player
+**Broadcast Range:** 2× each recipient's current radar range
 
 **Related Events:** `player:input`, `player:leave`
 
@@ -425,7 +426,8 @@ Local player died.
 | `killerType` | string | Type of killer (npc/player/star/unknown) |
 | `killerName` | string | Name of killer (if applicable) |
 | `npcName` | string | NPC name (if killed by NPC) |
-| `droppedCargo` | array | List of dropped cargo items |
+| `droppedCargo` | array | Per-resource cargo lost from combined inventory and marketplace escrow |
+| `inventory` | array | Authoritative remaining inventory after death settlement |
 
 **Example:**
 ```javascript
@@ -454,6 +456,7 @@ Player respawned after death.
 | `position` | object | Respawn position {x, y} |
 | `hull` | number | Respawned hull HP |
 | `shield` | number | Respawned shield HP |
+| `inventory` | array | Authoritative remaining inventory snapshot |
 
 **Example:**
 ```javascript
@@ -697,7 +700,12 @@ NPC fired weapon at target.
 | `sourceY` | number | Fire origin Y |
 | `targetX` | number | Target X |
 | `targetY` | number | Target Y |
+| `targetNpcId` | string/undefined | Authoritative NPC target when this is NPC-on-NPC fire |
 | `hitInfo` | object/null | Hit information for timing effects |
+
+`hitInfo` is `null` for misses and damage-negation procs. For Pirate weapons,
+its `shieldPiercing` flag mirrors the shield-bypass fraction applied by the
+authoritative NPC damage calculation.
 
 **Example:**
 ```javascript
@@ -787,6 +795,10 @@ socket.on('combat:teslaCoil', (data) => {
 ---
 
 ## Mining Events
+
+A successful completion atomically grants cargo and records the world object
+as depleted. Cargo capacity includes resources held in marketplace escrow; if
+either durable write fails, neither change persists.
 
 ### `mining:start`
 
@@ -988,6 +1000,8 @@ socket.on('mining:playerStopped', (data) => {
 
 ## Marketplace Events
 
+Marketplace resources use uppercase shared keys. Listing, purchase, and cancellation mutations are atomic: listed quantity is escrowed, escrow continues to count toward the seller's cargo use, buyer cargo space is checked, and a player cannot buy their own listing. Dead players and players in wormhole transit cannot create listings. On death, each resource's inventory and escrow are aggregated before the 50% loss is rounded down; any escrow change triggers a global market invalidation.
+
 ### `market:list`
 
 List item for sale on marketplace.
@@ -998,16 +1012,16 @@ List item for sale on marketplace.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `resourceType` | string | Yes | Resource type to sell |
-| `quantity` | number | Yes | Quantity to list |
-| `price` | number | Yes | Price per unit (credits) |
+| `resourceType` | string | Yes | Exact `RESOURCE_TYPES` key to sell, such as `IRON` |
+| `quantity` | number | Yes | Positive safe-integer quantity to escrow |
+| `price` | number | Yes | Positive safe-integer price per unit in credits |
 
 **Response:** `market:listed` or `market:error`
 
 **Example:**
 ```javascript
 socket.emit('market:list', {
-  resourceType: 'iron_ore',
+  resourceType: 'IRON',
   quantity: 50,
   price: 10
 });
@@ -1050,8 +1064,8 @@ Purchase item from marketplace.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `listingId` | number | Yes | Listing ID to purchase |
-| `quantity` | number | Yes | Quantity to buy |
+| `listingId` | number | Yes | Positive safe-integer listing ID |
+| `quantity` | number | Yes | Positive safe-integer quantity to buy |
 
 **Response:** `market:bought` or `market:error`
 
@@ -1105,10 +1119,12 @@ Your listing was purchased by another player.
 | `quantity` | number | Quantity sold |
 | `totalCredits` | number | Total credits earned |
 | `buyerName` | string | Buyer username |
+| `credits` | number | Seller's new authoritative total credit balance |
 
 **Example:**
 ```javascript
 socket.on('market:sold', (data) => {
+  player.credits = data.credits;
   showNotification(
     `${data.buyerName} bought ${data.quantity}x ${data.resourceName} for ${data.totalCredits} credits`
   );
@@ -1130,7 +1146,7 @@ Cancel your own listing.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `listingId` | number | Yes | Listing ID to cancel |
+| `listingId` | number | Yes | Positive safe-integer listing ID to cancel |
 
 **Response:** `market:cancelled` or `market:error`
 
@@ -1172,7 +1188,7 @@ Request marketplace listings.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `resourceType` | string | No | Filter by resource type (null for all) |
+| `resourceType` | string | No | Exact uppercase resource key, or `null`/omitted for all |
 
 **Response:** `market:listings`
 
@@ -1181,8 +1197,8 @@ Request marketplace listings.
 // Get all listings
 socket.emit('market:getListings', { resourceType: null });
 
-// Get iron ore listings only
-socket.emit('market:getListings', { resourceType: 'iron_ore' });
+// Get Iron listings only
+socket.emit('market:getListings', { resourceType: 'IRON' });
 ```
 
 **Related Events:** `market:listings`
@@ -1205,8 +1221,8 @@ Marketplace listings response.
 | `listings[].seller_name` | string | Seller username |
 | `listings[].resource_type` | string | Resource type |
 | `listings[].quantity` | number | Quantity available |
-| `listings[].price` | number | Price per unit |
-| `listings[].created_at` | string | ISO timestamp |
+| `listings[].price_per_unit` | number | Price per unit |
+| `listings[].listed_at` | string | SQLite listing timestamp |
 
 **Example:**
 ```javascript
@@ -1248,7 +1264,7 @@ Your active listings response.
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
-| `listings` | array | Array of your listing objects (same format as market:listings) |
+| `listings` | array | Your database listing objects: `id`, `seller_id`, `resource_type`, `quantity`, `price_per_unit`, and `listed_at` (no joined `seller_name`) |
 
 **Example:**
 ```javascript
@@ -1271,7 +1287,7 @@ Marketplace changed (generic refresh trigger).
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
-| `action` | string | Action type (new_listing/purchase/cancelled) |
+| `action` | string | Action type (`new_listing`, `purchase`, `cancelled`, or `death_settlement`) |
 
 **Example:**
 ```javascript
@@ -1404,6 +1420,7 @@ Upgrade successful.
 | `component` | string | Upgraded component |
 | `newTier` | number | New tier level (1-5) |
 | `credits` | number | Updated credits balance |
+| `inventory` | array | Authoritative post-upgrade inventory after resource consumption |
 | `shieldMax` | number | New max shield (if shield upgrade) |
 | `hullMax` | number | New max hull (if hull upgrade) |
 
@@ -1412,6 +1429,7 @@ Upgrade successful.
 socket.on('upgrade:success', (data) => {
   player.ship[data.component + 'Tier'] = data.newTier;
   player.credits = data.credits;
+  player.inventory = data.inventory;
   if (data.shieldMax) player.shieldMax = data.shieldMax;
   if (data.hullMax) player.hullMax = data.hullMax;
   showNotification(`${data.component} upgraded to tier ${data.newTier}!`);
@@ -1488,6 +1506,7 @@ Ship data response.
 | `energy_core_tier` | number | Energy core tier |
 | `hull_tier` | number | Hull tier |
 | `credits` | number | Credits balance |
+| `inventory` | array | Authoritative inventory snapshot used to reconcile upgrade affordability |
 | `ship_color_id` | string | Ship color ID |
 | `profile_id` | string | Profile ID |
 
@@ -2403,6 +2422,23 @@ socket.on('npc:destroyed', (data) => {
 
 ---
 
+### `npc:leave`
+
+NPC left this player's authoritative delivery range. This is a visibility
+retirement only; it does not represent damage, death, or a world despawn.
+
+**Direction:** Server → Client
+
+**Payload:**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `id` | string | NPC ID to remove from the local prediction set |
+
+**Related Events:** `npc:spawn`, `npc:update`
+
+---
+
 ### `npc:queenSpawn`
 
 Swarm Queen spawned minions.
@@ -2543,7 +2579,7 @@ socket.on('bases:nearby', (bases) => {
 });
 ```
 
-**Broadcast Range:** Player radar range
+**Broadcast Range:** Each recipient's current player radar range. An empty array is sent when no base is in range so clients can retire stale exact positions; the larger server activation radius is never exposed through this event.
 
 **Related Events:** `base:damaged`, `base:destroyed`
 
@@ -2733,7 +2769,7 @@ Base successfully assimilated by swarm.
 | `baseId` | string | Assimilated base ID |
 | `newType` | string | New base type (assimilated variant) |
 | `originalFaction` | string | Original faction |
-| `convertedNpcs` | array | NPCs converted to swarm faction |
+| `convertedNpcs` | array | Complete converted NPC snapshots (`id`, `oldType`, `oldFaction`, `type`, `name`, `faction`, position, velocity, state, hull/shield current and max values, and presentation flags) |
 | `position` | object | Base position {x, y} |
 | `consumedDroneIds` | array | Drone IDs consumed in conversion |
 
@@ -2741,6 +2777,7 @@ Base successfully assimilated by swarm.
 ```javascript
 socket.on('swarm:baseAssimilated', (data) => {
   updateBase(data.baseId, { type: data.newType, faction: 'swarm' });
+  data.convertedNpcs.forEach(npc => updateNPC(npc));
   triggerAssimilationEffect(data.position.x, data.position.y);
   data.consumedDroneIds.forEach(id => removeNPC(id));
   showNotification('The Swarm has assimilated a base!');
@@ -3132,6 +3169,98 @@ socket.on('relic:collected', (data) => {
 
 ---
 
+### `relic:strategicContacts`
+
+Sparse Ancient Star Map bearing feed. Sent only to an authenticated owner of that relic during the 500 ms nearby-base broadcast cadence. An empty array clears contacts that are no longer eligible.
+
+**Direction:** Server → Client
+
+**Payload:** Array of contact objects
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `[].id` | string | Stable base or boss identifier |
+| `[].x` | number | Authoritative world X coordinate |
+| `[].y` | number | Authoritative world Y coordinate |
+| `[].faction` | string \| null | Contact faction when known |
+| `[].contactType` | string | `base` or `boss` |
+
+Contacts are limited to the nearest eight objects between the player's normal radar range and 2× that range. The feed deliberately omits health, combat state, and loot.
+
+```javascript
+socket.on('relic:strategicContacts', (contacts) => {
+  RadarEntities.setStrategicContacts(contacts);
+});
+```
+
+**Related Events:** `bases:nearby`
+
+---
+
+### `relic:plunder`
+
+Attempt Skull and Bones plunder against an active base. Ownership, authenticated player state, authoritative base position, range, player/base cooldowns, finite reserves, and cargo space are all checked by the server.
+
+**Direction:** Client → Server
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `baseId` | string | Yes | Active base identifier |
+
+```javascript
+socket.emit('relic:plunder', { baseId: 'pirate_outpost_12_7' });
+```
+
+**Response:** `relic:plunderSuccess` or `relic:plunderFailed`
+
+---
+
+### `relic:plunderSuccess`
+
+**Direction:** Server → Client
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `baseId` | string | Plundered base identifier |
+| `credits` | number | Credits committed by the transaction |
+| `loot` | array | Granted resource entries `{ type, resource, quantity }` |
+| `position` | object | Authoritative `{ x, y }` base position |
+| `cargoLimited` | boolean | Whether finite resources remain because cargo was full |
+| `baseDepleted` | boolean | Whether the base's current finite reserve is empty |
+| `playerCooldown` | number | Player cooldown duration in milliseconds |
+| `baseCooldown` | number | Base alert cooldown duration in milliseconds |
+
+An `inventory:update` immediately follows a success. Credits and resource rows commit as one SQLite transaction before reserve, cooldown, aggro, or visual state changes.
+
+---
+
+### `relic:plunderFailed`
+
+**Direction:** Server → Client
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `reason` | string | Server rejection reason |
+| `cooldownRemaining` | number | Remaining milliseconds when a cooldown caused rejection; otherwise omitted |
+| `cooldownScope` | string | `player` or `base` when cooldown data is present |
+
+Player and base cooldowns are distinct: a base alert does not prevent trying a different base.
+
+---
+
+### `base:plundered`
+
+Nearby visual notification sent to players other than the initiating socket.
+
+**Direction:** Server → Client (broadcast within recipient radar broadcast range)
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `baseId` | string | Plundered base identifier |
+| `position` | object | `{ x, y }` base position |
+
+---
+
 ### `wreckage:spawn`
 
 Wreckage spawned from NPC death.
@@ -3232,6 +3361,29 @@ socket.on('formation:leaderChange', (data) => {
 ```
 
 **Related Events:** `npc:destroyed`
+
+---
+
+### `void:spawnMinions`
+
+Void Leviathan minion portals are opening. Portal coordinates are selected once
+by the server and reused for the delayed NPC spawns, so clients must render the
+provided positions rather than generating their own ring.
+
+**Direction:** Server → Client (broadcast to nearby players)
+
+**Payload:**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `leviathanId` | string | Leviathan NPC ID |
+| `position` | object | Leviathan center `{ x, y }` |
+| `riftCount` | number | Number of authoritative portals |
+| `riftPositions` | object[] | Exact portal coordinates as `{ x, y }` objects |
+| `trigger` | string | Ability trigger context |
+| `healthThreshold` | number | Health threshold that activated the ability |
+
+**Related Events:** `npc:spawn`, `void:leviathanSpawn`
 
 ---
 
@@ -3594,9 +3746,11 @@ socket.on('comet:collision', (data) => {
 
 Events are broadcast to players within specific ranges:
 
-- **Radar range**: Base 500 units × tier multiplier
+- **Radar range**: Explicit tier table: 500, 750, 1,125, 1,688, and 2,531 units
 - **Broadcast range**: 2× radar range
-- **Global events**: All connected players (chat, market updates, queen events)
+- **Global events**: All connected players only where the event contract calls
+  for it (for example global chat and marketplace invalidations). Queen,
+  faction, combat, and loot effects are spatial broadcasts.
 
 ### Rate Limiting
 
@@ -3707,7 +3861,7 @@ Issues discovered during the network event audit that have since been fixed:
 
 ## Handler Module Mapping
 
-### Server Handlers (`/server/handlers/`)
+### Server Handlers (`/server/socket/`)
 
 | Module | Events Handled |
 |--------|----------------|
@@ -3718,6 +3872,7 @@ Issues discovered during the network event audit that have since been fixed:
 | marketplace.js | market:list, market:buy, market:cancel, market:getListings, market:getMyListings |
 | ship.js | ship:upgrade, ship:getData, ship:setColor |
 | loot.js | loot:startCollect, loot:cancelCollect, loot:getNearby, wreckage:multiCollect |
+| relic.js | relic:plunder |
 | wormhole.js | wormhole:enter, wormhole:selectDestination, wormhole:cancel, wormhole:getProgress, wormhole:getNearestPosition |
 
 ### Client Handlers (`/client/js/network/`)
@@ -3730,10 +3885,10 @@ Issues discovered during the network event audit that have since been fixed:
 | mining.js | mining:started, mining:complete, mining:cancelled, mining:error, mining:playerStarted, mining:playerStopped, world:update, inventory:update |
 | marketplace.js | market:update, market:listings, market:myListings, market:listed, market:bought, market:cancelled, market:error, market:sold |
 | ship.js | ship:colorChanged, ship:colorError, ship:profileChanged, ship:profileError, upgrade:success, upgrade:error, error:generic, ship:data |
-| loot.js | wreckage:spawn, wreckage:despawn, wreckage:collected, loot:started, loot:progress, loot:complete, loot:cancelled, loot:error, loot:multiStarted, loot:multiComplete, team:creditReward, team:lootShare, buff:applied, relic:collected, loot:nearby |
+| loot.js | wreckage:spawn, wreckage:despawn, wreckage:collected, loot:started, loot:progress, loot:complete, loot:cancelled, loot:error, loot:multiStarted, loot:multiComplete, team:creditReward, team:lootShare, buff:applied, relic:collected, relic:plunderSuccess, relic:plunderFailed, base:plundered, loot:nearby |
 | wormhole.js | wormhole:entered, wormhole:transitStarted, wormhole:progress, wormhole:exitComplete, wormhole:cancelled, wormhole:error, wormhole:nearestPosition |
 | chat.js | chat:message, emote:broadcast, pong |
-| npc.js | npc:spawn, npc:update, npc:action, npc:destroyed, npc:queenSpawn, npc:death, swarm:\*, queen:\*, formation:\*, base:\*, rogueMiner:\*, comet:warning, comet:collision |
+| npc.js | npc:spawn, npc:update, npc:action, npc:destroyed, npc:queenSpawn, npc:death, swarm:\*, queen:\*, formation:\*, base:\*, rogueMiner:\*, relic:strategicContacts, comet:warning, comet:collision |
 
 ### Main Network File (`/client/js/network.js`)
 
@@ -3741,4 +3896,3 @@ Contains additional handlers for faction-specific events not in modular files:
 - npc:invulnerable
 - pirate:intel, pirate:boostDive, pirate:stealSuccess, pirate:dreadnoughtEnraged, pirate:captainHeal
 - scavenger:rage, scavenger:rageClear, scavenger:haulerSpawn, scavenger:haulerGrow, scavenger:barnacleKingSpawn, scavenger:haulerTransform, scavenger:scrapPileUpdate, scavenger:drillCharge
-- relic:plunderSuccess, relic:plunderFailed

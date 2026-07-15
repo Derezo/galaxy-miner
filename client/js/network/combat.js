@@ -72,8 +72,10 @@ function register(socket) {
     }
 
     if (typeof NPCWeaponEffects !== 'undefined') {
-      // Use faction to get proper visual weapon type
-      const visualWeaponType = NPCWeaponEffects.getWeaponForFaction(data.faction) || 'cannon';
+      // Preserve per-role weapon silhouettes (drill, cannon, web, beam, etc.).
+      const visualWeaponType = data.npcType && NPCWeaponEffects.getWeaponForNpcType
+        ? NPCWeaponEffects.getWeaponForNpcType(data.npcType)
+        : (NPCWeaponEffects.getWeaponForFaction(data.faction) || 'cannon');
       NPCWeaponEffects.fire(
         { x: data.sourceX, y: data.sourceY },
         { x: data.targetX, y: data.targetY },
@@ -104,13 +106,15 @@ function register(socket) {
 
     // Get NPC position for hit effect
     const npcEntity = Entities.npcs.get(data.npcId);
+    const hitX = Number.isFinite(data.x) ? data.x : npcEntity?.position.x;
+    const hitY = Number.isFinite(data.y) ? data.y : npcEntity?.position.y;
 
-    if (npcEntity) {
+    if (Number.isFinite(hitX) && Number.isFinite(hitY)) {
       // Register hit with WeaponRenderer for projectile-timed effects
       if (typeof WeaponRenderer !== 'undefined') {
         WeaponRenderer.registerHit(
-          npcEntity.position.x,
-          npcEntity.position.y,
+          hitX,
+          hitY,
           { isShieldHit: data.hitShield || false, damage: data.damage }
         );
       }
@@ -119,8 +123,8 @@ function register(socket) {
       if (typeof Renderer !== 'undefined') {
         Renderer.addEffect({
           type: 'damage_number',
-          x: npcEntity.position.x,
-          y: npcEntity.position.y,
+          x: hitX,
+          y: hitY,
           damage: data.damage,
           duration: 1000
         });

@@ -13,22 +13,16 @@ const AuthUI = {
       this.showLogin();
     });
 
-    // Login form
-    document.getElementById('login-btn').addEventListener('click', () => {
+    // Semantic form submission supports keyboard, password managers, and
+    // mobile action keys without allowing a browser navigation.
+    document.getElementById('login-form').addEventListener('submit', (e) => {
+      e.preventDefault();
       this.handleLogin();
     });
 
-    document.getElementById('login-password').addEventListener('keypress', (e) => {
-      if (e.key === 'Enter') this.handleLogin();
-    });
-
-    // Register form
-    document.getElementById('register-btn').addEventListener('click', () => {
+    document.getElementById('register-form').addEventListener('submit', (e) => {
+      e.preventDefault();
       this.handleRegister();
-    });
-
-    document.getElementById('register-confirm').addEventListener('keypress', (e) => {
-      if (e.key === 'Enter') this.handleRegister();
     });
 
     Logger.log('Auth UI initialized');

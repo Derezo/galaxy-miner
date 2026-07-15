@@ -177,7 +177,13 @@ const Entities = {
         rotation: data.rotation,
         targetRotation: data.rotation,
         hull: data.hull,
+        hullMax: Number.isFinite(data.hullMax) && data.hullMax > 0
+          ? data.hullMax
+          : Math.max(Number(data.hull) || 0, 100),
         shield: data.shield,
+        shieldMax: Number.isFinite(data.shieldMax) && data.shieldMax >= 0
+          ? data.shieldMax
+          : Math.max(Number(data.shield) || 0, 0),
         colorId: data.colorId || 'green',
         lastUpdateTime: now
       });
@@ -208,7 +214,13 @@ const Entities = {
       player.targetPosition.y = data.y;
       player.targetRotation = data.rotation;
       player.hull = data.hull;
+      if (Number.isFinite(data.hullMax) && data.hullMax > 0) {
+        player.hullMax = data.hullMax;
+      }
       player.shield = data.shield;
+      if (Number.isFinite(data.shieldMax) && data.shieldMax >= 0) {
+        player.shieldMax = data.shieldMax;
+      }
       player.status = data.status || 'idle';
       player.lastUpdateTime = now;
       // Update color if provided
@@ -275,6 +287,16 @@ const Entities = {
         hullMax: data.hullMax || data.hull || 100,
         shield: data.shield,
         shieldMax: data.shieldMax || data.shield || 0,
+        isBoss: data.isBoss === true || [
+          'pirate_dreadnought',
+          'scavenger_barnacle_king',
+          'swarm_queen',
+          'void_leviathan',
+          'rogue_foreman'
+        ].includes(data.type),
+        sizeMultiplier: Number(data.sizeMultiplier) ||
+          (data.type === 'scavenger_hauler' ? 1.8 : 1),
+        phase: data.phase || null,
         state: data.state || 'patrol',
         // Velocity for dead-reckoning interpolation (units/sec)
         vx: data.vx || 0,
@@ -290,6 +312,14 @@ const Entities = {
 
     } else {
       const npc = this.npcs.get(data.id);
+
+      if (typeof data.isBoss === 'boolean') npc.isBoss = data.isBoss;
+      if (Number.isFinite(Number(data.sizeMultiplier))) {
+        npc.sizeMultiplier = Number(data.sizeMultiplier);
+      }
+      if (Object.prototype.hasOwnProperty.call(data, 'phase')) {
+        npc.phase = data.phase || null;
+      }
 
       // Teleport detection - check if position jumped significantly
       const dx = data.x - npc.position.x;
@@ -312,20 +342,28 @@ const Entities = {
 
       npc.targetPosition.x = data.x;
       npc.targetPosition.y = data.y;
-      npc.targetRotation = data.rotation || npc.targetRotation;
+      if (Number.isFinite(data.rotation)) {
+        npc.targetRotation = data.rotation;
+      }
       // Update velocity for dead-reckoning interpolation
       // Apply exponential smoothing to dampen formation jitter (0.7/0.3 blend)
-      if (data.vx !== undefined) {
+      if (Number.isFinite(data.vx)) {
+        const previousSmoothVx = Number.isFinite(npc.smoothVx) ? npc.smoothVx : 0;
         npc.vx = data.vx;
-        npc.smoothVx = jumpDistance > TELEPORT_THRESHOLD
-          ? data.vx  // Snap on teleport
-          : 0.7 * (npc.smoothVx || 0) + 0.3 * data.vx;
+        const reversedX = previousSmoothVx * data.vx < 0;
+        npc.smoothVx = jumpDistance > TELEPORT_THRESHOLD ||
+          Math.abs(data.vx) < 0.001 || reversedX
+          ? data.vx  // Stops, reversals, and teleports must not glide the old way.
+          : 0.7 * previousSmoothVx + 0.3 * data.vx;
       }
-      if (data.vy !== undefined) {
+      if (Number.isFinite(data.vy)) {
+        const previousSmoothVy = Number.isFinite(npc.smoothVy) ? npc.smoothVy : 0;
         npc.vy = data.vy;
-        npc.smoothVy = jumpDistance > TELEPORT_THRESHOLD
+        const reversedY = previousSmoothVy * data.vy < 0;
+        npc.smoothVy = jumpDistance > TELEPORT_THRESHOLD ||
+          Math.abs(data.vy) < 0.001 || reversedY
           ? data.vy
-          : 0.7 * (npc.smoothVy || 0) + 0.3 * data.vy;
+          : 0.7 * previousSmoothVy + 0.3 * data.vy;
       }
       // Delta compression: only update hull/shield/state if present in update
       if (data.hull !== undefined) npc.hull = data.hull;

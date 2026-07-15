@@ -22,21 +22,17 @@ const path = require('path');
 // Configuration
 const PROJECT_ROOT = path.join(__dirname, '..');
 const SERVER_PATHS = [
-  'server/socket.js',
-  'server/handlers',
-  'server/game/engine.js',
-  'server/game/combat.js',
-  'server/game/star-damage.js',
-  'server/game/ai'
+  'server'
 ];
 const CLIENT_PATHS = [
-  'client/js/network.js',
-  'client/js/network'
+  // Some UI components emit directly through Network.socket, so audit the
+  // complete client source tree rather than only listener modules.
+  'client/js'
 ];
 
 // Patterns to match socket events
-// Covers: socket.emit, io.emit, io.to(...).emit, broadcastNear*, player.socket.emit
-const EMIT_PATTERN = /(?:socket|io|this\.socket|player\.socket|\.to\([^)]+\))\.emit\s*\(\s*['"`]([^'"`]+)['"`]/g;
+// Covers socket/io variants plus optional chaining used by UI components.
+const EMIT_PATTERN = /(?:socket|io|this\.socket|player\.socket|Network\.socket|\.to\([^)]+\))\??\.emit\s*\(\s*['"`]([^'"`]+)['"`]/g;
 const ON_PATTERN = /(?:socket|this\.socket)\.on\s*\(\s*['"`]([^'"`]+)['"`]/g;
 
 // Additional patterns for helper functions that emit events
@@ -44,6 +40,9 @@ const BROADCAST_NEAR_PATTERN = /broadcastNear(?:Player|Npc|Base|All)?\s*\([^,]+,
 
 // More broadcast helper patterns (different argument positions)
 const BROADCAST_HELPER_PATTERNS = [
+  // Generic proximity helpers. Event names are the first colon-delimited
+  // string argument; the bounded span tolerates nested object arguments.
+  /(?:emitNear|broadcastToNearby|broadcastWreckageNear|broadcastNearNpc|broadcastNearBase|broadcastInRange)\s*\([\s\S]{0,500}?,\s*['"`]([A-Za-z][A-Za-z0-9_-]*:[A-Za-z0-9:_-]+)['"`]\s*,/g,
   // broadcastToNearby(socket, player, 'event', data, ...) - event is 3rd arg
   /broadcastToNearby\s*\([^,]+,\s*[^,]+,\s*['"`]([^'"`]+)['"`]/g,
   // broadcastWreckageNear(wreckage, 'event', data) - event is 2nd arg
@@ -71,6 +70,10 @@ const KNOWN_EXCEPTIONS = new Set([
   'wormhole:playerTransiting', // Tells other players about transit
   'wormhole:playerExited',     // Tells other players about wormhole exit
   'wormhole:playerCancelled',  // Tells other players about transit cancel
+  // Backward-compatible/optional request contracts.
+  'npc:update',                // Legacy single-NPC stream; server now emits npc:batch
+  'mining:cancel',             // Optional manual cancellation (distance/death also cancel)
+  'wormhole:getProgress',      // Optional polling RPC; normal flow is push-based
 ]);
 
 // Parse command line arguments

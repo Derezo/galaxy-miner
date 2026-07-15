@@ -34,8 +34,8 @@ const FACTION_LOOT = {
 
   swarm: {
     resources: {
-      common:    ['CARBON', 'PHOSPHORUS', 'NITROGEN', 'HYDROGEN'],
-      uncommon:  ['HELIUM3', 'SULFUR', 'ICE_CRYSTALS'],
+      common:    ['CARBON', 'PHOSPHORUS', 'NITROGEN', 'HYDROGEN', 'SULFUR'],
+      uncommon:  ['HELIUM3', 'ICE_CRYSTALS'],
       rare:      ['DARK_MATTER', 'QUANTUM_CRYSTALS'],
       ultrarare: ['EXOTIC_MATTER', 'ANTIMATTER', 'VOID_CRYSTALS']
     },
@@ -47,9 +47,9 @@ const FACTION_LOOT = {
   void: {
     resources: {
       common:    [],  // Void entities never drop commons
-      uncommon:  ['XENON', 'DARK_MATTER', 'NEON'],
-      rare:      ['QUANTUM_CRYSTALS', 'EXOTIC_MATTER'],
-      ultrarare: ['ANTIMATTER', 'NEUTRONIUM', 'VOID_CRYSTALS']
+      uncommon:  ['NEON'],
+      rare:      ['XENON', 'DARK_MATTER', 'QUANTUM_CRYSTALS'],
+      ultrarare: ['EXOTIC_MATTER', 'ANTIMATTER', 'NEUTRONIUM', 'VOID_CRYSTALS']
     },
     relics: ['VOID_CRYSTAL', 'WORMHOLE_GEM', 'ANCIENT_STAR_MAP', 'SUBSPACE_WARP_DRIVE'],
     buffs: ['DAMAGE_AMP', 'RADAR_PULSE'],
@@ -58,10 +58,10 @@ const FACTION_LOOT = {
 
   rogue_miner: {
     resources: {
-      common:    ['IRON', 'COPPER', 'SILICON'],
-      uncommon:  ['TITANIUM', 'COBALT', 'LITHIUM'],
-      rare:      ['GOLD', 'URANIUM', 'IRIDIUM', 'PLATINUM'],
-      ultrarare: ['EXOTIC_MATTER', 'QUANTUM_CRYSTALS']
+      common:    ['IRON', 'SILICON'],
+      uncommon:  ['COPPER', 'TITANIUM', 'COBALT', 'LITHIUM'],
+      rare:      ['GOLD', 'URANIUM', 'IRIDIUM', 'PLATINUM', 'QUANTUM_CRYSTALS'],
+      ultrarare: ['EXOTIC_MATTER']
     },
     relics: ['ANCIENT_STAR_MAP', 'PIRATE_TREASURE', 'MINING_RITES'],
     buffs: ['SHIELD_BOOST', 'RADAR_PULSE'],
@@ -219,6 +219,27 @@ function weightedRarityPick(rarityWeights) {
   return 'common';
 }
 
+/**
+ * Pick only among rarity buckets the faction can actually supply. Original
+ * tier weights are renormalized so an empty bucket never deletes a loot slot.
+ */
+function pickAvailableRarity(rarityWeights, resourcesByRarity, roll = Math.random()) {
+  const available = Object.entries(rarityWeights || {}).filter(([rarity, entry]) =>
+    Number(entry?.weight) > 0 && Array.isArray(resourcesByRarity?.[rarity]) &&
+    resourcesByRarity[rarity].length > 0
+  );
+  const totalWeight = available.reduce((sum, [, entry]) => sum + Number(entry.weight), 0);
+  if (totalWeight <= 0) return null;
+
+  const boundedRoll = Math.min(1 - Number.EPSILON, Math.max(0, Number(roll) || 0));
+  let cumulative = 0;
+  for (const [rarity, entry] of available) {
+    cumulative += Number(entry.weight) / totalWeight;
+    if (boundedRoll < cumulative) return rarity;
+  }
+  return available[available.length - 1][0];
+}
+
 function rollBonusSlots(bonusConfig) {
   let count = 0;
   for (let i = 0; i < bonusConfig.count; i++) {
@@ -239,7 +260,7 @@ function getResourceRarity(resourceType) {
 // ============================================
 
 function generateLoot(npcType) {
-  const mapping = NPC_LOOT_MAPPING[npcType];
+  const mapping = getMappingForNpc(npcType);
   if (!mapping) {
     logger.warn(`No loot mapping found for NPC type: ${npcType}`);
     return [];
@@ -260,11 +281,9 @@ function generateLoot(npcType) {
   const totalSlots = template.slots.guaranteed + rollBonusSlots(template.slots.bonus);
 
   for (let i = 0; i < totalSlots; i++) {
-    const rarity = weightedRarityPick(template.rarityWeights);
+    const rarity = pickAvailableRarity(template.rarityWeights, faction.resources);
+    if (!rarity) continue;
     const resources = faction.resources[rarity];
-
-    // Skip if faction has no resources at this rarity (e.g., void commons)
-    if (!resources || resources.length === 0) continue;
 
     const resource = randomPick(resources);
     if (!resource) continue;
@@ -369,7 +388,16 @@ function generateLoot(npcType) {
 // ============================================
 
 function getMappingForNpc(npcType) {
-  return NPC_LOOT_MAPPING[npcType] || null;
+  const directMapping = NPC_LOOT_MAPPING[npcType];
+  if (directMapping) return directMapping;
+
+  // Assimilated hubs retain their original geometry in the type name, but
+  // their combat identity and rewards belong to the Swarm after conversion.
+  if (typeof npcType === 'string' && npcType.startsWith('assimilated_')) {
+    return { faction: 'swarm', tier: 'base' };
+  }
+
+  return null;
 }
 
 function getFactionLoot(factionName) {
@@ -381,7 +409,7 @@ function getTierTemplate(tierName) {
 }
 
 function isBossTier(npcType) {
-  const mapping = NPC_LOOT_MAPPING[npcType];
+  const mapping = getMappingForNpc(npcType);
   return mapping && mapping.tier === 'boss';
 }
 
@@ -398,5 +426,6 @@ module.exports = {
   getFactionLoot,
   getTierTemplate,
   isBossTier,
-  getResourceRarity
+  getResourceRarity,
+  pickAvailableRarity
 };

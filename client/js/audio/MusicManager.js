@@ -17,6 +17,7 @@ const MusicManager = (function () {
   let sourceB = null;
   let gainA = null;
   let gainB = null;
+  let outputGain = null;
   let activeDeck = 'A';
   let currentTrack = 0;
   let volume = 0.5;
@@ -24,6 +25,19 @@ const MusicManager = (function () {
   let initialized = false;
   let playing = false;
   let pendingStart = false;
+  let pendingTrack = 0;
+  let desiredPlaying = false;
+  let operationId = 0;
+  let contextStateTarget = null;
+  let contextStateListener = null;
+  let fadeTimer = null;
+  let crossfadeTimer = null;
+  let crossfadeIncomingDeck = null;
+  let crossfadeOutgoingDeck = null;
+  let outputMuted = false;
+  const deckTracks = { A: null, B: null };
+  const deckPlayOperations = { A: 0, B: 0 };
+  const visibilityPausedDecks = new Set();
 
   /**
    * Initialize the music system
@@ -52,12 +66,16 @@ const MusicManager = (function () {
     sourceB = ctx.createMediaElementSource(deckB);
     gainA = ctx.createGain();
     gainB = ctx.createGain();
+    outputGain = ctx.createGain();
 
-    // Connect graph: source -> gain -> destination
+    // Connect graph: source -> normalized deck gain -> shared output gain.
+    // The shared node applies persistent music/master volume and transient mute
+    // without disturbing an in-progress A/B crossfade envelope.
     sourceA.connect(gainA);
     sourceB.connect(gainB);
-    gainA.connect(ctx.destination);
-    gainB.connect(ctx.destination);
+    gainA.connect(outputGain);
+    gainB.connect(outputGain);
+    outputGain.connect(ctx.destination);
 
     // Start with zero gain
     gainA.gain.value = 0;
@@ -65,6 +83,7 @@ const MusicManager = (function () {
 
     // Load saved volume
     _loadVolume();
+    _applyOutputGain();
 
     initialized = true;
     Logger.log('MusicManager initialized');
@@ -76,69 +95,165 @@ const MusicManager = (function () {
    */
   function start(trackIndex) {
     if (!initialized) return;
-    if (playing) return;
-
     const idx = trackIndex !== undefined ? trackIndex : currentTrack;
+    if (!tracks[idx]) return;
+
+    desiredPlaying = true;
+    pendingTrack = idx;
+    pendingStart = false;
+    operationId += 1;
+    const operation = operationId;
+
+    _clearContextStateListener();
+    _clearFadeTimer();
+    _cancelCrossfadeTransition();
+    visibilityPausedDecks.clear();
 
     // Check if AudioContext is ready
     if (!AudioContextManager.isReady()) {
-      pendingStart = true;
-      // Listen for context state change
-      const ctx = AudioContextManager.getContext();
-      if (ctx) {
-        const onStateChange = () => {
-          if (ctx.state === 'running') {
-            ctx.removeEventListener('statechange', onStateChange);
-            _resumePending();
-          }
-        };
-        ctx.addEventListener('statechange', onStateChange);
-      }
+      _queuePendingStart(idx, operation);
       return;
     }
 
-    _playDeck(idx);
+    const activeEl = activeDeck === 'A' ? deckA : deckB;
+    const activeGain = activeDeck === 'A' ? gainA : gainB;
+    if (playing && currentTrack === idx && activeEl && !activeEl.paused) {
+      _setGainImmediately(activeGain, 1);
+      return;
+    }
+
+    playing = false;
+    _playDeck(idx, operation);
   }
 
   /**
    * Resume pending start after AudioContext becomes available
    */
-  function _resumePending() {
-    if (!pendingStart) return;
+  function _resumePending(operation) {
+    if (!pendingStart || !desiredPlaying || operation !== operationId) return;
     pendingStart = false;
-    _playDeck(currentTrack);
+    _clearContextStateListener();
+    _playDeck(pendingTrack, operation);
+  }
+
+  function _queuePendingStart(trackIndex, operation) {
+    if (!desiredPlaying || operation !== operationId) return;
+
+    pendingStart = true;
+    pendingTrack = trackIndex;
+    _clearContextStateListener();
+
+    const ctx = AudioContextManager.getContext();
+    if (!ctx || typeof ctx.addEventListener !== 'function') return;
+
+    contextStateTarget = ctx;
+    contextStateListener = () => {
+      if (ctx.state === 'running') _resumePending(operation);
+    };
+    ctx.addEventListener('statechange', contextStateListener);
+  }
+
+  function _clearContextStateListener() {
+    if (contextStateTarget && contextStateListener &&
+        typeof contextStateTarget.removeEventListener === 'function') {
+      contextStateTarget.removeEventListener('statechange', contextStateListener);
+    }
+    contextStateTarget = null;
+    contextStateListener = null;
+  }
+
+  function _clearTimer(timer) {
+    if (timer !== null && typeof clearTimeout === 'function') clearTimeout(timer);
+    return null;
+  }
+
+  function _clearFadeTimer() {
+    fadeTimer = _clearTimer(fadeTimer);
+  }
+
+  function _setGainImmediately(gainNode, value) {
+    if (!gainNode?.gain) return;
+    const ctx = AudioContextManager.getContext();
+    const now = ctx?.currentTime || 0;
+    if (typeof gainNode.gain.cancelScheduledValues === 'function') {
+      gainNode.gain.cancelScheduledValues(now);
+    }
+    if (typeof gainNode.gain.setValueAtTime === 'function') {
+      gainNode.gain.setValueAtTime(value, now);
+    }
+    gainNode.gain.value = value;
+  }
+
+  function _pauseDeck(deckKey, reset = true) {
+    const el = deckKey === 'A' ? deckA : deckB;
+    const gain = deckKey === 'A' ? gainA : gainB;
+    if (!el) return;
+
+    if (el.src || !el.paused) el.pause();
+    if (reset) {
+      el.currentTime = 0;
+      deckTracks[deckKey] = null;
+    }
+    _setGainImmediately(gain, 0);
+  }
+
+  function _cancelCrossfadeTransition() {
+    crossfadeTimer = _clearTimer(crossfadeTimer);
+
+    // Preserve whichever deck is currently authoritative and retire the
+    // other participant, whether cancellation happened before or after the
+    // crossfade promise resolved.
+    [crossfadeIncomingDeck, crossfadeOutgoingDeck].forEach((deckKey) => {
+      if (deckKey && deckKey !== activeDeck) _pauseDeck(deckKey);
+    });
+
+    crossfadeIncomingDeck = null;
+    crossfadeOutgoingDeck = null;
+    crossfading = false;
   }
 
   /**
    * Internal: start playing on the active deck
    */
-  function _playDeck(trackIndex) {
+  function _playDeck(trackIndex, operation) {
+    if (!tracks[trackIndex] || !desiredPlaying || operation !== operationId) return;
+
+    const deckKey = activeDeck;
     const el = activeDeck === 'A' ? deckA : deckB;
     const gain = activeDeck === 'A' ? gainA : gainB;
 
-    el.src = BASE_PATH + tracks[trackIndex].file;
+    if (deckTracks[deckKey] !== trackIndex) {
+      el.src = BASE_PATH + tracks[trackIndex].file;
+      deckTracks[deckKey] = trackIndex;
+    }
     currentTrack = trackIndex;
+    deckPlayOperations[deckKey] = operation;
 
-    const effectiveVol = _getEffectiveVolume();
-    gain.gain.value = effectiveVol;
+    _setGainImmediately(gain, 1);
 
-    el.play().then(() => {
+    const playResult = el.play();
+    const playPromise = playResult && typeof playResult.then === 'function'
+      ? playResult
+      : Promise.resolve();
+    playPromise.then(() => {
+      if (operation !== operationId ||
+          deckPlayOperations[deckKey] !== operation ||
+          !desiredPlaying) {
+        if (deckPlayOperations[deckKey] === operation && !desiredPlaying) {
+          _pauseDeck(deckKey);
+        }
+        return;
+      }
       playing = true;
+      pendingStart = false;
       Logger.log('MusicManager: Now playing "' + tracks[trackIndex].name + '"');
     }).catch(err => {
+      if (operation !== operationId || deckPlayOperations[deckKey] !== operation || !desiredPlaying) {
+        return;
+      }
       // Autoplay blocked - set pending
       if (err.name === 'NotAllowedError') {
-        pendingStart = true;
-        const ctx = AudioContextManager.getContext();
-        if (ctx) {
-          const onStateChange = () => {
-            if (ctx.state === 'running') {
-              ctx.removeEventListener('statechange', onStateChange);
-              _resumePending();
-            }
-          };
-          ctx.addEventListener('statechange', onStateChange);
-        }
+        _queuePendingStart(trackIndex, operation);
       } else {
         console.error('MusicManager: Playback failed:', err);
       }
@@ -149,29 +264,43 @@ const MusicManager = (function () {
    * Stop music with fade out
    */
   function stop() {
-    if (!initialized || !playing) return;
+    if (!initialized) return;
 
-    const gain = activeDeck === 'A' ? gainA : gainB;
-    const el = activeDeck === 'A' ? deckA : deckB;
+    desiredPlaying = false;
+    pendingStart = false;
+    playing = false;
+    operationId += 1;
+    const operation = operationId;
+
+    _clearContextStateListener();
+    _clearFadeTimer();
+    _cancelCrossfadeTransition();
+    visibilityPausedDecks.clear();
+
     const ctx = AudioContextManager.getContext();
+    const liveDecks = [['A', deckA, gainA], ['B', deckB, gainB]]
+      .filter(([, el]) => el && el.src && !el.paused);
 
-    if (ctx && ctx.state === 'running') {
+    if (liveDecks.length > 0 && ctx && ctx.state === 'running') {
       const now = ctx.currentTime;
-      gain.gain.setValueAtTime(gain.gain.value, now);
-      gain.gain.linearRampToValueAtTime(0, now + FADE_OUT_DURATION);
+      liveDecks.forEach(([, , gain]) => {
+        if (typeof gain.gain.cancelScheduledValues === 'function') {
+          gain.gain.cancelScheduledValues(now);
+        }
+        gain.gain.setValueAtTime(gain.gain.value, now);
+        gain.gain.linearRampToValueAtTime(0, now + FADE_OUT_DURATION);
+      });
 
-      setTimeout(() => {
-        el.pause();
-        el.currentTime = 0;
-        playing = false;
+      fadeTimer = setTimeout(() => {
+        if (operation !== operationId || desiredPlaying) return;
+        _pauseDeck('A');
+        _pauseDeck('B');
+        fadeTimer = null;
       }, FADE_OUT_DURATION * 1000);
     } else {
-      el.pause();
-      el.currentTime = 0;
-      playing = false;
+      _pauseDeck('A');
+      _pauseDeck('B');
     }
-
-    pendingStart = false;
   }
 
   /**
@@ -180,22 +309,35 @@ const MusicManager = (function () {
   function pause() {
     if (!initialized || !playing) return;
 
-    const el = activeDeck === 'A' ? deckA : deckB;
-    el.pause();
+    [['A', deckA], ['B', deckB]].forEach(([deckKey, el]) => {
+      if (el.src && !el.paused) {
+        el.pause();
+        visibilityPausedDecks.add(deckKey);
+      }
+    });
   }
 
   /**
    * Resume the active deck (e.g. when tab becomes visible)
    */
   function resume() {
-    if (!initialized || !playing) return;
+    if (!initialized || !playing || !desiredPlaying) return;
 
-    const el = activeDeck === 'A' ? deckA : deckB;
-    if (el.src && el.paused) {
+    const operation = operationId;
+    const decksToResume = [...visibilityPausedDecks];
+    visibilityPausedDecks.clear();
+    decksToResume.forEach((deckKey) => {
+      const el = deckKey === 'A' ? deckA : deckB;
+      if (!el.src || !el.paused) return;
+
       el.play().catch(() => {
-        // Silently handle if resume fails
+        // Preserve the intent so a later visibility/context restoration can
+        // retry only the deck that this manager paused.
+        if (operation === operationId && desiredPlaying) {
+          visibilityPausedDecks.add(deckKey);
+        }
       });
-    }
+    });
   }
 
   /**
@@ -203,24 +345,48 @@ const MusicManager = (function () {
    * @param {number} trackIndex - Index into tracks array
    */
   function crossfadeTo(trackIndex) {
-    if (!initialized || crossfading) return;
+    if (!initialized || crossfading || !tracks[trackIndex]) return;
+    if (!playing) {
+      start(trackIndex);
+      return;
+    }
     if (trackIndex === currentTrack && playing) return;
 
+    desiredPlaying = true;
+    pendingStart = false;
+    operationId += 1;
+    const operation = operationId;
+    _clearContextStateListener();
+    _clearFadeTimer();
+    _cancelCrossfadeTransition();
     crossfading = true;
 
     const newDeckKey = activeDeck === 'A' ? 'B' : 'A';
+    const oldDeckKey = activeDeck;
     const newEl = newDeckKey === 'A' ? deckA : deckB;
     const newGain = newDeckKey === 'A' ? gainA : gainB;
     const oldGain = activeDeck === 'A' ? gainA : gainB;
-    const oldEl = activeDeck === 'A' ? deckA : deckB;
 
     // Prep new deck
     newEl.src = BASE_PATH + tracks[trackIndex].file;
-    newGain.gain.value = 0;
+    deckTracks[newDeckKey] = trackIndex;
+    deckPlayOperations[newDeckKey] = operation;
+    crossfadeIncomingDeck = newDeckKey;
+    crossfadeOutgoingDeck = oldDeckKey;
+    _setGainImmediately(newGain, 0);
 
-    newEl.play().then(() => {
+    const playResult = newEl.play();
+    const playPromise = playResult && typeof playResult.then === 'function'
+      ? playResult
+      : Promise.resolve();
+    playPromise.then(() => {
+      if (operation !== operationId ||
+          deckPlayOperations[newDeckKey] !== operation ||
+          !desiredPlaying) return;
+
       const ctx = AudioContextManager.getContext();
       if (!ctx) {
+        _pauseDeck(newDeckKey);
         crossfading = false;
         return;
       }
@@ -233,20 +399,26 @@ const MusicManager = (function () {
 
       // Ramp new deck in
       newGain.gain.setValueAtTime(0, now);
-      newGain.gain.linearRampToValueAtTime(_getEffectiveVolume(), now + dur);
+      newGain.gain.linearRampToValueAtTime(1, now + dur);
 
       activeDeck = newDeckKey;
       currentTrack = trackIndex;
       playing = true;
 
-      setTimeout(() => {
-        oldEl.pause();
-        oldEl.currentTime = 0;
+      crossfadeTimer = setTimeout(() => {
+        if (operation !== operationId || !desiredPlaying) return;
+        _pauseDeck(oldDeckKey);
         crossfading = false;
+        crossfadeIncomingDeck = null;
+        crossfadeOutgoingDeck = null;
+        crossfadeTimer = null;
       }, CROSSFADE_DURATION * 1000);
     }).catch(err => {
+      if (operation !== operationId || deckPlayOperations[newDeckKey] !== operation) return;
       console.error('MusicManager: Crossfade failed:', err);
       crossfading = false;
+      crossfadeIncomingDeck = null;
+      crossfadeOutgoingDeck = null;
     });
   }
 
@@ -273,28 +445,33 @@ const MusicManager = (function () {
    * @param {number} v - Volume 0-1
    */
   function setVolume(v) {
-    volume = Math.max(0, Math.min(1, v));
+    const numericVolume = Number(v);
+    if (!Number.isFinite(numericVolume)) return;
+
+    volume = Math.max(0, Math.min(1, numericVolume));
     _saveVolume();
+    _applyOutputGain();
+  }
 
-    if (!initialized) return;
-
-    // Apply to active deck immediately
-    const gain = activeDeck === 'A' ? gainA : gainB;
-    if (gain && !crossfading) {
-      gain.gain.value = _getEffectiveVolume();
-    }
+  /** Apply a transient global mute without changing the saved music volume. */
+  function setMuted(muted) {
+    outputMuted = !!muted;
+    _applyOutputGain();
   }
 
   /**
    * Called when master volume changes - recalculate gain
    */
   function updateMasterVolume() {
-    if (!initialized) return;
+    _applyOutputGain();
+  }
 
-    const gain = activeDeck === 'A' ? gainA : gainB;
-    if (gain && !crossfading) {
-      gain.gain.value = _getEffectiveVolume();
-    }
+  /** Apply music * master to the post-crossfade output bus. */
+  function _applyOutputGain() {
+    if (!initialized && !outputGain) return;
+    if (!outputGain?.gain) return;
+
+    outputGain.gain.value = outputMuted ? 0 : _getEffectiveVolume();
   }
 
   /**
@@ -353,6 +530,7 @@ const MusicManager = (function () {
     crossfadeTo,
     playTrack,
     setVolume,
+    setMuted,
     updateMasterVolume,
     isPlaying
   };

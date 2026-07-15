@@ -1,6 +1,6 @@
 # Wreckage System
 
-The wreckage system handles loot drops when entities (NPCs, players, bases) are destroyed. Wreckage spawns at the death location containing credits, resources, buffs, components, and relics. Players collect wreckage via a timed progress bar or instantly with the Scrap Siphon relic. Scavenger NPCs also compete for wreckage and will become enraged if players steal their targets. Wreckage despawns after 60 seconds if uncollected.
+The wreckage system handles loot drops when entities (NPCs, players, bases) are destroyed. Wreckage spawns at the death location containing credits, resources, buffs, components, and relics. Players collect wreckage through a server-timed progress bar; Scrap Siphon reserves up to three eligible pieces in parallel at 50% of their normal collection duration. Scavenger NPCs also compete for unlocked wreckage. Wreckage normally despawns after two minutes.
 
 ## Table of Contents
 1. [Data Structures](#data-structures)
@@ -23,7 +23,7 @@ The wreckage system handles loot drops when entities (NPCs, players, bases) are 
   id: "wreckage_123",
   position: { x: 5000, y: 3000 },
   size: 20,                        // 20=NPC, 25=player, 40=base
-  source: "npc",                   // "npc" | "player" | "base"
+  source: "npc",                   // "npc" | "player" | "base" | "derelict"
   faction: "pirate",               // Faction color for rendering
   npcType: "pirate_raider",        // Original entity type
   npcName: "Pirate Raider",        // Display name
@@ -43,9 +43,12 @@ The wreckage system handles loot drops when entities (NPCs, players, bases) are 
   beingCollectedBy: null,          // Player ID if being collected
   collectionProgress: 0,           // 0-totalCollectionTime
   collectionStartTime: null,       // When collection started
-  totalCollectionTime: 3500        // Calculated from contents
+  totalCollectionTime: null,       // Calculated when collection starts
+  pendingCredits: []               // Exact owner-bound shares awaiting a retry
 }
 ```
+
+`activeCollectionsByPlayer` enforces one collection session per player. A standard session owns one exclusive wreckage lock; a Scrap Siphon session owns its explicitly bounded set. Duplicate events from the same socket do not create additional timers.
 
 ### Client: Wreckage Entity
 ```javascript
@@ -185,7 +188,7 @@ The wreckage system handles loot drops when entities (NPCs, players, bases) are 
     │               │   update UI    │               │              │
     │◀──────────────│◀───────────────│               │              │
     │               │                │               │              │
-    │               │    ... 50ms interval ...       │              │
+    │               │    ... 100ms poll interval ... │              │
     │               │                │               │              │
     │               │                │ loot:progress │              │
     │               │                │◀──────────────│              │
@@ -215,7 +218,7 @@ The wreckage system handles loot drops when entities (NPCs, players, bases) are 
           │        │ (progress 0%)│        │
           │        └──────┬───────┘        │
           │               │                │
-     Cancel/Move    Progress updates  Complete
+ Cancel/death/etc.  Progress updates  Complete
           │               │                │
           │               ▼                │
           │        ┌──────────────┐        │
@@ -256,10 +259,13 @@ The wreckage system handles loot drops when entities (NPCs, players, bases) are 
        └─▶ socket.emit('loot:started', { wreckageId, totalTime })
 
 4. Progress loop (server-side interval)
-   └─▶ socket.js: setInterval (50ms)
-       └─▶ loot.updateCollection(wreckageId, playerId, 50)
+   └─▶ server/socket/loot.js: setInterval (100ms)
+       └─▶ loot.updateCollection(wreckageId, playerId)
+       └─▶ Derive elapsed time from Date.now() - collectionStartTime
        └─▶ socket.emit('loot:progress', { progress })
-       └─▶ When complete: socket.emit('loot:complete', { contents })
+       └─▶ Persist rewards within each recipient's cargo limit
+       └─▶ Finalize only after writes; leave overflow/pending credits claimable
+       └─▶ socket.emit('loot:complete', { contents, results, cargoLimited })
 
 5. Client updates UI
    └─▶ network.js: socket.on('loot:progress')
@@ -304,7 +310,7 @@ The wreckage system handles loot drops when entities (NPCs, players, bases) are 
     │               │                │  state per       │
     │               │                │  wreckageId      │
     │               │                │                  │
-    │               │    ... 500ms server timeout ...  │
+    │               │ ... server-timed relative duration ...
     │               │                │                  │
     │               │loot:multiCompl │                  │
     │               │◀───────────────│                  │
@@ -345,7 +351,7 @@ Time: 0ms                                              650ms
       │   - Store player position as target              │
       │   - Duration = max(600, serverTime)              │
       │                                                  │
-      │        loot:multiComplete (500ms)                │
+      │        loot:multiComplete (server duration)      │
       │        ▼                                         │
       │        setTimeout(650ms) ───────────────────────▶│
       │                                                  │
@@ -370,9 +376,12 @@ Time: 0ms                                              650ms
    └─▶ socket.js: socket.on('wreckage:multiCollect')
        └─▶ Check player has SCRAP_SIPHON relic
        └─▶ engine.getWreckageInRange(position, 300)
-       └─▶ Take up to 3 nearest
-       └─▶ socket.emit('loot:multiStarted', { wreckageIds, totalTime: 500 })
-       └─▶ setTimeout(500ms) → socket.emit('loot:multiComplete', {...})
+       └─▶ Take up to the configured maximum (currently 3)
+       └─▶ Atomically reserve the unlocked set
+       └─▶ totalTime = slowest normal duration × 0.5
+       └─▶ Poll server-clock progress
+       └─▶ Settle each wreckage independently with its own contributors
+       └─▶ socket.emit('loot:multiComplete', {...})
 
 3. Client starts animation
    └─▶ network.js: socket.on('loot:multiStarted')
@@ -403,6 +412,11 @@ Time: 0ms                                              650ms
 ---
 
 ## Scavenger NPC Collection Flow
+
+Scavengers only target unreserved wreckage with no owner-bound pending credit
+shares. They revalidate those conditions while seeking and again when their
+1.5-second scoop completes, so a player lock or failed-credit retry that appears
+mid-animation always wins and the wreckage remains in the world.
 
 ### State Machine: Scavenger AI
 
@@ -581,12 +595,12 @@ if (isSiphoning) {
 | `loot:cancelCollect` | C→S | `{wreckageId}` | Request to stop collecting |
 | `loot:started` | S→C | `{wreckageId, totalTime}` | Collection started |
 | `loot:progress` | S→C | `{wreckageId, progress}` | Progress update (0-1) |
-| `loot:complete` | S→C | `{wreckageId, contents, results}` | Standard collection done |
+| `loot:complete` | S→C | `{wreckageId, contents, results, teamCredits, cargoLimited}` | Standard collection settlement done |
 | `loot:cancelled` | S→C | `{reason}` | Collection interrupted |
 | `loot:error` | S→C | `{message}` | Collection failed |
 | `wreckage:multiCollect` | C→S | (none) | Scrap Siphon request |
 | `loot:multiStarted` | S→C | `{wreckageIds, totalTime}` | Multi-collect started |
-| `loot:multiComplete` | S→C | `{wreckageIds, contents, results}` | Multi-collect done |
+| `loot:multiComplete` | S→C | `{wreckageIds, attemptedWreckageIds, remainingWreckageIds, contents, results, teamCredits, cargoLimited}` | Multi-collect settlement done; `wreckageIds` contains only fully consumed pieces |
 | `loot:getNearby` | C→S | (none) | Request nearby wreckage |
 | `loot:nearby` | S→C | `{wreckage: [...]}` | Nearby wreckage list |
 | `loot:playerCollecting` | S→C | `{playerId, wreckageId}` | Other player started |
@@ -605,15 +619,13 @@ if (isSiphoning) {
 #### Server
 ```
 /server/game/loot.js
-├── activeWreckage (Map)        - Line 7
-├── spawnWreckage()             - Line 41
-├── getWreckage()               - Line 80
-├── removeWreckage()            - Line 84
-├── getWreckageInRange()        - Line 88
-├── startCollection()           - Line 101
-├── updateCollection()          - Line 133
-├── cancelCollection()          - Line 158
-└── cleanupExpiredWreckage()    - Line 168
+├── activeWreckage (Map)
+├── activeCollectionsByPlayer (Map)
+├── startCollection() / startMultiCollection()
+├── updateCollection()          - server-clock progress
+├── finalizeCollection()        - two-phase reward settlement
+├── cancelCollectionsForPlayer()
+└── cleanupExpiredWreckage()    - expiry and stale-lock recovery
 
 /server/game/engine.js
 ├── handlePlayerDeath()         - Line ~145  (spawns player wreckage)
@@ -621,10 +633,10 @@ if (isSiphoning) {
 ├── handleBaseDestruction()     - Line ~1745 (spawns base wreckage)
 └── updateWreckage()            - Line ~1270 (despawn cleanup)
 
-/server/socket.js
-├── loot:startCollect           - Line ~863
-├── loot:cancelCollect          - Line ~1004
-└── wreckage:multiCollect       - Line ~1043
+/server/socket/loot.js
+├── loot:startCollect
+├── loot:cancelCollect
+└── wreckage:multiCollect
 
 /server/game/ai/scavenger.js
 ├── findNearestWreckage()       - Line 103
@@ -674,30 +686,14 @@ if (isSiphoning) {
 
 ---
 
-## Refactoring Recommendations
+## Authority and settlement invariants
 
-### Issue 1: Duplicate Handler Systems
-**Problem:** Both `/client/js/network.js` and `/client/js/network/loot.js` exist. Only network.js is loaded.
-
-**Recommendation:** Either:
-- Remove the `/client/js/network/` folder entirely, OR
-- Wire up the modular system and migrate handlers
-
-### Issue 2: Event Name Inconsistency
-**Problem:** Mix of `wreckage:*` and `loot:*` prefixes for related events.
-
-**Recommendation:** Consolidate under `wreckage:` namespace:
-- `wreckage:startCollect` instead of `loot:startCollect`
-- `wreckage:complete` instead of `loot:complete`
-
-### Issue 3: Animation/Server Timing Mismatch
-**Problem:** Server collection (500ms) completes before client animation (600ms).
-
-**Recommendation:** Either:
-- Make animation duration configurable from server, OR
-- Store animation state separate from wreckage data
-
-### Issue 4: No TypeScript Types
-**Problem:** No type definitions for wreckage objects.
-
-**Recommendation:** Add JSDoc types or convert to TypeScript for better IDE support.
+- Collection progress always comes from the server clock; caller deltas cannot accelerate it.
+- A player owns at most one collection session, and each wreckage lock is exclusive even for duplicate same-player requests.
+- Death, wormhole transit, disconnect, explicit cancellation, and stale-lock cleanup release every owned lock.
+- Player death atomically loses `floor(combined * 0.5)` of each resource after combining inventory with marketplace escrow; `floor(loss * 0.5)` becomes wreckage. Splitting holdings across listings cannot change the rounding basis, and escrow mutations invalidate the global market view.
+- Reward writes happen before wreckage mutation. Cargo overflow and rejected writes remain on unlocked wreckage rather than being deleted.
+- Failed credit writes remain as exact owner-bound pending shares, so retries do not reapply team or relic multipliers.
+- Scrap Siphon processes each wreckage separately; contributor maps from unrelated kills are never merged.
+- Every durable player collection calls the Scavenger `onWreckageCollectedNearby` hook. Ordinary collection within 300 units triggers the spatial `scavenger:rage` event; Scrap Siphon passes its immunity through the same hook and leaves the cluster passive.
+- Scavengers cannot target or finish consuming player-locked wreckage, and never consume wreckage that contains owner-bound `pendingCredits`.

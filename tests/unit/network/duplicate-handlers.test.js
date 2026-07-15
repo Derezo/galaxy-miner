@@ -49,7 +49,8 @@ const SERVER_HANDLER_FILES = [
   'server/socket/wormhole.js',
   'server/socket/relic.js',
   'server/socket/emote.js',
-  'server/socket/connection.js'
+  'server/socket/connection.js',
+  'server/socket/fleet.js'
 ];
 
 /**

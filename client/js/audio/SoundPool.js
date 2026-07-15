@@ -17,6 +17,33 @@ const SoundPool = (function() {
   // Base path for audio files
   const AUDIO_BASE_PATH = '/assets/audio/';
 
+  function finalizeActiveSource(activeSource, reason) {
+    if (!activeSource || activeSource.finished) return;
+    activeSource.finished = true;
+
+    const index = activeSources.indexOf(activeSource);
+    if (index !== -1) activeSources.splice(index, 1);
+
+    if (typeof activeSource.onEnded === 'function') {
+      try {
+        activeSource.onEnded(activeSource.source, reason);
+      } catch (error) {
+        console.error('Sound end callback failed:', error);
+      }
+    }
+  }
+
+  function stopActiveSource(activeSource, reason) {
+    // Finalize first so a synchronous onended callback cannot replace the more
+    // specific stop/eviction reason with a generic natural-end reason.
+    finalizeActiveSource(activeSource, reason);
+    try {
+      activeSource.source.stop();
+    } catch (e) {
+      // Ignore errors from already stopped sources
+    }
+  }
+
   /**
    * Load an audio file and cache the buffer
    * @param {string} filename - Relative path to audio file
@@ -87,21 +114,18 @@ const SoundPool = (function() {
         return;
       }
 
-      // Check concurrent sound limit
-      if (activeSources.length >= MAX_CONCURRENT) {
-        // Stop oldest sound to make room
-        const oldest = activeSources.shift();
-        if (oldest && oldest.source) {
-          try {
-            oldest.source.stop();
-          } catch (e) {
-            // Ignore errors from already stopped sources
-          }
-        }
-      }
-
       loadSound(filename)
         .then(buffer => {
+          // Enforce the limit after asynchronous loading. Checking before load
+          // lets a burst of cache misses all observe the same free capacity.
+          if (activeSources.length >= MAX_CONCURRENT) {
+            // Prefer evicting a one-shot so persistent semantic loops survive
+            // ordinary combat bursts. If every source loops, evict the oldest.
+            const evictionIndex = activeSources.findIndex(active => !active.source.loop);
+            const oldest = activeSources[evictionIndex === -1 ? 0 : evictionIndex];
+            if (oldest) stopActiveSource(oldest, 'evicted');
+          }
+
           // Create source node
           const source = context.createBufferSource();
           source.buffer = buffer;
@@ -131,16 +155,15 @@ const SoundPool = (function() {
             gainNode,
             pannerNode,
             filename,
-            startTime: context.currentTime
+            startTime: context.currentTime,
+            onEnded: options.onEnded,
+            finished: false
           };
           activeSources.push(activeSource);
 
           // Clean up when sound ends
           source.onended = () => {
-            const index = activeSources.indexOf(activeSource);
-            if (index !== -1) {
-              activeSources.splice(index, 1);
-            }
+            finalizeActiveSource(activeSource, 'ended');
           };
 
           // Start playback
@@ -162,31 +185,57 @@ const SoundPool = (function() {
   function stopSound(sourceNode) {
     if (!sourceNode) return;
 
+    const activeSource = activeSources.find(entry => entry.source === sourceNode);
+    if (activeSource) {
+      stopActiveSource(activeSource, 'stopped');
+      return;
+    }
+
     try {
       sourceNode.stop();
     } catch (e) {
       // Source may already be stopped
     }
+  }
 
-    // Remove from active sources
-    const index = activeSources.findIndex(s => s.source === sourceNode);
-    if (index !== -1) {
-      activeSources.splice(index, 1);
+  /**
+   * Update the gain for a currently active source without restarting it.
+   * @param {AudioBufferSourceNode} sourceNode - Source returned by playSound
+   * @param {number} volume - New linear gain (0 or greater)
+   * @returns {boolean} True when the active source was updated
+   */
+  function setSourceVolume(sourceNode, volume) {
+    const numericVolume = Number(volume);
+    if (!sourceNode || !Number.isFinite(numericVolume)) return false;
+
+    const activeSource = activeSources.find(entry => entry.source === sourceNode);
+    if (!activeSource?.gainNode?.gain) return false;
+
+    const nextVolume = Math.max(0, numericVolume);
+    const gain = activeSource.gainNode.gain;
+    const context = AudioContextManager.getContext();
+    const now = context?.currentTime || 0;
+
+    // Clear any stale automation before applying the setting immediately.
+    if (typeof gain.cancelScheduledValues === 'function') {
+      gain.cancelScheduledValues(now);
     }
+    if (typeof gain.setValueAtTime === 'function') {
+      gain.setValueAtTime(nextVolume, now);
+    } else {
+      gain.value = nextVolume;
+    }
+
+    return true;
   }
 
   /**
    * Stop all currently playing sounds
    */
   function stopAll() {
-    activeSources.forEach(activeSource => {
-      try {
-        activeSource.source.stop();
-      } catch (e) {
-        // Ignore errors from already stopped sources
-      }
+    [...activeSources].forEach(activeSource => {
+      stopActiveSource(activeSource, 'stop-all');
     });
-    activeSources.length = 0;
   }
 
   /**
@@ -203,6 +252,10 @@ const SoundPool = (function() {
    */
   function getActiveSources() {
     return [...activeSources];
+  }
+
+  function isSourceActive(sourceNode) {
+    return activeSources.some(activeSource => activeSource.source === sourceNode);
   }
 
   /**
@@ -241,9 +294,11 @@ const SoundPool = (function() {
     loadSound,
     playSound,
     stopSound,
+    setSourceVolume,
     stopAll,
     getActiveCount,
     getActiveSources,
+    isSourceActive,
     preloadSounds,
     clearCache,
     getStats

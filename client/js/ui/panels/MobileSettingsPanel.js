@@ -7,7 +7,7 @@ const MobileSettingsPanel = {
   settings: {
     joystickSize: 120,
     joystickDeadzone: 0.15,
-    autoFireEnabled: true,
+    autoFireEnabled: false,
     autoFireTolerance: 30,
     hapticFeedback: true
   },
@@ -201,7 +201,11 @@ const MobileSettingsPanel = {
   applySettings() {
     // Apply to VirtualJoystick
     if (typeof VirtualJoystick !== 'undefined') {
-      VirtualJoystick.config.size = this.settings.joystickSize;
+      if (typeof VirtualJoystick.setSize === 'function') {
+        VirtualJoystick.setSize(this.settings.joystickSize);
+      } else {
+        VirtualJoystick.config.size = this.settings.joystickSize;
+      }
       VirtualJoystick.config.deadzone = this.settings.joystickDeadzone;
     }
 
@@ -250,7 +254,7 @@ const MobileSettingsPanel = {
     this.settings = {
       joystickSize: 120,
       joystickDeadzone: 0.15,
-      autoFireEnabled: true,
+      autoFireEnabled: false,
       autoFireTolerance: 30,
       hapticFeedback: true
     };

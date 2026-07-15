@@ -79,7 +79,8 @@ const Player = {
   _boostLoopActive: false,
   _lastShieldState: 'damaged',  // 'damaged' | 'full'
 
-  init(data) {
+  init(data, options = {}) {
+    const preserveLifeState = options.preserveLifeState === true && this.id === data.id;
     this.id = data.id;
     this.username = data.username;
     this.position = { x: data.position_x || 0, y: data.position_y || 0 };
@@ -90,6 +91,49 @@ const Player = {
     this.credits = (typeof data.credits === 'number' && !Number.isNaN(data.credits)) ? data.credits : 0;
     this.inventory = data.inventory || [];
     this.relics = data.relics || [];
+
+    // Clear action state that belongs to the previous transport session. Its
+    // completion events may have been lost while disconnected.
+    this.miningTarget = null;
+    this.miningProgress = 0;
+    this.miningConfirmed = false;
+    this.thrustDuration = 0;
+    this._lastThrustKeyWasDown = false;
+    this._lastPositionSend = 0;
+    this.collectingWreckage = null;
+    this.collectProgress = 0;
+    this.collectTotalTime = 0;
+    this.multiCollecting = false;
+    this.multiCollectWreckageIds = null;
+    this.multiCollectCooldownEnd = 0;
+    this._nearestMineable = null;
+    this._nearestDerelict = null;
+    this._lastDerelictRequest = 0;
+
+    // Buffs persist in SQLite and are resynchronized by authentication.
+    this.activeBuffs.clear();
+    const now = Date.now();
+    for (const buff of data.active_buffs || []) {
+      const buffType = buff?.buff_type;
+      const expiresAt = Number(buff?.expires_at);
+      if (typeof buffType !== 'string' || !Number.isFinite(expiresAt) || expiresAt <= now) continue;
+      this.activeBuffs.set(buffType, {
+        type: buffType,
+        expiresAt,
+        duration: expiresAt - now
+      });
+    }
+
+    // Server combat debuffs are in-memory but survive a transport reconnect.
+    // Replace the old client timers with the authoritative remaining expiry.
+    this.debuffs = {};
+    const slow = data.debuffs?.slow;
+    if (Number.isFinite(slow?.expiresAt) && slow.expiresAt > now) {
+      this.debuffs.slow = {
+        expiresAt: slow.expiresAt,
+        percent: Math.max(0, Math.min(0.9, Number(slow.percent) || 0))
+      };
+    }
 
     this.ship = {
       engineTier: data.engine_tier,
@@ -116,10 +160,14 @@ const Player = {
       }
     }
 
-    // Reset boost state
-    this.boostActive = false;
-    this.boostEndTime = 0;
-    this.boostCooldownEnd = 0;
+    // Boost authority survives transport replacement. Restore the active
+    // window and cooldown from server-relative durations to avoid refresh
+    // bypasses or a falsely enabled control.
+    const boostRemaining = Math.max(0, Number(data.boostRemaining) || 0);
+    const boostCooldownRemaining = Math.max(0, Number(data.boostCooldownRemaining) || 0);
+    this.boostActive = boostRemaining > 0;
+    this.boostEndTime = now + boostRemaining;
+    this.boostCooldownEnd = now + boostCooldownRemaining;
     this.lastThrustKeyTime = 0;
 
     // Reset audio state
@@ -127,19 +175,27 @@ const Player = {
     this._boostLoopActive = false;
     this._lastShieldState = 'damaged';
 
-    // Initialize survival tracking
-    this.isDead = false;
-    this.sessionStartTime = Date.now();
-    this.frozenSurvivalTime = 0;
-
-    // Reset session statistics
-    this.sessionStats = {
-      distanceTraveled: 0,
-      lastPosition: { x: this.position.x, y: this.position.y },
-      npcsKilled: 0,
-      resourcesMined: 0,
-      creditsEarned: 0
-    };
+    // A reconnect snapshot with zero hull is authoritative. The server may
+    // also send player:death immediately around authentication, so init must
+    // never revive that state locally before an explicit respawn event.
+    this.isDead = data.is_dead === true ||
+      (Number.isFinite(data.hull_hp) && data.hull_hp <= 0);
+    if (preserveLifeState) {
+      // These metrics are client-owned and describe the current life. A
+      // transport resync should not turn a brief outage into a new life; only
+      // rebase distance tracking to avoid counting the reconciliation jump.
+      this.sessionStats.lastPosition = { x: this.position.x, y: this.position.y };
+    } else {
+      this.sessionStartTime = this.isDead ? 0 : now;
+      this.frozenSurvivalTime = 0;
+      this.sessionStats = {
+        distanceTraveled: 0,
+        lastPosition: { x: this.position.x, y: this.position.y },
+        npcsKilled: 0,
+        resourcesMined: 0,
+        creditsEarned: 0
+      };
+    }
 
     // Reset wormhole transit state
     this.inWormholeTransit = false;
@@ -150,7 +206,12 @@ const Player = {
     this._nearestWormhole = null;
 
     // Reset plunder state
-    this.plunderCooldownEnd = 0;
+    const plunderCooldownRemaining = Number(data.plunderCooldownRemaining);
+    if (Number.isFinite(plunderCooldownRemaining)) {
+      this.plunderCooldownEnd = now + Math.max(0, plunderCooldownRemaining);
+    } else if (!preserveLifeState) {
+      this.plunderCooldownEnd = 0;
+    }
     this._nearestBase = null;
 
     // Initialize UIState with player data
@@ -166,7 +227,7 @@ const Player = {
     Logger.log('Player initialized:', this.username);
   },
 
-  update(dt) {
+  update(dt, visibleWorldObjects = null) {
     // Skip all updates while dead - player cannot move or act
     if (this.isDead) {
       return;
@@ -187,6 +248,14 @@ const Player = {
     let speed = CONSTANTS.BASE_SPEED * Math.pow(CONSTANTS.TIER_MULTIPLIER, this.ship.engineTier - 1);
     const rotSpeed = CONSTANTS.BASE_ROTATION_SPEED;
 
+    const slow = this.debuffs?.slow;
+    if (slow && slow.expiresAt > now) {
+      const slowPercent = Math.max(0, Math.min(0.9, Number(slow.percent) || 0));
+      speed *= 1 - slowPercent;
+    } else if (slow && this.debuffs) {
+      delete this.debuffs.slow;
+    }
+
     // Check for boost end
     if (this.boostActive && now >= this.boostEndTime) {
       this.boostActive = false;
@@ -195,6 +264,14 @@ const Player = {
         AudioManager.stopLoop('boost_sustain');
         this._boostLoopActive = false;
       }
+    }
+
+    // A reconnect stops physical loops before restoring boost authority.
+    // Reconcile the semantic sustain intent on the first resumed update.
+    if (this.boostActive && !this._boostLoopActive &&
+        typeof AudioManager !== 'undefined') {
+      AudioManager.startLoop('boost_sustain');
+      this._boostLoopActive = true;
     }
 
     // Apply boost speed multiplier if active
@@ -269,6 +346,10 @@ const Player = {
       this.velocity.y -= Math.sin(this.rotation) * speed * 0.5 * dt;
     }
 
+    // Equivalent orientations render identically; bounding the network-facing
+    // value also keeps server-side angle handling constant-time.
+    this.rotation = Math.atan2(Math.sin(this.rotation), Math.cos(this.rotation));
+
     // Apply friction/drag
     const drag = 0.98;
     this.velocity.x *= drag;
@@ -277,8 +358,12 @@ const Player = {
     // Update engine audio based on velocity
     this.updateEngineAudio();
 
+    // Reuse the frame's world snapshot across all player systems. Direct
+    // callers still get a single fallback query for compatibility.
+    const worldObjects = visibleWorldObjects || World.getVisibleObjects(this.position, 2000);
+
     // Apply star gravity wells
-    this.applyStarGravity(dt);
+    this.applyStarGravity(dt, worldObjects);
 
     // Update position
     this.position.x += this.velocity.x * dt;
@@ -291,24 +376,26 @@ const Player = {
     this.sendPositionUpdate();
 
     // Check for nearby mineable objects
-    this.checkMiningProximity();
+    this.checkMiningProximity(worldObjects);
 
     // Check for nearby wreckage
     this.checkWreckageProximity();
 
     // Check for nearby wormholes
-    this.checkWormholeProximity();
+    this.checkWormholeProximity(worldObjects);
 
     // Check for nearby derelicts (in Graveyard zone)
     this.checkDerelictProximity();
 
     // Update mining progress if mining
     if (this.miningTarget) {
-      this.updateMining(dt);
+      this.updateMining(dt, worldObjects);
     }
 
     // Shield regeneration
     this.regenShield(dt);
+
+    return worldObjects;
   },
 
   sendPositionUpdate() {
@@ -319,22 +406,30 @@ const Player = {
         y: this.position.y,
         vx: this.velocity.x,
         vy: this.velocity.y,
-        rotation: this.rotation
+        rotation: this.rotation,
+        boostActive: this.isBoostActive()
       });
       this._lastPositionSend = Date.now();
     }
   },
 
+  /**
+   * Return the effective weapon cooldown after weapon and energy-core upgrades.
+   * Mobile firing systems call this too so every input path uses one formula.
+   */
+  getWeaponCooldown() {
+    let cooldown = CONSTANTS.BASE_WEAPON_COOLDOWN / Math.pow(CONSTANTS.TIER_MULTIPLIER, this.ship.weaponTier - 1);
+    const cooldownReduction = CONSTANTS.ENERGY_CORE?.COOLDOWN_REDUCTION?.[this.ship.energyCoreTier] || 0;
+    return cooldown * (1 - cooldownReduction);
+  },
+
   fire() {
     // Cannot fire while dead
     if (this.isDead) return;
+    if (typeof Network === 'undefined' || !Network.connected) return;
 
     const now = Date.now();
-    // Base cooldown from weapon tier
-    let cooldown = CONSTANTS.BASE_WEAPON_COOLDOWN / Math.pow(CONSTANTS.TIER_MULTIPLIER, this.ship.weaponTier - 1);
-    // Apply energy core cooldown reduction
-    const cooldownReduction = CONSTANTS.ENERGY_CORE?.COOLDOWN_REDUCTION?.[this.ship.energyCoreTier] || 0;
-    cooldown = cooldown * (1 - cooldownReduction);
+    const cooldown = this.getWeaponCooldown();
 
     if (now - this.lastFireTime < cooldown) return;
 
@@ -351,8 +446,9 @@ const Player = {
     Renderer.fireWeapon();
   },
 
-  checkMiningProximity() {
-    const objects = World.getVisibleObjects(this.position, CONSTANTS.MINING_RANGE * 2);
+  checkMiningProximity(visibleWorldObjects = null) {
+    const objects = visibleWorldObjects ||
+      World.getVisibleObjects(this.position, CONSTANTS.MINING_RANGE * 2);
     let nearestMineable = null;
     let nearestDist = CONSTANTS.MINING_RANGE;
 
@@ -479,10 +575,10 @@ const Player = {
     return false;
   },
 
-  updateMining(dt) {
+  updateMining(dt, visibleWorldObjects = null) {
     // Update target position to track moving asteroid/planet
     // Find current position of the mining target
-    const objects = World.getVisibleObjects(this.position, 2000);
+    const objects = visibleWorldObjects || World.getVisibleObjects(this.position, 2000);
     const allObjects = [...objects.asteroids, ...objects.planets];
     const currentTarget = allObjects.find(obj => obj.id === this.miningTarget.id);
     if (currentTarget) {
@@ -554,11 +650,11 @@ const Player = {
    * Apply gravity from nearby stars
    * Higher engine tiers provide more resistance to gravity
    */
-  applyStarGravity(dt) {
+  applyStarGravity(dt, visibleWorldObjects = null) {
     // Get visible stars from world
     if (typeof World === 'undefined') return;
 
-    const objects = World.getVisibleObjects(this.position, 2000);
+    const objects = visibleWorldObjects || World.getVisibleObjects(this.position, 2000);
     if (!objects.stars || objects.stars.length === 0) return;
 
     // Track if we're in any gravity well (for UI feedback)
@@ -607,6 +703,9 @@ const Player = {
 
   onMiningStarted(data) {
     this.miningConfirmed = true;
+    if (this.miningTarget && data?.resourceType) {
+      this.miningTarget.activeResourceType = data.resourceType;
+    }
   },
 
   onMiningComplete(data) {
@@ -662,7 +761,10 @@ const Player = {
   },
 
   getRadarRange() {
-    return CONSTANTS.BASE_RADAR_RANGE * Math.pow(CONSTANTS.TIER_MULTIPLIER, this.ship.radarTier - 1);
+    if (typeof Utils !== 'undefined' && typeof Utils.getRadarRange === 'function') {
+      return Utils.getRadarRange(this.ship.radarTier);
+    }
+    return CONSTANTS.RADAR_TIERS?.[this.ship.radarTier]?.range || CONSTANTS.BASE_RADAR_RANGE;
   },
 
   /**
@@ -855,20 +957,26 @@ const Player = {
   // Thrust boost methods (Energy Core ability)
   activateBoost() {
     const now = Date.now();
+
+    // Keep the ability authoritative even when invoked directly by touch gestures.
+    if (this.isDead || this.inWormholeTransit || this.boostActive || now < this.boostCooldownEnd) {
+      return false;
+    }
+
     const tier = this.ship.energyCoreTier || 1;
 
     // Get boost duration and cooldown from constants
     let boostDuration = CONSTANTS.ENERGY_CORE?.BOOST?.DURATION?.[tier] || 1000;
     let boostCooldown = CONSTANTS.ENERGY_CORE?.BOOST?.COOLDOWN?.[tier] || 15000;
 
-    // Apply Subspace Warp Drive relic effects (+150% velocity via longer duration, -25% cooldown)
+    // Apply Subspace Warp Drive relic effects (+150% boost duration, -25% cooldown).
     if (this.hasRelic('SUBSPACE_WARP_DRIVE')) {
-      const relicEffects = CONSTANTS.RELICS?.SUBSPACE_WARP_DRIVE?.effects;
+      const relicEffects = CONSTANTS.RELIC_TYPES?.SUBSPACE_WARP_DRIVE?.effects;
       if (relicEffects) {
-        // Longer duration = more velocity gained (2.5x duration for +150% effective velocity)
-        boostDuration = Math.round(boostDuration * (relicEffects.warpVelocityMultiplier || 2.5));
+        // The speed multiplier is unchanged; 2.5x duration extends boost travel.
+        boostDuration = Math.round(boostDuration * (relicEffects.boostDurationMultiplier || 2.5));
         // Reduced cooldown
-        boostCooldown = Math.round(boostCooldown * (relicEffects.warpCooldownMultiplier || 0.75));
+        boostCooldown = Math.round(boostCooldown * (relicEffects.boostCooldownMultiplier || 0.75));
       }
     }
 
@@ -887,6 +995,7 @@ const Player = {
     }
 
     Logger.log(`Thrust boost activated! Duration: ${boostDuration}ms, Cooldown: ${boostCooldown}ms`);
+    return true;
   },
 
   isBoostActive() {
@@ -910,7 +1019,7 @@ const Player = {
       totalCooldown = CONSTANTS.ENERGY_CORE?.BOOST?.COOLDOWN?.[tier] || 15000;
       // Apply relic effect if present
       if (this.hasRelic('SUBSPACE_WARP_DRIVE')) {
-        const multiplier = CONSTANTS.RELICS?.SUBSPACE_WARP_DRIVE?.effects?.warpCooldownMultiplier || 0.75;
+        const multiplier = CONSTANTS.RELIC_TYPES?.SUBSPACE_WARP_DRIVE?.effects?.boostCooldownMultiplier || 0.75;
         totalCooldown = Math.round(totalCooldown * multiplier);
       }
     }
@@ -938,8 +1047,13 @@ const Player = {
    * @param {Object} data - Death data from server
    */
   onDeath(data) {
-    // Freeze survival time BEFORE setting isDead, so we capture the actual survival time
-    this.frozenSurvivalTime = this.sessionStartTime > 0 ? Date.now() - this.sessionStartTime : 0;
+    // Authentication re-emits player:death for an already-dead reconnect.
+    // Freeze only the first transition so dead downtime never inflates a life.
+    if (!this.isDead) {
+      this.frozenSurvivalTime = this.sessionStartTime > 0
+        ? Date.now() - this.sessionStartTime
+        : 0;
+    }
 
     this.isDead = true;
     // Note: Don't reset sessionStartTime here - we use frozenSurvivalTime for display
@@ -1012,9 +1126,9 @@ const Player = {
   /**
    * Check for nearby wormholes and update UI hint
    */
-  checkWormholeProximity() {
+  checkWormholeProximity(visibleWorldObjects = null) {
     const WORMHOLE_RANGE = 100; // Must match server WORMHOLE_RANGE
-    const objects = World.getVisibleObjects(this.position, 2000);
+    const objects = visibleWorldObjects || World.getVisibleObjects(this.position, 2000);
     let nearestWormhole = null;
     let nearestDist = Infinity;
 

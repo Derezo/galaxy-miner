@@ -8,6 +8,13 @@ For visual architecture diagrams and data flow details, see [ARCHITECTURE.md](AR
 
 The audio system is composed of modular components following the game's IIFE singleton pattern:
 
+Loop requests are versioned. Stopping or replacing a loop while its audio buffer
+is still loading invalidates the older request, so late promises cannot restart
+stale engine or ambient audio. Semantic loop intents are tracked separately from
+their physical Web Audio sources: hiding the page suspends sources but retains
+intents, and visibility restoration starts only intents that still exist. A
+`stopLoop()` call while hidden therefore prevents that loop from returning.
+
 ```
 audio/
 ├── AudioContext.js       - Web Audio API context lifecycle management
@@ -57,19 +64,27 @@ AudioManager.playAt('mining_complete', asteroid.x, asteroid.y);
 ### Looping Sounds
 
 ```javascript
-// Start a loop
-AudioManager.startLoop('engine_3');
+// The optional third argument identifies one instance of a configured sound.
+const loopKey = `engine_${player.id}`;
+AudioManager.startLoop('engine_3', { x: player.x, y: player.y }, loopKey);
 
 // Stop the loop
-AudioManager.stopLoop('engine_3');
+AudioManager.stopLoop(loopKey);
 
 // Update position for moving loops (e.g., other players' engines)
-AudioManager.updateLoopPosition('engine_other_player', player.x, player.y);
+AudioManager.updateLoopPosition(loopKey, player.x, player.y);
 ```
+
+`startLoop()` records the latest options even while audio is muted or the page is
+hidden. `stopLoop()` and `stopAllLoops()` are state operations and should be
+called whenever gameplay ends the sound, regardless of current audio readiness.
+Omit the instance key when one global instance per sound ID is sufficient. Page
+visibility restoration waits until the underlying `AudioContext` is actually
+running before it recreates intended loop sources.
 
 ## Volume Control
 
-Four independent volume categories: `master`, `sfx`, `ambient`, `ui`
+Five independent volume categories: `master`, `sfx`, `ambient`, `ui`, `music`
 
 ```javascript
 // Set volume (0-1)
@@ -86,7 +101,12 @@ AudioManager.unmute();
 AudioManager.toggleMute();
 ```
 
-Volumes are automatically persisted to `localStorage`.
+Volumes are automatically persisted to `localStorage`. Master and category
+changes update the `GainNode` of every active loop immediately. Global mute sets
+those live gains to zero without overwriting the configured category values;
+unmute restores the current calculated gains without restarting the sources.
+Music uses a shared post-crossfade output gain, so mute is also transient and
+never persists a zero music preference.
 
 ## Sound Configuration
 
@@ -95,29 +115,35 @@ All sounds are defined in `/client/js/audio/config/SoundConfig.js`:
 ```javascript
 const SoundConfig = {
   'weapon_fire_3': {
-    file: 'weapons/weapon_player_t3_01.wav',  // Relative to /assets/audio/
-    baseVolume: 0.75,                          // Base volume (0-1)
-    priority: 75,                              // Priority (0-100)
-    category: 'sfx',                           // Volume category
-    variations: 3                              // Number of variations
+    file: 'weapons/weapon_player_t3.mp3',
+    variationPattern: 'weapons/weapon_player_t3_{index}.mp3',
+    variations: 3,
+    baseVolume: 0.75,
+    priority: 75,
+    category: 'sfx'
   }
 };
 ```
 
 ### Sound Properties
 
-- **file**: Path relative to `/assets/audio/`
+- **file**: Path relative to `/assets/audio/`; also the fallback when a variant fails
+- **variationPattern**: Variant path containing an `{index}` token
+- **variationFiles**: Optional explicit filename array for non-sequential families
+- **variations**: Number of files generated from `variationPattern`
+- **variationStartIndex**: Optional first index (defaults to `1`)
+- **variationPadding**: Optional index width (defaults to `2`, producing `01`)
 - **baseVolume**: Base volume before category/master volume applied
 - **priority**: Playback priority (100 = critical, 75 = high, 50 = medium, 25 = low)
 - **category**: Volume category (`sfx`, `ambient`, `ui`)
-- **variations**: Number of sound variations (system auto-selects to avoid repetition)
 - **loop**: Whether sound should loop (for ambient sounds)
 
 ## Spatial Audio
 
 Distance-based falloff and stereo panning:
 
-- **Range**: 0-1000 units (matches base radar range)
+- **Range**: Fixed 0-1000-unit near field (equal to the tier-1 2× broadcast
+  envelope; it does not scale with the radar tier)
 - **Falloff**: Linear volume reduction from full at 0 to silent at 1000
 - **Panning**: Stereo positioning based on relative angle (-1 left, 0 center, 1 right)
 - **Culling**: Sounds beyond range won't play (volume = 0)
@@ -132,19 +158,24 @@ Prevents audio overload with intelligent sound culling:
 - **MEDIUM (50)**: Plays when < 80% capacity (loot pickup, notifications)
 - **LOW (25)**: Plays when < 60% capacity (engine loops, drilling)
 
-When at capacity, lowest priority sounds are culled first.
+Priority gates new requests as the pool fills. At the hard limit, the pool
+evicts the oldest one-shot before considering a managed loop, and reconciles
+loop intent when capacity becomes available again.
 
 ## Variations
 
 Sounds with `variations > 1` have multiple audio files that rotate:
 
 ```
-weapons/weapon_player_t3_01.wav  (base file in config)
-weapons/weapon_player_t3_02.wav  (variation 1)
-weapons/weapon_player_t3_03.wav  (variation 2)
+weapons/weapon_player_t3_01.mp3
+weapons/weapon_player_t3_02.mp3
+weapons/weapon_player_t3_03.mp3
 ```
 
-The system automatically prevents consecutive identical variations.
+The system automatically prevents consecutive identical variations. If a
+variant cannot load or decode, playback retries the `file` MP3 fallback. Calling
+`AudioManager.preload(soundIds)` expands every requested ID to all of its
+variation paths plus the fallback, and deduplicates shared alias paths.
 
 ## Game Integration Hooks
 
@@ -180,9 +211,14 @@ socket.on('combat:hit', (data) => {
 ### NPC and Player Deaths
 
 ```javascript
+socket.on('npc:destroyed', (data) => {
+  const npc = Entities.npcs.get(data.id);
+  AudioManager.playAt(`death_${npc.faction}`, npc.position.x, npc.position.y);
+});
+
 socket.on('npc:death', (data) => {
-  const faction = data.faction.toLowerCase();
-  AudioManager.playAt(`death_${faction}`, data.x, data.y);
+  // Non-destructive removal, such as an orphan NPC timing out.
+  AudioManager.playAt('npc_despawn', data.x, data.y);
 });
 
 socket.on('player:death', (data) => {
@@ -384,6 +420,10 @@ assets/audio/
 └── ui/              - Interface and notification sounds
 ```
 
+Weapon variations and UI/menu MP3s are generated from the tested ElevenLabs
+catalog in `/tools/audio-generator/elevenlabs/`. Use its `weapon-ui` collection
+to avoid selecting the unrelated NPC destruction categories.
+
 ## Performance Considerations
 
 - **Lazy Loading**: Sounds load on first play, then cached
@@ -410,8 +450,10 @@ console.log(stats);
 {
   initialized: true,
   muted: false,
-  volumes: { master: 0.8, sfx: 1.0, ambient: 0.6, ui: 0.8 },
+  volumes: { master: 0.8, sfx: 1.0, ambient: 0.6, ui: 0.8, music: 0.5 },
   activeLoops: 2,
+  intendedLoops: 2,
+  visibilitySuspended: false,
   soundPool: { cached: 15, loading: 0, active: 8, maxConcurrent: 32 },
   audioContext: 'running'
 }

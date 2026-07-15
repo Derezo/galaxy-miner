@@ -69,6 +69,12 @@ function register(socket) {
 
   // Seller notification when their listing is sold
   socket.on('market:sold', (data) => {
+    if (typeof Player !== 'undefined' && Number.isFinite(Number(data.credits))) {
+      Player.credits = Number(data.credits);
+    }
+    if (typeof UIState !== 'undefined' && Number.isFinite(Number(data.credits))) {
+      UIState.set('credits', Number(data.credits));
+    }
     // Track credits earned for session statistics
     if (typeof Player !== 'undefined' && data.totalCredits > 0) {
       Player.onCreditsEarned(data.totalCredits);
@@ -77,6 +83,7 @@ function register(socket) {
     // Animate credit gain instead of toast
     if (typeof CreditAnimation !== 'undefined' && data.totalCredits > 0) {
       CreditAnimation.addCredits(data.totalCredits);
+      if (typeof CreditAnimation.sync === 'function') CreditAnimation.sync();
     }
     window.Logger.log('Market sale:', data);
   });

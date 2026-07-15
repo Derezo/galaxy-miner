@@ -16,6 +16,9 @@ The network handlers are organized into separate modules by functionality:
 - **loot.js** - Loot collection, wreckage, buffs, relics (`loot:started`, `loot:complete`, `buff:applied`, `relic:collected`)
 - **wormhole.js** - Wormhole transit handlers (`wormhole:entered`, `wormhole:progress`, etc.)
 - **npc.js** - NPC and base handlers (`npc:spawn`, `npc:destroyed`, `base:damaged`, swarm/queen events, etc.)
+- **derelict.js** - Graveyard derelict discovery, salvage, and siphon events
+- **scavenger.js** and **pirate.js** - Faction-specific boss and ability events
+- **fleet.js** - Fleet membership, invites, and shared presence
 - **index.js** - Exports `registerAllHandlers()` to initialize all modules
 
 ## Usage Pattern
@@ -38,47 +41,29 @@ window.NetworkHandlers.moduleName = { register };
 
 To use these handlers in the main Network module:
 
-1. Load all handler scripts in index.html (before network.js)
-2. Call `window.NetworkHandlers.registerAll(socket)` in Network.init()
+1. Load `network.js`, then the handler scripts, in `index.html`.
+2. Call `window.NetworkHandlers.registerAll(socket)` from `Network.init()` after page scripts have loaded.
+
+## Reconnection
+
+Socket.io reconnects reuse the existing socket and handler registrations. On a
+disconnect, the game loop is paused, held inputs and firing intervals are
+cleared, transient targets are dropped, and managed audio sources stop. A
+successful token-auth response reapplies the complete authoritative player
+snapshot, reinitializes world/entity state around that position, and resumes
+the existing loop. This avoids duplicate listeners, duplicate animation-frame
+loops, and stale client prediction.
+
+If token authentication fails during reconnect, the invalid stored token is
+removed and the paused game is not resumed.
 
 ## Benefits
 
-- **Maintainability**: Each domain has its own file (88+ handlers split into 10 modules)
+- **Maintainability**: Each network domain has its own handler module
 - **Readability**: Easier to find specific handlers by category
 - **Debugging**: Clear module boundaries for debugging
 - **Performance**: No build step required, works with vanilla JS
 - **Consistency**: All handlers use `window.Logger`, browser globals
-
-## File Sizes
-
-- auth.js: ~800 bytes (2 handlers)
-- player.js: ~5.3 KB (8 handlers)
-- combat.js: ~5.8 KB (9 handlers)
-- mining.js: ~2.8 KB (7 handlers)
-- marketplace.js: ~2.5 KB (8 handlers)
-- chat.js: ~1.2 KB (3 handlers)
-- ship.js: ~4.1 KB (6 handlers)
-- loot.js: ~4.5 KB (11 handlers)
-- wormhole.js: ~1.5 KB (6 handlers)
-- npc.js: ~24 KB (28 handlers - largest module due to complex faction events)
-- index.js: ~1.5 KB (coordinator)
-
-**Total**: ~53 KB (vs original 1,704 line monolithic file)
-
-## Handler Count by Module
-
-- auth: 2
-- player: 8
-- combat: 9
-- mining: 7
-- marketplace: 8
-- chat: 3
-- ship: 6
-- loot: 11
-- wormhole: 6
-- npc: 28 (includes swarm queen, bases, assimilation, etc.)
-
-**Total**: 88 handlers
 
 ## Notes
 

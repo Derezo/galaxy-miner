@@ -6,120 +6,346 @@
  */
 
 const config = require('../config');
-const { statements, getSafeCredits, safeUpdateCredits, safeUpsertInventory } = require('../database');
+const { statements, getSafeCredits, grantPlunderRewards } = require('../database');
 const npc = require('../game/npc');
 const world = require('../world');
 const LootPools = require('../game/loot-pools');
 const Constants = require('../../shared/constants');
+const {
+  playerHasRelic,
+  allocateCargoResources,
+  getCooldownRemaining
+} = require('../game/relic-effects');
 const logger = require('../../shared/logger');
 
+// These maps deliberately live outside the socket closure. Reconnecting cannot
+// clear a player's cooldown, and deactivating/reactivating a base cannot refill
+// its finite cache during the same server-side base lifecycle.
+const playerPlunderCooldowns = new Map(); // userId -> last successful plunder
+const basePlunderStates = new Map(); // baseId -> lifecycle reserve + cooldown
+
+function getPlunderConfig() {
+  return Constants.RELIC_TYPES?.SKULL_AND_BONES || {};
+}
+
+function getPlayerPlunderCooldownRemaining(userId, now = Date.now()) {
+  const cooldown = getPlunderConfig().cooldown || 15000;
+  const remaining = getCooldownRemaining(playerPlunderCooldowns.get(userId), cooldown, now);
+  if (remaining <= 0) playerPlunderCooldowns.delete(userId);
+  return remaining;
+}
+
+function getBaseIdentity(base) {
+  return `${base.type || 'unknown'}:${base.faction || 'unknown'}`;
+}
+
+function getBasePlunderState(baseId, base) {
+  const baseIdentity = getBaseIdentity(base);
+  const destroyedAt = Math.max(0, Number(base.destroyedAt) || 0);
+  const existing = basePlunderStates.get(baseId);
+  if (existing
+    && existing.baseIdentity === baseIdentity
+    && (destroyedAt === 0 || destroyedAt <= existing.lastDestroyedAt)) {
+    return existing;
+  }
+
+  const state = {
+    baseIdentity,
+    // A reactivated world base may no longer carry destroyedAt. Retaining the
+    // highest observed value prevents activation-range churn from rerolling it.
+    lastDestroyedAt: Math.max(destroyedAt, existing?.lastDestroyedAt || 0),
+    lastPlunderAt: 0,
+    reserve: null
+  };
+  basePlunderStates.set(baseId, state);
+  return state;
+}
+
+function mergeResource(resources, resource, quantity) {
+  const safeQuantity = Math.max(0, Math.floor(Number(quantity) || 0));
+  if (!resource || safeQuantity <= 0) return;
+
+  const existing = resources.find(item => item.resource === resource);
+  if (existing) existing.quantity += safeQuantity;
+  else resources.push({ resource, quantity: safeQuantity });
+}
+
+function normalizeLoot(contents) {
+  const rewards = { credits: 0, resources: [] };
+
+  for (const item of Array.isArray(contents) ? contents : []) {
+    if (item?.type === 'resource') {
+      mergeResource(rewards.resources, item.resourceType || item.resource, item.quantity);
+    } else if (item?.type === 'credits') {
+      rewards.credits += Math.max(0, Math.floor(Number(item.amount) || 0));
+    } else if (item?.credits) {
+      rewards.credits += Math.max(0, Math.floor(Number(item.credits) || 0));
+    }
+  }
+
+  return rewards;
+}
+
+function createFiniteBaseReserve(base) {
+  const plunderConfig = getPlunderConfig();
+  const rolls = Math.max(1, Math.min(3, Math.floor(plunderConfig.reserveLootRolls || 1)));
+  const contents = [];
+  for (let i = 0; i < rolls; i++) {
+    contents.push(...(LootPools.generateLoot(base.type) || []));
+  }
+
+  const reserve = normalizeLoot(contents);
+  const creditReserves = plunderConfig.baseCreditReserve || {};
+  reserve.credits += Math.max(
+    0,
+    Math.floor(Number(creditReserves[base.type] ?? creditReserves.default) || 0)
+  );
+  return reserve;
+}
+
 /**
- * Register relic socket event handlers
- * @param {Object} socket - Socket.io socket instance
- * @param {Object} deps - Shared dependencies
+ * Read what is currently available without mutating the base or reserve.
+ */
+function calculateAvailableRewards(base, state) {
+  if (base.type === 'mining_claim') {
+    return {
+      source: 'mining_claim',
+      credits: Math.max(0, Math.floor(Number(base.claimCredits) || 0)),
+      resources: []
+    };
+  }
+
+  if (base.type === 'scavenger_yard') {
+    return {
+      source: 'scavenger_yard',
+      ...normalizeLoot(base.scrapPile?.contents || [])
+    };
+  }
+
+  if (!state.reserve) state.reserve = createFiniteBaseReserve(base);
+  return {
+    source: 'finite_cache',
+    credits: state.reserve.credits,
+    resources: state.reserve.resources.map(item => ({ ...item }))
+  };
+}
+
+function consumeScavengerRewards(base, grantedResources) {
+  if (!base.scrapPile || !Array.isArray(base.scrapPile.contents)) return;
+
+  const quantitiesToRemove = new Map();
+  for (const item of grantedResources) {
+    quantitiesToRemove.set(
+      item.resource,
+      (quantitiesToRemove.get(item.resource) || 0) + item.quantity
+    );
+  }
+
+  const remainingContents = [];
+  for (const item of base.scrapPile.contents) {
+    if (item?.type === 'credits' || item?.credits) {
+      // Credit rewards have no cargo cost and are fully withdrawn on success.
+      continue;
+    }
+
+    if (item?.type !== 'resource') {
+      // Plunder cannot steal buffs/components/relics from a scrap pile.
+      remainingContents.push(item);
+      continue;
+    }
+
+    const resource = item.resourceType || item.resource;
+    const available = Math.max(0, Math.floor(Number(item.quantity) || 0));
+    const requested = quantitiesToRemove.get(resource) || 0;
+    const removed = Math.min(available, requested);
+    quantitiesToRemove.set(resource, requested - removed);
+
+    if (available > removed) {
+      remainingContents.push({ ...item, quantity: available - removed });
+    }
+  }
+
+  base.scrapPile.contents = remainingContents;
+  if (remainingContents.length === 0) {
+    base.scrapPile.count = 0;
+  } else {
+    base.scrapPile.count = Math.max(1, Math.min(base.scrapPile.count || 1, remainingContents.length));
+  }
+}
+
+function consumeRewards(base, state, available, cargoAllocation) {
+  if (available.source === 'mining_claim') {
+    base.claimCredits = Math.max(0, (Number(base.claimCredits) || 0) - available.credits);
+    return;
+  }
+
+  if (available.source === 'scavenger_yard') {
+    consumeScavengerRewards(base, cargoAllocation.granted);
+    return;
+  }
+
+  state.reserve.credits = 0;
+  state.reserve.resources = cargoAllocation.remaining.map(item => ({ ...item }));
+}
+
+function isReserveDepleted(base, state) {
+  const available = calculateAvailableRewards(base, state);
+  return available.credits <= 0 && available.resources.length === 0;
+}
+
+function emitFailure(socket, reason, extra = {}) {
+  socket.emit('relic:plunderFailed', { reason, ...extra });
+}
+
+/**
+ * Register relic handlers for a socket.
  */
 function register(socket, deps) {
-  const { io, getAuthenticatedUserId } = deps;
-  const { connectedPlayers } = deps.state;
+  const { getAuthenticatedUserId } = deps;
+  const { connectedPlayers, broadcastToNearby } = deps.state;
 
-  // Skull and Bones: Plunder faction base
   socket.on('relic:plunder', (data) => {
     try {
       const authenticatedUserId = getAuthenticatedUserId();
       if (!authenticatedUserId) return;
-      const { baseId } = data;
 
-      logger.log('[Plunder] Plunder request from user', authenticatedUserId, 'for base', baseId);
-
-      // Validate relic ownership
-      const hasRelic = statements.hasRelic.get(authenticatedUserId, 'SKULL_AND_BONES');
-      if (!hasRelic) {
-        socket.emit('relic:plunderFailed', { reason: 'Missing Skull and Bones relic' });
+      const baseId = typeof data?.baseId === 'string' ? data.baseId : null;
+      if (!baseId) {
+        emitFailure(socket, 'Invalid base');
         return;
       }
 
-      // Get player position
+      logger.log('[Plunder] Request from user', authenticatedUserId, 'for base', baseId);
+
+      if (!playerHasRelic(statements, authenticatedUserId, 'SKULL_AND_BONES')) {
+        emitFailure(socket, 'Missing Skull and Bones relic');
+        return;
+      }
+
       const player = connectedPlayers.get(socket.id);
-      if (!player || !player.position) {
-        socket.emit('relic:plunderFailed', { reason: 'Player not found' });
+      if (!player?.position ||
+          player.id !== authenticatedUserId ||
+          player.isDead ||
+          deps.wormhole?.isInTransit?.(authenticatedUserId)) {
+        emitFailure(socket, 'Player unavailable');
         return;
       }
 
-      // Get base and validate
       const base = npc.getActiveBase(baseId);
       if (!base || base.destroyed) {
-        socket.emit('relic:plunderFailed', { reason: 'Base not found' });
+        emitFailure(socket, 'Base not found');
         return;
       }
 
-      // Get computed position for orbital bases
       const computedPos = world.getObjectPosition(baseId);
       const baseX = computedPos ? computedPos.x : base.x;
       const baseY = computedPos ? computedPos.y : base.y;
-
-      // Calculate distance and validate range with tolerance
       const dx = baseX - player.position.x;
       const dy = baseY - player.position.y;
       const dist = Math.sqrt(dx * dx + dy * dy);
-      const plunderRange = Constants.RELIC_TYPES?.SKULL_AND_BONES?.plunderRange || 200;
+      const plunderConfig = getPlunderConfig();
+      const plunderRange = plunderConfig.plunderRange || 200;
       const baseSize = base.size || 100;
       const tolerance = config.ORBITAL_POSITION_TOLERANCE || 1.15;
 
       if (dist > (plunderRange + baseSize) * tolerance) {
-        socket.emit('relic:plunderFailed', { reason: 'Too far from base' });
+        emitFailure(socket, 'Too far from base');
         return;
       }
 
-      // Calculate plunder rewards based on base type
-      const rewards = calculatePlunderRewards(base);
-
-      // Apply rewards to player
-      if (rewards.credits > 0) {
-        const ship = statements.getShipByUserId.get(authenticatedUserId);
-        const currentCredits = getSafeCredits(ship);
-        safeUpdateCredits(currentCredits + rewards.credits, authenticatedUserId);
-        logger.log('[Plunder] Added', rewards.credits, 'credits to user', authenticatedUserId);
+      const now = Date.now();
+      const playerCooldown = plunderConfig.cooldown || 15000;
+      const playerCooldownRemaining = getPlayerPlunderCooldownRemaining(
+        authenticatedUserId,
+        now
+      );
+      if (playerCooldownRemaining > 0) {
+        emitFailure(socket, 'Plunder systems recharging', {
+          cooldownRemaining: playerCooldownRemaining,
+          cooldownScope: 'player'
+        });
+        return;
       }
 
-      // Add resources to inventory
-      if (rewards.resources && rewards.resources.length > 0) {
-        for (const item of rewards.resources) {
-          safeUpsertInventory(authenticatedUserId, item.resource, item.quantity);
-          logger.log('[Plunder] Added', item.quantity, item.resource, 'to user', authenticatedUserId);
-        }
+      const state = getBasePlunderState(baseId, base);
+      const baseCooldown = plunderConfig.baseCooldown || 90000;
+      const baseCooldownRemaining = getCooldownRemaining(state.lastPlunderAt, baseCooldown, now);
+      if (baseCooldownRemaining > 0) {
+        emitFailure(socket, 'Base security is on alert', {
+          cooldownRemaining: baseCooldownRemaining,
+          cooldownScope: 'base'
+        });
+        return;
       }
 
-      // Clear base resources after plundering
-      clearBaseResources(base);
+      const ship = statements.getShipByUserId.get(authenticatedUserId);
+      if (!ship) {
+        emitFailure(socket, 'Ship not found');
+        return;
+      }
 
-      // Trigger aggro for same-faction NPCs within range (use computed position)
-      const aggroRange = Constants.RELIC_TYPES?.SKULL_AND_BONES?.aggroRange || 600;
+      const cargoUsed = Number(
+        statements.getTotalCargoCount.get(authenticatedUserId, authenticatedUserId)?.total
+      ) || 0;
+      const cargoTier = ship.cargo_tier || 1;
+      const cargoMax = config.CARGO_CAPACITY[cargoTier] || config.CARGO_CAPACITY[1];
+      const available = calculateAvailableRewards(base, state);
+
+      if (available.credits <= 0 && available.resources.length === 0) {
+        emitFailure(socket, 'Base reserves depleted');
+        return;
+      }
+
+      const cargoAllocation = allocateCargoResources(
+        available.resources,
+        Math.max(0, cargoMax - cargoUsed)
+      );
+      if (available.credits <= 0 && cargoAllocation.granted.length === 0) {
+        emitFailure(socket, 'Cargo hold full');
+        return;
+      }
+
+      // Durable credits and every resource row commit as one SQLite unit. No
+      // finite reserve, cooldown, aggro, or visual state changes before this.
+      const committed = grantPlunderRewards(
+        authenticatedUserId,
+        available.credits,
+        cargoAllocation.granted
+      );
+      const grantedResources = committed.resources;
+      cargoAllocation.granted = grantedResources;
+
+      consumeRewards(base, state, available, cargoAllocation);
+      playerPlunderCooldowns.set(authenticatedUserId, now);
+      state.lastPlunderAt = now;
+
+      const aggroRange = plunderConfig.aggroRange || 600;
       const nearbyNPCs = npc.getNPCsInRange({ x: baseX, y: baseY }, aggroRange);
-
       for (const npcEntity of nearbyNPCs) {
         if (npcEntity.faction === base.faction) {
           npcEntity.targetPlayer = authenticatedUserId;
           npcEntity.state = 'combat';
-          logger.log('[Plunder] NPC', npcEntity.id, 'now hostile to player');
         }
       }
 
-      // Build loot array for client
-      const lootItems = rewards.resources.map(r => ({
+      const lootItems = grantedResources.map(item => ({
         type: 'resource',
-        resource: r.resource,
-        quantity: r.quantity
+        resource: item.resource,
+        quantity: item.quantity
       }));
+      const depleted = isReserveDepleted(base, state);
 
-      // Send success to plundering player (use computed position)
       socket.emit('relic:plunderSuccess', {
         baseId,
-        credits: rewards.credits,
+        credits: committed.creditGrant,
         loot: lootItems,
-        position: { x: baseX, y: baseY }
+        position: { x: baseX, y: baseY },
+        cargoLimited: cargoAllocation.remaining.length > 0,
+        baseDepleted: depleted,
+        playerCooldown,
+        baseCooldown
       });
 
-      // Send inventory update for server sync
       const inventory = statements.getInventory.all(authenticatedUserId);
       const updatedShip = statements.getShipByUserId.get(authenticatedUserId);
       socket.emit('inventory:update', {
@@ -127,116 +353,27 @@ function register(socket, deps) {
         credits: getSafeCredits(updatedShip)
       });
 
-      // Broadcast visual effect to all nearby players (use computed position)
-      io.emit('base:plundered', {
+      // Sector-room scoped broadcast excludes the sender, who already received
+      // plunderSuccess and renders the same visual locally.
+      broadcastToNearby(socket, { position: { x: baseX, y: baseY } }, 'base:plundered', {
         baseId,
         position: { x: baseX, y: baseY }
       });
 
-      logger.log('[Plunder] Plunder complete - credits:', rewards.credits, 'items:', lootItems.length);
+      logger.log('[Plunder] Complete - credits:', committed.creditGrant,
+        'resource units:', cargoAllocation.usedCapacity,
+        'depleted:', depleted);
     } catch (err) {
-      logger.error(`[HANDLER] relic:plunder error:`, err);
+      logger.error('[HANDLER] relic:plunder error:', err);
+      emitFailure(socket, 'Plunder failed');
     }
   });
 }
 
-/**
- * Calculate plunder rewards based on base type (Skull and Bones relic)
- * @param {Object} base - The base being plundered
- * @returns {Object} { credits: number, resources: Array }
- */
-function calculatePlunderRewards(base) {
-  const rewards = { credits: 0, resources: [] };
-
-  switch (base.type) {
-    case 'mining_claim':
-      // Steal all accumulated credits from rogue miner claim
-      rewards.credits = base.claimCredits || 0;
-      break;
-
-    case 'scavenger_yard':
-      // Steal entire scrap pile contents
-      if (base.scrapPile && base.scrapPile.contents && base.scrapPile.contents.length > 0) {
-        // Convert wreckage contents to resources
-        // Note: Wreckage contents use 'resourceType' from LootPools
-        for (const item of base.scrapPile.contents) {
-          if (item.type === 'resource' && item.resourceType && item.quantity) {
-            rewards.resources.push({
-              resource: item.resourceType,
-              quantity: item.quantity
-            });
-          } else if (item.credits) {
-            rewards.credits += item.credits;
-          }
-        }
-      }
-      // Fallback: if scrap pile is empty, generate loot from base pool
-      if (rewards.credits === 0 && rewards.resources.length === 0) {
-        const generated = LootPools.generateLoot(base.type);
-        if (generated && generated.length > 0) {
-          for (const item of generated) {
-            if (item.type === 'resource') {
-              rewards.resources.push({
-                resource: item.resourceType,
-                quantity: item.quantity || 1
-              });
-            } else if (item.type === 'credits') {
-              rewards.credits += item.amount || 100;
-            }
-          }
-        }
-        // Minimum credits if still nothing
-        if (rewards.credits === 0 && rewards.resources.length === 0) {
-          rewards.credits = 50 + Math.floor(Math.random() * 100);
-        }
-      }
-      break;
-
-    case 'pirate_outpost':
-    case 'void_rift':
-    case 'swarm_hive':
-      // Generate loot using standard loot pools
-      const generated = LootPools.generateLoot(base.type);
-      if (generated && generated.length > 0) {
-        for (const item of generated) {
-          if (item.type === 'resource') {
-            // LootPools uses 'resourceType', normalize to 'resource' for consistency
-            rewards.resources.push({
-              resource: item.resourceType,
-              quantity: item.quantity || 1
-            });
-          } else if (item.type === 'credits') {
-            rewards.credits += item.amount || 100;
-          }
-        }
-      }
-      // Minimum credits if nothing generated
-      if (rewards.credits === 0 && rewards.resources.length === 0) {
-        rewards.credits = 50 + Math.floor(Math.random() * 100);
-      }
-      break;
-
-    default:
-      // Unknown base type - give small credit reward
-      rewards.credits = 25;
-      break;
-  }
-
-  return rewards;
-}
-
-/**
- * Clear base resources after plundering (Skull and Bones relic)
- * @param {Object} base - The base that was plundered
- */
-function clearBaseResources(base) {
-  if (base.type === 'mining_claim') {
-    base.claimCredits = 0;
-  } else if (base.type === 'scavenger_yard' && base.scrapPile) {
-    base.scrapPile.count = 0;
-    base.scrapPile.contents = [];
-  }
-  // pirate_outpost, void_rift, swarm_hive don't have persistent resources
-}
-
-module.exports = { register };
+module.exports = {
+  register,
+  // Exported for focused invariant tests and diagnostics.
+  normalizeLoot,
+  getBaseIdentity,
+  getPlayerPlunderCooldownRemaining
+};

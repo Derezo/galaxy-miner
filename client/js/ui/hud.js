@@ -189,7 +189,7 @@ const HUD = {
     // This method can be used for HUD-specific badge/state management
   },
 
-  update() {
+  update(visibleWorldObjects = null) {
     if (!GalaxyMiner.gameStarted) return;
 
     // Update profile username
@@ -214,7 +214,7 @@ const HUD = {
     }
 
     // Update radar
-    this.drawRadar();
+    this.drawRadar(visibleWorldObjects);
 
     // Update upgrade availability indicator
     this.updateUpgradeIndicator();
@@ -227,7 +227,7 @@ const HUD = {
     const terminalIcon = document.getElementById('terminal-icon');
     const upgradesRadialItem = document.querySelector('.radial-item[data-tab="upgrades"]');
 
-    if (!terminalIcon || !Player.ship) return;
+    if (!terminalIcon || typeof Player === 'undefined' || !Player.ship) return;
 
     const hasUpgradesAvailable = this.checkUpgradesAvailable();
 
@@ -245,13 +245,43 @@ const HUD = {
   },
 
   /**
+   * Remove account-specific upgrade affordances immediately on logout.
+   */
+  clearUpgradeIndicator() {
+    const terminalIcon = document.getElementById('terminal-icon');
+    const upgradesRadialItem = document.querySelector('.radial-item[data-tab="upgrades"]');
+    if (terminalIcon) terminalIcon.classList.remove('upgrades-available');
+    if (upgradesRadialItem) upgradesRadialItem.classList.remove('upgrades-available');
+  },
+
+  /**
    * Check if player can afford at least one upgrade (credits + resources)
-   * Uses ShipUpgradePanel.checkAffordability when available for consistency
+   * Always uses the current Player snapshot. ShipUpgradePanel retains display
+   * state while hidden, so using its cache here can leak old affordability
+   * across inventory changes or account switches.
    * @returns {boolean}
    */
   checkUpgradesAvailable() {
-    if (!Player.ship || typeof CONSTANTS === 'undefined') return false;
+    if (typeof Player === 'undefined' || !Player.ship || typeof CONSTANTS === 'undefined') return false;
     if (!CONSTANTS.UPGRADE_REQUIREMENTS) return false;
+
+    // A pending, rejected, or just-completed request is not safe to advertise
+    // until the matching authoritative inventory snapshot has arrived.
+    if (typeof ShipUpgradePanel !== 'undefined' &&
+        (ShipUpgradePanel.isUpgrading ||
+         ShipUpgradePanel.isAwaitingInventorySync ||
+         ShipUpgradePanel.isAwaitingFullSync)) {
+      return false;
+    }
+    if (typeof ShipUpgradePanel === 'undefined' &&
+        typeof UpgradesUI !== 'undefined') {
+      const legacySynchronizing = typeof UpgradesUI.isSynchronizing === 'function'
+        ? UpgradesUI.isSynchronizing()
+        : (UpgradesUI.isUpgrading ||
+           UpgradesUI.isAwaitingInventorySync ||
+           UpgradesUI.isAwaitingFullSync);
+      if (legacySynchronizing) return false;
+    }
 
     const components = ['engine', 'weapon', 'shield', 'mining', 'cargo', 'radar', 'hull', 'energy_core'];
     const tierKeys = {
@@ -265,20 +295,8 @@ const HUD = {
       energy_core: 'energyCoreTier'
     };
 
-    // Use ShipUpgradePanel if available and has data (preferred - shared logic)
-    if (typeof ShipUpgradePanel !== 'undefined' && ShipUpgradePanel.shipData) {
-      for (const comp of components) {
-        const affordability = ShipUpgradePanel.checkAffordability(comp);
-        if (affordability.canAfford) {
-          return true;
-        }
-      }
-      return false;
-    }
-
-    // Fallback: manual check when ShipUpgradePanel not ready
-    const maxTier = 5;
-    const credits = Player.credits || 0;
+    const maxTier = CONSTANTS.MAX_TIER || 5;
+    const credits = Number.isFinite(Player.credits) ? Player.credits : 0;
 
     // Convert inventory array to object for easy lookup
     // Player.inventory is array of { resource_type, quantity }
@@ -349,14 +367,14 @@ const HUD = {
     }
   },
 
-  drawRadar() {
+  drawRadar(visibleWorldObjects = null) {
     const ctx = this.radarCtx;
     const radarRange = Player.getRadarRange();
     const radarTier = Player.ship.radarTier || 1;
 
     // Use the modular radar system if available
     if (typeof Radar !== 'undefined' && Radar.initialized) {
-      Radar.draw(ctx, radarRange, radarTier);
+      Radar.draw(ctx, radarRange, radarTier, visibleWorldObjects);
       return;
     }
 
@@ -391,7 +409,7 @@ const HUD = {
     const scale = center / radarRange;
 
     // Draw world objects (asteroids, planets)
-    const objects = World.getVisibleObjects(Player.position, radarRange);
+    const objects = visibleWorldObjects || World.getVisibleObjects(Player.position, radarRange);
 
     // Asteroids as small gray dots
     ctx.fillStyle = '#666666';

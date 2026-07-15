@@ -9,6 +9,12 @@ const config = require('../config');
 const { statements, getSafeCredits } = require('../database');
 const marketplace = require('../game/marketplace');
 const logger = require('../../shared/logger');
+const {
+  isPositiveInteger,
+  isValidResourceType,
+  validateMarketListing,
+  validateMarketPurchase
+} = require('../validators');
 
 /**
  * Register marketplace socket event handlers
@@ -24,6 +30,27 @@ function register(socket, deps) {
     try {
       const authenticatedUserId = getAuthenticatedUserId();
       if (!authenticatedUserId) return;
+
+      const player = connectedPlayers.get(socket.id);
+      if (!player || player.isDead) {
+        socket.emit('market:error', {
+          message: 'You must be alive and connected to list items'
+        });
+        return;
+      }
+
+      if (deps.wormhole?.isInTransit(authenticatedUserId)) {
+        socket.emit('market:error', {
+          message: 'Cannot list items during wormhole transit'
+        });
+        return;
+      }
+
+      const validation = validateMarketListing(data);
+      if (!validation.valid) {
+        socket.emit('market:error', { message: validation.error });
+        return;
+      }
 
       const result = marketplace.listItem(
         authenticatedUserId,
@@ -56,6 +83,12 @@ function register(socket, deps) {
       const authenticatedUserId = getAuthenticatedUserId();
       if (!authenticatedUserId) return;
 
+      const validation = validateMarketPurchase(data);
+      if (!validation.valid) {
+        socket.emit('market:error', { message: validation.error });
+        return;
+      }
+
       // Get listing info before purchase (for seller notification)
       const listing = statements.getListingById.get(data.listingId);
       if (!listing) {
@@ -86,12 +119,21 @@ function register(socket, deps) {
         const sellerSocketId = userSockets.get(listing.seller_id);
         if (sellerSocketId) {
           const resourceInfo = config.RESOURCE_TYPES[listing.resource_type];
+          const sellerShip = statements.getShipByUserId.get(listing.seller_id);
+          const sellerCredits = getSafeCredits(sellerShip);
+          const sellerPlayer = connectedPlayers.get(sellerSocketId);
+          if (sellerPlayer) sellerPlayer.credits = sellerCredits;
           io.to(sellerSocketId).emit('market:sold', {
             resourceType: listing.resource_type,
             resourceName: resourceInfo ? resourceInfo.name : listing.resource_type,
             quantity: data.quantity,
             totalCredits: result.cost,
-            buyerName: player ? player.username : 'Unknown'
+            buyerName: player ? player.username : 'Unknown',
+            credits: sellerCredits
+          });
+          io.to(sellerSocketId).emit('inventory:update', {
+            inventory: statements.getInventory.all(listing.seller_id),
+            credits: sellerCredits
           });
         }
       } else {
@@ -107,6 +149,11 @@ function register(socket, deps) {
     try {
       const authenticatedUserId = getAuthenticatedUserId();
       if (!authenticatedUserId) return;
+
+      if (!data || !isPositiveInteger(data.listingId)) {
+        socket.emit('market:error', { message: 'Invalid listing ID' });
+        return;
+      }
 
       const result = marketplace.cancelListing(authenticatedUserId, data.listingId);
 
@@ -131,6 +178,11 @@ function register(socket, deps) {
   socket.on('market:getListings', (data) => {
     const authenticatedUserId = getAuthenticatedUserId();
     if (!authenticatedUserId) return;
+
+    if (data?.resourceType && !isValidResourceType(data.resourceType)) {
+      socket.emit('market:error', { message: 'Invalid resource type' });
+      return;
+    }
 
     const listings = data && data.resourceType
       ? marketplace.getListings(data.resourceType)

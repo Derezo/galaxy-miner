@@ -1,5 +1,13 @@
 'use strict';
 
+const config = require('../config');
+const { getRadarRange } = require('../../shared/utils');
+
+function getBroadcastRange(player) {
+  const tier = Math.max(1, Math.min(config.MAX_TIER || 5, Number(player?.radarTier) || 1));
+  return getRadarRange(tier) * 2;
+}
+
 /**
  * Socket Broadcast Functions
  * Global broadcast functions used by external modules (engine.js, npc.js, etc.)
@@ -10,16 +18,41 @@
  * @param {Object} io - Socket.io server instance
  * @returns {Object} Broadcast functions
  */
-function createBroadcasts(io) {
+function createBroadcasts(io, connectedPlayers = new Map()) {
+  function emitNear(position, event, data, sourceSize = 0) {
+    if (!position || !Number.isFinite(position.x) || !Number.isFinite(position.y)) return 0;
+    const boundedSourceSize = Number.isFinite(Number(sourceSize))
+      ? Math.max(0, Number(sourceSize))
+      : 0;
+
+    let delivered = 0;
+    for (const [socketId, player] of connectedPlayers) {
+      if (!Number.isFinite(player?.position?.x) || !Number.isFinite(player?.position?.y)) continue;
+      const distance = Math.hypot(
+        player.position.x - position.x,
+        player.position.y - position.y
+      );
+      if (distance - boundedSourceSize > getBroadcastRange(player)) continue;
+      io.to(socketId).emit(event, data);
+      delivered++;
+    }
+    return delivered;
+  }
+
   return {
+    // Generic spatial emission for authoritative effects that do not warrant a
+    // dedicated wrapper. Recipient-specific radar ranges are still enforced.
+    emitNear,
+
     /**
      * Broadcast drone sacrifice visual effect
      * @param {Object} data - { droneId, baseId, position: { x, y } }
      */
     broadcastDroneSacrifice(data) {
-      io.emit('swarm:droneSacrifice', {
+      emitNear(data.position, 'swarm:droneSacrifice', {
         droneId: data.droneId,
         baseId: data.baseId,
+        position: { x: data.position.x, y: data.position.y },
         x: data.position.x,
         y: data.position.y
       });
@@ -30,12 +63,16 @@ function createBroadcasts(io) {
      * @param {Object} data - { baseId, progress, threshold, position }
      */
     broadcastAssimilationProgress(data) {
-      io.emit('swarm:assimilationProgress', {
+      const progress = data.progress ?? data.attachedCount ?? 0;
+      const payload = {
         baseId: data.baseId,
-        progress: data.progress,
+        progress,
         threshold: data.threshold,
-        position: data.position // For client visual effects
-      });
+        position: { x: data.position.x, y: data.position.y }
+      };
+      if (data.droneKilled != null) payload.droneKilled = data.droneKilled;
+      if (data.killedBy != null) payload.killedBy = data.killedBy;
+      emitNear(data.position, 'swarm:assimilationProgress', payload);
     },
 
     /**
@@ -43,7 +80,7 @@ function createBroadcasts(io) {
      * @param {Object} data - { baseId, newType, originalFaction, convertedNpcs, position, consumedDroneIds }
      */
     broadcastBaseAssimilated(data) {
-      io.emit('swarm:baseAssimilated', {
+      emitNear(data.position, 'swarm:baseAssimilated', {
         baseId: data.baseId,
         newType: data.newType,
         originalFaction: data.originalFaction,
@@ -58,7 +95,7 @@ function createBroadcasts(io) {
      * @param {Object} queen - Queen NPC data
      */
     broadcastQueenSpawn(queen) {
-      io.emit('swarm:queenSpawn', {
+      emitNear(queen.position, 'swarm:queenSpawn', {
         id: queen.id,
         x: queen.position.x,
         y: queen.position.y,
@@ -74,7 +111,7 @@ function createBroadcasts(io) {
      * @param {Object} position - { x, y } death position
      */
     broadcastQueenDeath(queenId, position) {
-      io.emit('swarm:queenDeath', {
+      emitNear(position, 'swarm:queenDeath', {
         id: queenId,
         x: position.x,
         y: position.y
@@ -86,9 +123,9 @@ function createBroadcasts(io) {
      * @param {Array} affectedBases - [{ baseId, health, maxHealth }]
      */
     broadcastQueenAura(affectedBases) {
-      if (affectedBases.length > 0) {
-        io.emit('swarm:queenAura', {
-          affectedBases
+      for (const base of affectedBases) {
+        emitNear({ x: base.x, y: base.y }, 'swarm:queenAura', {
+          affectedBases: [base]
         });
       }
     },
@@ -98,7 +135,7 @@ function createBroadcasts(io) {
      * @param {Object} data - { playerId, sourceNpcId, sourceX, sourceY, chains: [{ targetId, targetX, targetY, damage, destroyed }] }
      */
     broadcastChainLightning(data) {
-      io.emit('combat:chainLightning', data);
+      emitNear({ x: data.sourceX, y: data.sourceY }, 'combat:chainLightning', data);
     },
 
     /**
@@ -106,7 +143,28 @@ function createBroadcasts(io) {
      * @param {Object} data - { playerId, baseId, impactX, impactY, baseSize, duration, targets: [{ npcId, x, y, damage }] }
      */
     broadcastTeslaCoil(data) {
-      io.emit('combat:teslaCoil', data);
+      emitNear(
+        { x: data.impactX, y: data.impactY },
+        'combat:teslaCoil',
+        data,
+        Number(data.baseSize) || 0
+      );
+    },
+
+    /**
+     * Warn nearby clients that the Barnacle King's lethal drill is charging.
+     * @param {Object} npcEntity - Authoritative Barnacle King entity
+     * @param {Object} action - AI action containing targetId and chargeTime
+     */
+    broadcastDrillCharge(npcEntity, action) {
+      if (!npcEntity?.position) return;
+      emitNear(npcEntity.position, 'scavenger:drillCharge', {
+        npcId: npcEntity.id,
+        kingX: npcEntity.position.x,
+        kingY: npcEntity.position.y,
+        targetId: action?.targetId,
+        chargeTime: Number(action?.chargeTime) || 1500
+      }, Number(npcEntity.size) || 0);
     }
   };
 }

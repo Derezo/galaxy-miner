@@ -7,7 +7,14 @@
 
 const config = require('../config');
 const { statements, safeUpdateCredits, getSafeCredits, safeUpsertInventory } = require('../database');
+const {
+  playerHasRelic,
+  invalidatePlayerRelicCache,
+  calculateNpcCreditShare,
+  classifyRelicInsert
+} = require('../game/relic-effects');
 const logger = require('../../shared/logger');
+const { getRadarRange } = require('../../shared/utils');
 
 // ============================================
 // SHARED STATE MAPS
@@ -32,6 +39,64 @@ const playerSectorRooms = new Map();
 const VALID_COMPONENTS = new Set(['engine', 'weapon', 'shield', 'mining', 'cargo', 'radar', 'energy_core', 'hull']);
 const VALID_COLORS = new Set(config.PLAYER_COLOR_OPTIONS.map(c => c.id));
 const VALID_PROFILES = new Set((config.PROFILE_OPTIONS || []).map(p => p.id));
+const SAFE_SOCKET_BOUNDARY = Symbol('safeSocketBoundary');
+
+// ============================================
+// SOCKET ERROR BOUNDARY
+// ============================================
+
+/**
+ * Guard every subsequently registered socket handler. Socket.io does not catch
+ * exceptions or rejected promises from application listeners; without this
+ * boundary one malformed authenticated event can reach the process-level fatal
+ * handler and terminate the server.
+ *
+ * Individual handlers should still validate payloads and emit useful domain
+ * errors. This is the last line of defence for unexpected programmer/database
+ * failures.
+ *
+ * @param {Object} socket - Socket.io socket
+ * @param {Object} handlerLogger - Logger implementation
+ * @returns {Object} The socket
+ */
+function installSafeSocketBoundary(socket, handlerLogger = logger) {
+  if (!socket || socket[SAFE_SOCKET_BOUNDARY] || typeof socket.on !== 'function') {
+    return socket;
+  }
+
+  const originalOn = socket.on.bind(socket);
+
+  const reportFailure = (eventName, error) => {
+    const err = error instanceof Error ? error : new Error(String(error));
+    handlerLogger.error(`[SOCKET] Unhandled ${eventName} handler failure:`, err);
+
+    if (eventName !== 'disconnect' && typeof socket.emit === 'function') {
+      socket.emit('error:generic', { message: 'Unable to process that request.' });
+    }
+  };
+
+  socket.on = (eventName, handler) => {
+    if (typeof handler !== 'function') {
+      return originalOn(eventName, handler);
+    }
+
+    return originalOn(eventName, function guardedSocketHandler(...args) {
+      try {
+        const result = handler.apply(this, args);
+        if (result && typeof result.then === 'function') {
+          return result.catch(error => reportFailure(eventName, error));
+        }
+        return result;
+      } catch (error) {
+        reportFailure(eventName, error);
+        return undefined;
+      }
+    });
+  };
+
+  Object.defineProperty(socket, SAFE_SOCKET_BOUNDARY, { value: true });
+  return socket;
+}
 
 // ============================================
 // INTERVAL TRACKING
@@ -162,6 +227,36 @@ function getAdjacentSectorRooms(x, y) {
   return rooms;
 }
 
+function getPlayerBroadcastRange(player) {
+  const tier = Math.max(
+    1,
+    Math.min(config.MAX_TIER || 5, Number(player?.radarTier) || 1)
+  );
+  return getRadarRange(tier) * 2;
+}
+
+function getBroadcastCandidateIds(socket, position) {
+  const rooms = socket?.nsp?.adapter?.rooms;
+  if (!(rooms instanceof Map)) return new Set(connectedPlayers.keys());
+
+  const maxRange = getPlayerBroadcastRange({ radarTier: config.MAX_TIER || 5 });
+  // Players currently join their center plus one adjacent sector, so include
+  // that membership margin when collecting room candidates.
+  const sectorRadius = Math.ceil(maxRange / config.SECTOR_SIZE) + 1;
+  const centerX = Math.floor(position.x / config.SECTOR_SIZE);
+  const centerY = Math.floor(position.y / config.SECTOR_SIZE);
+  const candidates = new Set();
+
+  for (let dx = -sectorRadius; dx <= sectorRadius; dx++) {
+    for (let dy = -sectorRadius; dy <= sectorRadius; dy++) {
+      const members = rooms.get(`sector:${centerX + dx}:${centerY + dy}`);
+      if (!members) continue;
+      for (const socketId of members) candidates.add(socketId);
+    }
+  }
+  return candidates;
+}
+
 /**
  * Update player's sector rooms when they move between sectors
  * @param {Object} socket - Socket.io socket
@@ -231,30 +326,132 @@ function leaveSectorRooms(socket) {
 // ============================================
 
 /**
- * Broadcast to nearby players using sector rooms
- * Uses Socket.io rooms for O(1) broadcast instead of iterating all players
+ * Broadcast to nearby players. Sector rooms provide a coarse candidate set;
+ * recipient-specific radar distance is then enforced before direct delivery.
  * @param {Object} socket - Socket.io socket (sender, excluded from broadcast)
  * @param {Object} player - Player data with position
  * @param {string} event - Event name
  * @param {*} data - Event data
  */
 function broadcastToNearby(socket, player, event, data) {
-  const sectorX = Math.floor(player.position.x / config.SECTOR_SIZE);
-  const sectorY = Math.floor(player.position.y / config.SECTOR_SIZE);
+  if (!player?.position || !Number.isFinite(player.position.x) ||
+      !Number.isFinite(player.position.y) || typeof event !== 'string') {
+    return 0;
+  }
 
-  // Broadcast to 3x3 sector grid (current + adjacent sectors)
-  // This covers the radar range which is typically less than 2 sectors
-  for (let dx = -1; dx <= 1; dx++) {
-    for (let dy = -1; dy <= 1; dy++) {
-      const room = `sector:${sectorX + dx}:${sectorY + dy}`;
-      socket.to(room).emit(event, data);
+  const candidates = getBroadcastCandidateIds(socket, player.position);
+  let delivered = 0;
+  for (const socketId of candidates) {
+    if (socketId === socket.id) continue;
+    const recipient = connectedPlayers.get(socketId);
+    if (!recipient?.position) continue;
+
+    const dx = recipient.position.x - player.position.x;
+    const dy = recipient.position.y - player.position.y;
+    if (!Number.isFinite(dx) || !Number.isFinite(dy) ||
+        Math.hypot(dx, dy) > getPlayerBroadcastRange(recipient)) {
+      continue;
+    }
+
+    const broadcaster = typeof socket.to === 'function'
+      ? socket.to(socketId)
+      : socket.nsp?.to?.(socketId);
+    if (broadcaster && typeof broadcaster.emit === 'function') {
+      broadcaster.emit(event, data);
+      delivered++;
     }
   }
+  return delivered;
 }
 
 // ============================================
 // TEAM LOOT DISTRIBUTION
 // ============================================
+
+function getContributorIds(damageContributors) {
+  if (!damageContributors) return [];
+
+  const rawIds = damageContributors instanceof Map
+    ? [...damageContributors.keys()]
+    : Object.keys(damageContributors);
+  const contributorIds = new Set();
+
+  for (const rawId of rawIds) {
+    const playerId = Number(rawId);
+    if (Number.isSafeInteger(playerId) && playerId > 0) {
+      contributorIds.add(playerId);
+    }
+  }
+
+  return [...contributorIds];
+}
+
+function normalizePositiveInteger(value) {
+  const numericValue = Number(value);
+  if (!Number.isFinite(numericValue) || numericValue <= 0) return 0;
+  const normalized = Math.floor(numericValue);
+  return Number.isSafeInteger(normalized) ? normalized : 0;
+}
+
+function getCargoSpace(userId) {
+  try {
+    const ship = statements.getShipByUserId.get(userId);
+    if (!ship) return 0;
+
+    const cargoTier = Math.max(1, Math.floor(Number(ship.cargo_tier) || 1));
+    const cargoCapacity = Number(config.CARGO_CAPACITY?.[cargoTier] ?? config.CARGO_CAPACITY?.[1]);
+    if (!Number.isFinite(cargoCapacity) || cargoCapacity <= 0) return 0;
+
+    let cargoUsed = 0;
+    if (statements.getTotalCargoCount && typeof statements.getTotalCargoCount.get === 'function') {
+      cargoUsed = Number(statements.getTotalCargoCount.get(userId, userId)?.total) || 0;
+    } else if (statements.getInventory && typeof statements.getInventory.all === 'function') {
+      cargoUsed = statements.getInventory.all(userId).reduce(
+        (total, item) => total + normalizePositiveInteger(item?.quantity),
+        0
+      );
+    }
+
+    return Math.max(0, Math.floor(cargoCapacity - cargoUsed));
+  } catch (error) {
+    logger.error(`[LOOT] Unable to read cargo capacity for ${userId}:`, error.message);
+    return 0;
+  }
+}
+
+function splitResourceForCargo(item, availableCapacity) {
+  const quantity = normalizePositiveInteger(item?.quantity);
+  if (!item || item.type !== 'resource' || typeof item.resourceType !== 'string' || quantity <= 0) {
+    return { granted: null, remaining: item || null, usedCapacity: 0 };
+  }
+
+  const grantedQuantity = Math.min(quantity, Math.max(0, Math.floor(availableCapacity)));
+  return {
+    granted: grantedQuantity > 0 ? { ...item, quantity: grantedQuantity } : null,
+    remaining: quantity > grantedQuantity ? { ...item, quantity: quantity - grantedQuantity } : null,
+    usedCapacity: grantedQuantity
+  };
+}
+
+function persistResourceShare(playerId, item, availableCapacity) {
+  const allocation = splitResourceForCargo(item, availableCapacity);
+  if (!allocation.granted) return allocation;
+
+  try {
+    const writeResult = safeUpsertInventory(
+      playerId,
+      allocation.granted.resourceType,
+      allocation.granted.quantity
+    );
+    if (!writeResult || writeResult.changes <= 0) {
+      return { granted: null, remaining: item, usedCapacity: 0 };
+    }
+    return allocation;
+  } catch (error) {
+    logger.error(`[TEAM LOOT] Error giving resource to ${playerId}:`, error.message);
+    return { granted: null, remaining: item, usedCapacity: 0 };
+  }
+}
 
 /**
  * Distribute credits to team members who contributed damage
@@ -263,90 +460,125 @@ function broadcastToNearby(socket, player, event, data) {
  * @param {number} collectorId - ID of player who collected
  * @returns {Object} { total, collectorCredits, distributed: [{ playerId, credits }] }
  */
-function distributeTeamCredits(io, baseCredits, damageContributors, collectorId) {
-  // If no base credits or invalid, return 0 for all
-  if (!baseCredits || typeof baseCredits !== 'number' || baseCredits <= 0) {
-    return { total: 0, collectorCredits: 0, distributed: [] };
+function distributeTeamCredits(io, baseCredits, damageContributors, collectorId, pendingCredits = null) {
+  const numericCollectorId = Number(collectorId);
+  if (!Number.isSafeInteger(numericCollectorId) || numericCollectorId <= 0) {
+    return { total: 0, collectorCredits: 0, distributed: [], pendingCredits: [] };
   }
 
-  // If no damage contributors, collector gets all credits
-  if (!damageContributors || Object.keys(damageContributors).length === 0) {
-    // Solo kill - collector gets base credits
-    const ship = statements.getShipByUserId.get(collectorId);
-    if (ship) {
-      const currentCredits = getSafeCredits(ship);
-      safeUpdateCredits(currentCredits + baseCredits, collectorId);
+  const participants = getContributorIds(damageContributors);
+  const normalizedBaseCredits = normalizePositiveInteger(baseCredits);
+  const exactPending = Array.isArray(pendingCredits) && pendingCredits.length > 0;
+  let plannedRewards = [];
+  let teamMultiplier = 1;
+
+  if (exactPending) {
+    // Pending rewards already include team and relic bonuses. Retry their exact
+    // owner-bound amounts so a transient write failure cannot multiply them.
+    const aggregated = new Map();
+    for (const reward of pendingCredits) {
+      const playerId = Number(reward?.playerId);
+      const credits = normalizePositiveInteger(reward?.credits);
+      if (!Number.isSafeInteger(playerId) || playerId <= 0 || credits <= 0) continue;
+      const updated = (aggregated.get(playerId) || 0) + credits;
+      if (Number.isSafeInteger(updated)) aggregated.set(playerId, updated);
     }
-    return { total: baseCredits, collectorCredits: baseCredits, distributed: [{ playerId: collectorId, credits: baseCredits }] };
+    plannedRewards = [...aggregated].map(([playerId, credits]) => ({ playerId, credits }));
+  } else if (normalizedBaseCredits > 0 && participants.length === 0) {
+    const credits = normalizePositiveInteger(calculateNpcCreditShare(
+      normalizedBaseCredits,
+      playerHasRelic(statements, numericCollectorId, 'PIRATE_TREASURE')
+    ));
+    if (credits > 0) plannedRewards.push({ playerId: numericCollectorId, credits });
+  } else if (normalizedBaseCredits > 0) {
+    const participantCount = participants.length;
+    const teamMultipliers = config.TEAM_MULTIPLIERS || { 1: 1.0, 2: 1.5, 3: 2.0, 4: 2.5 };
+    teamMultiplier = teamMultipliers[Math.min(participantCount, 4)] || 2.5;
+    const teamPool = normalizePositiveInteger(Math.round(normalizedBaseCredits * teamMultiplier));
+    const perPlayer = Math.floor(teamPool / participantCount);
+    let remainder = teamPool % participantCount;
+
+    // Split the team pool without rounding inflation, then apply each owner's
+    // Pirate Treasure bonus independently.
+    plannedRewards = participants.map(playerId => {
+      const baseShare = perPlayer + (remainder-- > 0 ? 1 : 0);
+      return {
+        playerId,
+        credits: normalizePositiveInteger(calculateNpcCreditShare(
+          baseShare,
+          playerHasRelic(statements, playerId, 'PIRATE_TREASURE')
+        ))
+      };
+    }).filter(reward => reward.credits > 0);
   }
 
-  const participants = Object.keys(damageContributors);
-  const participantCount = participants.length;
-  // Convert collectorId to string to match Object.keys() output (keys are always strings)
-  const collectorIdStr = String(collectorId);
-
-  // Apply team bonus multiplier
-  const teamMultipliers = config.TEAM_MULTIPLIERS || { 1: 1.0, 2: 1.5, 3: 2.0, 4: 2.5 };
-  const teamMultiplier = teamMultipliers[Math.min(participantCount, 4)] || 2.5;
-  const totalCredits = Math.round(baseCredits * teamMultiplier);
-  const creditsPerPlayer = Math.round(totalCredits / participantCount);
+  if (plannedRewards.length === 0) {
+    return { total: 0, collectorCredits: 0, distributed: [], pendingCredits: [] };
+  }
 
   const distributed = [];
+  const unawarded = [];
   let collectorCredits = 0;
+  let totalCredits = 0;
 
-  // Distribute credits to all contributors
-  for (const playerId of participants) {
+  for (const reward of plannedRewards) {
+    const { playerId, credits } = reward;
     try {
       const ship = statements.getShipByUserId.get(playerId);
-      if (ship) {
-        const currentCredits = getSafeCredits(ship);
-        safeUpdateCredits(currentCredits + creditsPerPlayer, playerId);
+      const currentCredits = getSafeCredits(ship);
+      const nextCredits = currentCredits + credits;
+      if (!ship || !Number.isSafeInteger(nextCredits)) {
+        unawarded.push(reward);
+        continue;
+      }
 
-        distributed.push({ playerId, credits: creditsPerPlayer });
+      const writeResult = safeUpdateCredits(nextCredits, playerId);
+      if (!writeResult || writeResult.changes <= 0) {
+        unawarded.push(reward);
+        continue;
+      }
 
-        if (playerId === collectorIdStr) {
-          collectorCredits = creditsPerPlayer;
-        }
-
-        // Notify non-collector team members of their credit reward
-        if (playerId !== collectorIdStr) {
-          const socketId = userSockets.get(playerId);
-          if (socketId) {
-            io.to(socketId).emit('team:creditReward', {
-              credits: creditsPerPlayer,
-              totalTeamCredits: totalCredits,
-              participantCount
-            });
-
-            // Also update their inventory display
-            const inventory = statements.getInventory.all(playerId);
-            const updatedShip = statements.getShipByUserId.get(playerId);
-            io.to(socketId).emit('inventory:update', {
-              inventory,
-              credits: getSafeCredits(updatedShip)
-            });
-          }
-        }
+      distributed.push(reward);
+      totalCredits += credits;
+      if (playerId === numericCollectorId) {
+        collectorCredits += credits;
       }
     } catch (err) {
       logger.error(`[TEAM CREDITS] Error distributing to ${playerId}:`, err.message);
+      unawarded.push(reward);
     }
   }
 
-  // If collector wasn't a contributor (rare - e.g., collected someone else's kill), they still get share
-  if (!participants.includes(collectorIdStr)) {
-    const ship = statements.getShipByUserId.get(collectorId);
-    if (ship) {
-      const currentCredits = getSafeCredits(ship);
-      safeUpdateCredits(currentCredits + creditsPerPlayer, collectorId);
-      collectorCredits = creditsPerPlayer;
-      distributed.push({ playerId: collectorId, credits: creditsPerPlayer });
+  // Notify non-collector recipients after the actual relic-adjusted total is known.
+  for (const reward of distributed) {
+    if (reward.playerId === numericCollectorId) continue;
+
+    const socketId = userSockets.get(reward.playerId) || userSockets.get(String(reward.playerId));
+    if (socketId) {
+      try {
+        io.to(socketId).emit('team:creditReward', {
+          credits: reward.credits,
+          totalTeamCredits: totalCredits,
+          participantCount: plannedRewards.length
+        });
+
+        const inventory = statements.getInventory.all(reward.playerId);
+        const updatedShip = statements.getShipByUserId.get(reward.playerId);
+        io.to(socketId).emit('inventory:update', {
+          inventory,
+          credits: getSafeCredits(updatedShip)
+        });
+      } catch (error) {
+        // Reward persistence already succeeded. A notification failure must not
+        // make the settlement retry and duplicate the durable credit write.
+        logger.error(`[TEAM CREDITS] Unable to notify ${reward.playerId}:`, error.message);
+      }
     }
   }
 
-  logger.log(`[TEAM CREDITS] Distributed ${totalCredits} credits (${teamMultiplier}x bonus) to ${participantCount} players`);
+  logger.log(`[TEAM CREDITS] Distributed ${totalCredits} credits (${teamMultiplier}x team pool plus owner relic bonuses) to ${distributed.length} players`);
 
-  return { total: totalCredits, collectorCredits, distributed };
+  return { total: totalCredits, collectorCredits, distributed, pendingCredits: unawarded };
 }
 
 /**
@@ -360,25 +592,28 @@ function distributeTeamCredits(io, baseCredits, damageContributors, collectorId)
  * @returns {Object} { collectorLoot, teamShares, rareDropNotifications }
  */
 function distributeTeamResources(io, contents, damageContributors, collectorId) {
-  const collectorIdStr = String(collectorId);
+  const numericCollectorId = Number(collectorId);
+  const participants = getContributorIds(damageContributors);
+  const collectorContributed = participants.includes(numericCollectorId);
   const result = {
     collectorLoot: [],      // Items that go to collector
     teamShares: new Map(),  // playerId -> [items]
-    rareDropNotifications: [] // Rare items collector got (for team notification)
+    rareDropNotifications: [], // Rare items collector got (for team notification)
+    remainingLoot: []       // Cargo overflow or rejected durable writes
   };
 
-  // If no team (solo kill), collector gets everything
-  if (!damageContributors || Object.keys(damageContributors).length <= 1) {
+  // With no contribution record, the collector is treated as the solo owner.
+  if (participants.length === 0 ||
+      !Number.isSafeInteger(numericCollectorId) || numericCollectorId <= 0) {
     result.collectorLoot = contents;
     return result;
   }
 
-  const participants = Object.keys(damageContributors);
-  const participantCount = participants.length;
+  const recipientCount = participants.length;
 
   // Initialize team shares
   for (const playerId of participants) {
-    if (playerId !== collectorIdStr) {
+    if (playerId !== numericCollectorId) {
       result.teamShares.set(playerId, []);
     }
   }
@@ -389,29 +624,39 @@ function distributeTeamResources(io, contents, damageContributors, collectorId) 
 
       if (rarity === 'common' || rarity === 'uncommon') {
         // Split common/uncommon resources equally
-        const perPlayer = Math.floor(item.quantity / participantCount);
-        const remainder = item.quantity % participantCount;
+        const perPlayer = Math.floor(item.quantity / recipientCount);
+        const remainder = item.quantity % recipientCount;
 
         if (perPlayer > 0) {
-          // Collector gets their share + remainder
-          result.collectorLoot.push({
-            ...item,
-            quantity: perPlayer + remainder
-          });
+          // The collector receives a common-resource share only if they helped
+          // earn the wreckage. Otherwise all common cargo stays with contributors.
+          if (collectorContributed) {
+            result.collectorLoot.push({
+              ...item,
+              quantity: perPlayer + remainder
+            });
+          }
 
-          // Other team members get their share
+          let remainderAssigned = collectorContributed;
           for (const playerId of participants) {
-            if (playerId !== collectorIdStr) {
-              const shares = result.teamShares.get(playerId);
-              shares.push({
-                ...item,
-                quantity: perPlayer
-              });
-            }
+            if (playerId === numericCollectorId) continue;
+
+            const shares = result.teamShares.get(playerId);
+            const playerRemainder = !remainderAssigned ? remainder : 0;
+            remainderAssigned = true;
+            shares.push({
+              ...item,
+              quantity: perPlayer + playerRemainder
+            });
           }
         } else {
-          // Not enough to split - collector gets all
-          result.collectorLoot.push(item);
+          // Not enough to split: prefer a contributing collector, otherwise
+          // preserve the units for the first damage contributor.
+          if (collectorContributed) {
+            result.collectorLoot.push(item);
+          } else {
+            result.teamShares.get(participants[0]).push(item);
+          }
         }
       } else {
         // Rare/Ultrarare resources go to collector only
@@ -428,44 +673,58 @@ function distributeTeamResources(io, contents, damageContributors, collectorId) 
     }
   }
 
-  // Process team member shares and send notifications
-  for (const [playerId, items] of result.teamShares) {
-    if (items.length > 0) {
-      // Add resources to team member's inventory
-      for (const item of items) {
-        try {
-          safeUpsertInventory(playerId, item.resourceType, item.quantity);
-        } catch (err) {
-          logger.error(`[TEAM LOOT] Error giving resource to ${playerId}:`, err.message);
-        }
+  // Persist team member shares within each owner's cargo limit. Replace the
+  // planned shares with the actually awarded shares and preserve every rejected
+  // or overflow unit for the wreckage settlement phase.
+  for (const [playerId, plannedItems] of result.teamShares) {
+    let availableCapacity = getCargoSpace(playerId);
+    const awardedItems = [];
+    for (const item of plannedItems) {
+      const allocation = persistResourceShare(playerId, item, availableCapacity);
+      if (allocation.granted) {
+        awardedItems.push(allocation.granted);
+        availableCapacity -= allocation.usedCapacity;
       }
+      if (allocation.remaining) result.remainingLoot.push(allocation.remaining);
+    }
+    result.teamShares.set(playerId, awardedItems);
+
+    if (awardedItems.length > 0) {
 
       // Notify team member of their share
       const socketId = userSockets.get(playerId);
       if (socketId) {
-        io.to(socketId).emit('team:lootShare', {
-          resources: items,
-          rareDropNotification: result.rareDropNotifications.length > 0 ? result.rareDropNotifications : null,
-          collectorId: collectorIdStr
-        });
+        try {
+          io.to(socketId).emit('team:lootShare', {
+            resources: awardedItems,
+            rareDropNotification: result.rareDropNotifications.length > 0 ? result.rareDropNotifications : null,
+            collectorId: numericCollectorId
+          });
 
-        // Update their inventory display
-        const inventory = statements.getInventory.all(playerId);
-        const ship = statements.getShipByUserId.get(playerId);
-        io.to(socketId).emit('inventory:update', {
-          inventory,
-          credits: getSafeCredits(ship)
-        });
+          // Update their inventory display
+          const inventory = statements.getInventory.all(playerId);
+          const ship = statements.getShipByUserId.get(playerId);
+          io.to(socketId).emit('inventory:update', {
+            inventory,
+            credits: getSafeCredits(ship)
+          });
+        } catch (error) {
+          logger.error(`[TEAM LOOT] Unable to notify ${playerId}:`, error.message);
+        }
       }
     } else if (result.rareDropNotifications.length > 0) {
       // No shared resources but notify about rare drops
       const socketId = userSockets.get(playerId);
       if (socketId) {
-        io.to(socketId).emit('team:lootShare', {
-          resources: [],
-          rareDropNotification: result.rareDropNotifications,
-          collectorId: collectorIdStr
-        });
+        try {
+          io.to(socketId).emit('team:lootShare', {
+            resources: [],
+            rareDropNotification: result.rareDropNotifications,
+            collectorId: numericCollectorId
+          });
+        } catch (error) {
+          logger.error(`[TEAM LOOT] Unable to notify ${playerId}:`, error.message);
+        }
       }
     }
   }
@@ -490,33 +749,47 @@ function processCollectedLoot(io, userId, contents) {
     resources: [],
     components: [],
     relics: [],
+    duplicateRelics: [],
     buffs: [],
-    errors: []
+    errors: [],
+    remainingLoot: []
   };
+
+  let availableCargo = getCargoSpace(userId);
 
   for (const item of contents) {
     try {
       switch (item.type) {
         case 'credits':
           // Add credits to player (only if amount is valid)
-          if (typeof item.amount === 'number' && item.amount > 0 && !Number.isNaN(item.amount)) {
+          if (normalizePositiveInteger(item.amount) > 0) {
+            const amount = normalizePositiveInteger(item.amount);
             const ship = statements.getShipByUserId.get(userId);
             const currentCredits = getSafeCredits(ship);
-            safeUpdateCredits(currentCredits + item.amount, userId);
-            results.credits += item.amount;
+            const nextCredits = currentCredits + amount;
+            const creditResult = ship && Number.isSafeInteger(nextCredits)
+              ? safeUpdateCredits(nextCredits, userId)
+              : null;
+            if (creditResult && creditResult.changes > 0) {
+              results.credits += amount;
+            } else {
+              results.remainingLoot.push({ ...item, amount });
+            }
           }
           break;
 
-        case 'resource':
-          // Add resource to inventory using safe wrapper
-          const resourceResult = safeUpsertInventory(userId, item.resourceType, item.quantity);
-          if (resourceResult.changes > 0) {
+        case 'resource': {
+          const allocation = persistResourceShare(userId, item, availableCargo);
+          if (allocation.granted) {
+            availableCargo -= allocation.usedCapacity;
             results.resources.push({
-              type: item.resourceType,
-              quantity: item.quantity
+              type: allocation.granted.resourceType,
+              quantity: allocation.granted.quantity
             });
           }
+          if (allocation.remaining) results.remainingLoot.push(allocation.remaining);
           break;
+        }
 
         case 'component':
           // Add component to components table
@@ -527,11 +800,33 @@ function processCollectedLoot(io, userId, contents) {
           break;
 
         case 'relic':
-          // Add relic to relics table (only if not already owned)
-          statements.addRelic.run(userId, item.relicType);
-          results.relics.push({
-            type: item.relicType
-          });
+          // INSERT OR IGNORE reports whether this was a real acquisition. Never
+          // show an "acquired" result for a duplicate that the database rejected.
+          const relicInsert = statements.addRelic.run(userId, item.relicType);
+          const acquisition = classifyRelicInsert(item.relicType, relicInsert);
+          if (acquisition.acquired) {
+            invalidatePlayerRelicCache(statements, userId, item.relicType);
+            results.relics.push(acquisition.result);
+
+            // Update the live client collection immediately; the loot result owns
+            // the reward popup, so this state-sync event is intentionally silent.
+            const relicSocketId = userSockets.get(userId);
+            if (relicSocketId) {
+              const connectedPlayer = connectedPlayers.get(relicSocketId);
+              if (connectedPlayer) {
+                if (!Array.isArray(connectedPlayer.relicTypes)) connectedPlayer.relicTypes = [];
+                if (!connectedPlayer.relicTypes.includes(acquisition.result.type)) {
+                  connectedPlayer.relicTypes.push(acquisition.result.type);
+                }
+              }
+              io.to(relicSocketId).emit('relic:collected', {
+                relicType: item.relicType,
+                showReward: false
+              });
+            }
+          } else {
+            if (acquisition.result) results.duplicateRelics.push(acquisition.result);
+          }
           break;
 
         case 'buff':
@@ -556,10 +851,16 @@ function processCollectedLoot(io, userId, contents) {
             });
           }
           break;
+
+        default:
+          results.errors.push({ type: item?.type, error: 'Unsupported loot item' });
+          results.remainingLoot.push(item);
+          break;
       }
     } catch (err) {
-      logger.error(`[LOOT ERROR] User ${userId} processing ${item.type}:`, err.message);
-      results.errors.push({ type: item.type, error: err.message });
+      logger.error(`[LOOT ERROR] User ${userId} processing ${item?.type}:`, err.message);
+      results.errors.push({ type: item?.type, error: err.message });
+      results.remainingLoot.push(item);
     }
   }
 
@@ -583,6 +884,9 @@ module.exports = {
   VALID_COLORS,
   VALID_PROFILES,
 
+  // Socket safety
+  installSafeSocketBoundary,
+
   // Interval tracking
   trackInterval,
   untrackInterval,
@@ -596,6 +900,7 @@ module.exports = {
   // Sector rooms
   getSectorRoom,
   getAdjacentSectorRooms,
+  getPlayerBroadcastRange,
   updatePlayerSectorRooms,
   joinSectorRooms,
   leaveSectorRooms,

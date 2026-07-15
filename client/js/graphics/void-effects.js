@@ -292,13 +292,20 @@ const RiftPortal = {
    * @param {object} camera - { x, y }
    */
   draw(ctx, camera) {
+    const viewportWidth = (typeof RenderContext !== 'undefined' && RenderContext.width)
+      || ctx.canvas.clientWidth
+      || ctx.canvas.width;
+    const viewportHeight = (typeof RenderContext !== 'undefined' && RenderContext.height)
+      || ctx.canvas.clientHeight
+      || ctx.canvas.height;
+
     for (const [riftId, rift] of this.activeRifts) {
       const screenX = rift.x - camera.x;
       const screenY = rift.y - camera.y;
 
       // Skip if off-screen
-      if (screenX < -200 || screenX > ctx.canvas.width + 200 ||
-          screenY < -200 || screenY > ctx.canvas.height + 200) {
+      if (screenX < -200 || screenX > viewportWidth + 200 ||
+          screenY < -200 || screenY > viewportHeight + 200) {
         continue;
       }
 
@@ -635,14 +642,21 @@ const GravityWellEffect = {
    * Draw all gravity wells
    */
   draw(ctx, camera) {
+    const viewportWidth = (typeof RenderContext !== 'undefined' && RenderContext.width)
+      || ctx.canvas.clientWidth
+      || ctx.canvas.width;
+    const viewportHeight = (typeof RenderContext !== 'undefined' && RenderContext.height)
+      || ctx.canvas.clientHeight
+      || ctx.canvas.height;
+
     for (const [wellId, well] of this.activeWells) {
       const screenX = well.x - camera.x;
       const screenY = well.y - camera.y;
 
       // Skip if off-screen
       const margin = well.radius + 100;
-      if (screenX < -margin || screenX > ctx.canvas.width + margin ||
-          screenY < -margin || screenY > ctx.canvas.height + margin) {
+      if (screenX < -margin || screenX > viewportWidth + margin ||
+          screenY < -margin || screenY > viewportHeight + margin) {
         continue;
       }
 

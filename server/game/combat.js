@@ -1,7 +1,7 @@
 // Galaxy Miner - Combat System (Server-side)
 
 const config = require('../config');
-const { statements } = require('../database');
+const { statements, settleDeathCargo } = require('../database');
 const world = require('../world');
 const logger = require('../../shared/logger');
 const npc = require('./npc');
@@ -14,6 +14,11 @@ const weaponCooldowns = new Map();
 
 // Track shield recharge delay: playerId -> lastDamageTime
 const shieldDelays = new Map();
+
+// Preserve sub-HP recharge progress between server ticks and cache the last
+// authoritative ship health snapshot. This avoids re-reading and re-writing
+// integer SQLite values at 20 Hz while still exposing integer health to clients.
+const shieldRechargeStates = new Map();
 
 /**
  * Get hull resistance values for a given hull tier
@@ -47,8 +52,8 @@ function canFire(playerId, weaponTier, energyCoreTier = 1) {
   return Date.now() - lastFire >= cooldown;
 }
 
-function fire(playerId, weaponTier) {
-  if (!canFire(playerId, weaponTier)) {
+function fire(playerId, weaponTier, energyCoreTier = 1) {
+  if (!canFire(playerId, weaponTier, energyCoreTier)) {
     return { success: false, error: 'Weapon on cooldown' };
   }
 
@@ -110,7 +115,16 @@ function checkHit(attackerPos, targetPos, targetSize, weaponRange, weaponTier) {
  */
 function applyDamage(targetUserId, damage, damageType = 'kinetic', shieldPiercing = 0) {
   const ship = statements.getShipByUserId.get(targetUserId);
-  if (!ship) return null;
+  if (!ship) {
+    shieldRechargeStates.delete(targetUserId);
+    return null;
+  }
+
+  // Consume any fractional recharge accumulated since the last persisted HP.
+  // Damage then invalidates the cache so recharge restarts from the resulting
+  // authoritative database value after the configured delay.
+  const rechargeState = shieldRechargeStates.get(targetUserId);
+  shieldRechargeStates.delete(targetUserId);
 
   // CRITICAL: Don't apply damage to dead players (hull <= 0)
   // This prevents multiple death events from stacking damage
@@ -119,7 +133,9 @@ function applyDamage(targetUserId, damage, damageType = 'kinetic', shieldPiercin
   }
 
   let { shieldDamage, hullDamage } = damage;
-  let newShield = ship.shield_hp;
+  let newShield = rechargeState && Number.isFinite(rechargeState.shield)
+    ? Math.min(ship.shield_max, Math.max(ship.shield_hp, rechargeState.shield))
+    : ship.shield_hp;
   let newHull = ship.hull_hp;
   const hadShields = newShield > 0;
 
@@ -236,22 +252,35 @@ function findNearestSwarmHive(position) {
   const activeBases = npc.getActiveBases();
   let nearestHive = null;
   let nearestDistance = Infinity;
+  const originX = Number.isFinite(position?.x) ? position.x : 0;
+  const originY = Number.isFinite(position?.y) ? position.y : 0;
 
-  for (const [baseId, base] of activeBases) {
+  for (const [baseId, storedBase] of activeBases) {
+    const base = npc.getActiveBaseWithPosition(baseId) || storedBase;
     // Check for swarm_hive type (both original and assimilated)
-    if ((base.type === 'swarm_hive' || base.faction === 'swarm') && !base.destroyed) {
-      const dx = base.x - position.x;
-      const dy = base.y - position.y;
+    if (isEligibleSwarmHive(base)) {
+      const dx = base.x - originX;
+      const dy = base.y - originY;
       const distance = Math.sqrt(dx * dx + dy * dy);
 
       if (distance < nearestDistance) {
         nearestDistance = distance;
-        nearestHive = { id: baseId, ...base };
+        nearestHive = { ...base, id: baseId };
       }
     }
   }
 
   return nearestHive;
+}
+
+function isEligibleSwarmHive(base) {
+  return Boolean(
+    base &&
+    !base.destroyed &&
+    (base.type === 'swarm_hive' || base.faction === 'swarm') &&
+    Number.isFinite(base.x) &&
+    Number.isFinite(base.y)
+  );
 }
 
 /**
@@ -262,29 +291,12 @@ function findNearestSwarmHive(position) {
  * @returns {Object} Death result with droppedCargo, wreckageContents, respawnOptions, deathPosition
  */
 function handleDeath(userId, deathPosition = null) {
-  const ship = statements.getShipByUserId.get(userId);
-  const inventory = statements.getInventory.all(userId);
-
-  // Calculate cargo to drop (50% of inventory)
-  const droppedCargo = [];
-  for (const item of inventory) {
-    const dropAmount = Math.floor(item.quantity * config.DEATH_CARGO_DROP_PERCENT);
-    if (dropAmount > 0) {
-      droppedCargo.push({
-        resource_type: item.resource_type,
-        quantity: dropAmount
-      });
-
-      // Remove from inventory (death cargo drop)
-      const newQuantity = item.quantity - dropAmount;
-      logger.log(`[INVENTORY] User ${userId} ${item.resource_type}: ${item.quantity} -> ${newQuantity} (death cargo drop -${dropAmount})`);
-      if (newQuantity <= 0) {
-        statements.removeInventoryItem.run(userId, item.resource_type);
-      } else {
-        statements.setInventoryQuantity.run(newQuantity, userId, item.resource_type);
-      }
-    }
-  }
+  // Resolve every fallible authority lookup before committing cargo loss. Once
+  // settlement succeeds, the remainder of this function is pure payload work,
+  // so the caller can never observe an empty fallback after a real deduction.
+  const respawnOptions = buildRespawnOptions(userId, deathPosition);
+  const settlement = settleDeathCargo(userId);
+  const { ship, droppedCargo, marketplaceChanged, inventory } = settlement;
 
   // Calculate wreckage contents (50% of dropped cargo = 25% of original inventory)
   // This is what goes into the wreckage for other players/Scavengers to collect
@@ -301,17 +313,19 @@ function handleDeath(userId, deathPosition = null) {
     }
   }
 
-  // Build respawn options for player to choose from
-  const respawnOptions = buildRespawnOptions(userId, deathPosition);
-
   // NOTE: We no longer respawn immediately - wait for player selection via respawn:select event
 
   return {
     droppedCargo,
     wreckageContents, // For spawning wreckage
     respawnOptions,   // Options for player to choose from
-    deathPosition: deathPosition || { x: ship?.x || 0, y: ship?.y || 0 },
-    playerName: ship?.username || 'Unknown'
+    deathPosition: deathPosition || {
+      x: ship?.position_x || 0,
+      y: ship?.position_y || 0
+    },
+    playerName: ship?.username || 'Unknown',
+    marketplaceChanged,
+    inventory
   };
 }
 
@@ -321,9 +335,15 @@ function handleDeath(userId, deathPosition = null) {
  * @param {number} userId - Player's user ID
  * @param {string} respawnType - 'graveyard' | 'swarm_hive_core' (from buildRespawnOptions)
  * @param {string|null} targetId - Hive ID for swarm_hive_core respawn
+ * @param {Object|null} offeredRespawnOption - Exact authoritative option issued at death
  * @returns {Object} Respawn result with position, location name, and special effects
  */
-function applyRespawn(userId, respawnType = 'graveyard', targetId = null) {
+function applyRespawn(
+  userId,
+  respawnType = 'graveyard',
+  targetId = null,
+  offeredRespawnOption = null
+) {
   const ship = statements.getShipByUserId.get(userId);
   let respawnPosition;
   let locationName = 'The Graveyard';
@@ -331,10 +351,20 @@ function applyRespawn(userId, respawnType = 'graveyard', targetId = null) {
 
   switch (respawnType) {
     case 'swarm_hive_core':
-      // Respawn at Swarm Hive and destroy it
-      if (targetId) {
-        const base = npc.getActiveBase(targetId);
-        if (base && !base.destroyed && (base.type === 'swarm_hive' || base.faction === 'swarm')) {
+      // The respawn selection comes from the client, so ownership must be
+      // checked again at the point where the destructive effect is applied.
+      if (!statements.hasRelic.get(userId, 'SWARM_HIVE_CORE')) {
+        respawnPosition = findGraveyardSpawnLocation();
+        locationName = 'The Graveyard';
+        logger.warn(`[HIVE CORE RESPAWN] Player ${userId} does not own SWARM_HIVE_CORE; falling back to Graveyard`);
+      } else if (
+        targetId &&
+        offeredRespawnOption?.type === 'swarm_hive_core' &&
+        offeredRespawnOption.hiveId === targetId
+      ) {
+        // Respawn at Swarm Hive and destroy it
+        const base = npc.getActiveBaseWithPosition(targetId);
+        if (isEligibleSwarmHive(base)) {
           // Respawn position is at the hive center
           respawnPosition = { x: base.x, y: base.y };
           locationName = 'Swarm Hive (Destroyed)';
@@ -350,9 +380,11 @@ function applyRespawn(userId, respawnType = 'graveyard', targetId = null) {
           logger.log(`[HIVE CORE RESPAWN] Hive ${targetId} not found, falling back to Graveyard for player ${userId}`);
         }
       } else {
-        // No target specified, fall back to Graveyard
+        // Never trust a client-supplied hive that was not the exact option
+        // issued by the authoritative death flow.
         respawnPosition = findGraveyardSpawnLocation();
         locationName = 'The Graveyard';
+        logger.warn(`[HIVE CORE RESPAWN] Player ${userId} selected an unoffered hive; falling back to Graveyard`);
       }
       break;
 
@@ -366,6 +398,8 @@ function applyRespawn(userId, respawnType = 'graveyard', targetId = null) {
 
   // Apply the respawn to database
   statements.respawnShip.run(respawnPosition.x, respawnPosition.y, userId);
+  shieldRechargeStates.delete(userId);
+  shieldDelays.delete(userId);
 
   const result = {
     position: respawnPosition,
@@ -441,47 +475,64 @@ function destroyHiveWithAoE(hiveId, hiveBase) {
   const HIVE_DESTRUCTION_RADIUS = Constants.RELIC_TYPES?.SWARM_HIVE_CORE?.effects?.hiveDestructionRadius || 500;
   const hivePosition = { x: hiveBase.x, y: hiveBase.y };
 
-  // Get all Swarm NPCs within the destruction radius
+  // Treat the spatial query as a candidate set and validate against the live
+  // entity before applying the destructive effect. This prevents stale query
+  // data from turning a survivor into an untracked deletion.
   const nearbyNpcs = npc.getNPCsInRange(hivePosition, HIVE_DESTRUCTION_RADIUS);
-  const swarmNpcs = nearbyNpcs.filter(npcData => npcData.faction === 'swarm');
+  const radiusSquared = HIVE_DESTRUCTION_RADIUS * HIVE_DESTRUCTION_RADIUS;
 
   const killedNpcs = [];
   const spawnedWreckage = [];
 
   // Kill each Swarm NPC and spawn wreckage
-  for (const swarmNpc of swarmNpcs) {
-    // Get the full NPC entity for wreckage generation
-    const npcEntity = npc.getNPC(swarmNpc.id);
+  for (const candidate of nearbyNpcs) {
+    const npcEntity = npc.getNPC(candidate.id);
+    const npcPosition = npcEntity?.position;
+    if (!npcEntity || npcEntity.faction !== 'swarm' || !npcPosition) continue;
 
-    if (npcEntity) {
-      // Spawn wreckage at NPC location (similar to engine.js NPC death handling)
-      const wreckage = loot.spawnWreckage(
-        npcEntity,
-        { x: swarmNpc.position.x, y: swarmNpc.position.y },
-        null, // Generate loot based on NPC type
-        null  // No damage contributors for hive core AoE kill
-      );
-
-      if (wreckage) {
-        spawnedWreckage.push({
-          id: wreckage.id,
-          position: wreckage.position,
-          size: wreckage.size,
-          faction: wreckage.faction,
-          npcType: wreckage.npcType,
-          npcName: wreckage.npcName,
-          contents: wreckage.contents
-        });
-      }
+    const dx = npcPosition.x - hivePosition.x;
+    const dy = npcPosition.y - hivePosition.y;
+    if (!Number.isFinite(dx) || !Number.isFinite(dy) ||
+        dx * dx + dy * dy > radiusSquared) {
+      continue;
     }
 
-    // Remove the NPC
-    npc.removeNPC(swarmNpc.id);
+    const homeBaseId = npcEntity.homeBaseId || npcEntity.baseId;
+    const removedNpc = npc.removeNPC(candidate.id, {
+      // A neighboring hive still needs to replenish a defender lost to this
+      // AoE; the hive being destroyed will seed a new population on respawn.
+      scheduleBaseRespawn: Boolean(homeBaseId && homeBaseId !== hiveId)
+    });
+    if (!removedNpc) continue;
+
+    const deathPosition = {
+      x: removedNpc.position.x,
+      y: removedNpc.position.y
+    };
+    const wreckage = loot.spawnWreckage(
+      removedNpc,
+      deathPosition,
+      null, // Generate loot based on NPC type
+      null  // No damage contributors for hive core AoE kill
+    );
+
+    if (wreckage) {
+      spawnedWreckage.push({
+        id: wreckage.id,
+        position: wreckage.position,
+        size: wreckage.size,
+        faction: wreckage.faction,
+        npcType: wreckage.npcType,
+        npcName: wreckage.npcName,
+        contents: wreckage.contents
+      });
+    }
 
     killedNpcs.push({
-      id: swarmNpc.id,
-      type: swarmNpc.type,
-      position: swarmNpc.position
+      id: removedNpc.id,
+      type: removedNpc.type,
+      faction: removedNpc.faction,
+      position: deathPosition
     });
   }
 
@@ -505,6 +556,8 @@ function destroyHiveWithAoE(hiveId, hiveBase) {
  * @returns {Object|null} New shield value, or null if no change
  */
 function updateShieldRecharge(userId, deltaTime, energyCoreTier = null) {
+  if (!Number.isFinite(deltaTime) || deltaTime <= 0) return null;
+
   const lastDamage = shieldDelays.get(userId) || 0;
   const timeSinceDamage = Date.now() - lastDamage;
 
@@ -512,13 +565,39 @@ function updateShieldRecharge(userId, deltaTime, energyCoreTier = null) {
     return null; // Still in recharge delay
   }
 
-  const ship = statements.getShipByUserId.get(userId);
-  if (!ship || ship.shield_hp >= ship.shield_max) {
-    return null; // Already full
+  let state = shieldRechargeStates.get(userId);
+  if (!state) {
+    const ship = statements.getShipByUserId.get(userId);
+    if (!ship) return null;
+
+    const maxShield = Math.max(0, Number(ship.shield_max) || 0);
+    const currentShield = Math.min(
+      maxShield,
+      Math.max(0, Number(ship.shield_hp) || 0)
+    );
+    state = {
+      shield: currentShield,
+      maxShield,
+      hull: Number(ship.hull_hp) || 0,
+      persistedShield: Math.floor(currentShield),
+      energyCoreTier: ship.energy_core_tier || 1,
+      blocked: ship.hull_hp <= 0 || currentShield >= maxShield
+    };
+    shieldRechargeStates.set(userId, state);
   }
 
-  // Get energy core tier from ship if not provided
-  const coreTier = energyCoreTier !== null ? energyCoreTier : (ship.energy_core_tier || 1);
+  // Full shields and dead ships stay cached until damage, respawn, an upgrade,
+  // or disconnect explicitly invalidates their state.
+  if (state.blocked) return null;
+
+  // Get energy core tier from the connected-player cache when provided.
+  const requestedCoreTier = energyCoreTier !== null
+    ? energyCoreTier
+    : state.energyCoreTier;
+  const coreTier = Math.max(
+    1,
+    Math.min(config.MAX_TIER || 5, Number(requestedCoreTier) || 1)
+  );
 
   // Calculate recharge rate with energy core bonus
   const baseRate = config.SHIELD_RECHARGE_RATE;
@@ -526,11 +605,53 @@ function updateShieldRecharge(userId, deltaTime, energyCoreTier = null) {
   const effectiveRate = baseRate + bonusRate;
 
   const rechargeAmount = effectiveRate * (deltaTime / 1000);
-  const newShield = Math.min(ship.shield_max, ship.shield_hp + rechargeAmount);
+  state.shield = Math.min(state.maxShield, state.shield + rechargeAmount);
+  const visibleShield = Math.floor(state.shield);
 
-  statements.updateShipHealth.run(ship.hull_hp, Math.floor(newShield), userId);
+  // Keep fractional progress in memory; only persist and broadcast when the
+  // client-visible integer HP changes.
+  if (visibleShield <= state.persistedShield) return null;
 
-  return { shield: Math.floor(newShield) };
+  statements.updateShipHealth.run(state.hull, visibleShield, userId);
+  state.persistedShield = visibleShield;
+  if (state.shield >= state.maxShield) state.blocked = true;
+
+  return { shield: visibleShield };
+}
+
+/**
+ * Invalidate cached shield health after an out-of-band ship stat change.
+ */
+function invalidateShieldRechargeState(userId) {
+  shieldRechargeStates.delete(userId);
+}
+
+/**
+ * Persist health changed by an external/environmental system while keeping the
+ * recharge cache coherent. Callers may retain fractional live HP; SQLite stores
+ * the same client-visible integer values used elsewhere in combat.
+ */
+function syncExternalHealth(userId, hull, shield, delayRecharge = true) {
+  if (!Number.isFinite(hull) || !Number.isFinite(shield)) return false;
+
+  shieldRechargeStates.delete(userId);
+  if (delayRecharge) shieldDelays.set(userId, Date.now());
+
+  statements.updateShipHealth.run(
+    Math.floor(Math.max(0, hull)),
+    Math.floor(Math.max(0, shield)),
+    userId
+  );
+  return true;
+}
+
+/**
+ * Release all per-player combat state on disconnect or in tests.
+ */
+function clearPlayerCombatState(userId) {
+  weaponCooldowns.delete(userId);
+  shieldDelays.delete(userId);
+  shieldRechargeStates.delete(userId);
 }
 
 function getWeaponRange(weaponTier) {
@@ -552,6 +673,9 @@ module.exports = {
   applyRespawn,
   buildRespawnOptions,
   updateShieldRecharge,
+  invalidateShieldRechargeState,
+  syncExternalHealth,
+  clearPlayerCombatState,
   getWeaponRange,
   getHullResistances,
   getEffectiveCooldown,
