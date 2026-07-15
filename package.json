@@ -16,7 +16,7 @@
     "audit:handlers:verbose": "node scripts/audit-handler-duplicates.js --verbose"
   },
   "dependencies": {
-    "bcrypt": "^5.1.1",
+    "bcrypt": "^6.0.0",
     "better-sqlite3": "^11.6.0",
     "dotenv": "^17.2.3",
     "express": "^4.21.1",
@@ -24,8 +24,8 @@
     "uuid": "^11.0.3"
   },
   "devDependencies": {
-    "@vitest/coverage-v8": "^2.1.8",
-    "vitest": "^2.1.8"
+    "@vitest/coverage-v8": "^4.1.10",
+    "vitest": "^4.1.10"
   },
   "engines": {
     "node": ">=22.0.0"
